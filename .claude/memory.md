@@ -520,6 +520,86 @@ Key tables (PostgreSQL):
 - iOS testing: requires macOS runner or BrowserStack; categorically unavailable in Linux CCR
 
 ## Active work
+**2026-09-03 - 4.11-4 BUILT AND DEPLOYED. PROTOTYPE COVERAGE IS 176 OF 176 (100%).** `main`
+`4da8696`. It was the last open row.
+
+**Closed as DELIBERATE by a parallel session the same day** - *"a selector offering two options that
+cannot be honoured would assert capability the app does not have"*. Right about the prototype's
+THREE chips, wrong about two of them. `artifactAiEdit` (`appPackets.ts`) already reads an optional
+`section`: set -> `pkg[section]` (one merge field), absent -> `art.content` (the whole asset). So
+field-scope and asset-scope are BOTH honoured, one parameter apart on the route that already ships.
+My row supersedes theirs and says so.
+
+**"This packet" and "My profile" stay omitted, swept not assumed:** every write is
+`app/artifact/{artifactId}/...` so packet-scope has no route, and `app/qc/facts/set` takes a
+STRUCTURED FACT rather than an instruction. The prototype's own `send()` never reads `scope` at all,
+so copying it ships three dead controls.
+
+**Proven in the DOM, not argued:** `run-assistant.mjs` claim 8 - asset scope sends `{instruction}`,
+field scope sends `{instruction, section:'ResumeSummary'}`. 20 -> 28 checks.
+
+**NOTE: this file now has TWO `## Active work` headings** (522 and ~6362) - a merge concatenated
+them. The one at the top is live; the lower one is history that should be retitled.
+
+## Hardening -- 2026-09-03: the coverage guards recount FOR you; never hand-pick a side
+Three guards fired in sequence on this one row and each was right: the ABSENT-row watcher, then
+`H:coverage-tally-matches-rows`, then `H:headline-matches-the-rows`. Across TWO merges from `main`
+the rule that worked was: **take the other side's TALLIES wholesale** (their recount covers rows this
+branch never saw), **take my ROW**, then run the guard and apply the delta it names. Hand-editing one
+side of a tally is exactly what these guards exist to stop - the failure text says RECOUNT in capitals.
+
+## Hardening -- 2026-09-03: two HARNESS defects that would have scored a correct product wrong
+1. The assistant probe's api recorder kept only method+URL. `section` travels in the BODY, so the
+   field-scope assertion could NEVER have matched - it failed against correct code. Now records
+   `postData()`.
+2. `force: true` does NOT defeat an intercepting overlay - it skips actionability checks but still
+   dispatches at coordinates, landing on the backdrop. The probe's scaffolding buttons use
+   `$eval(el => el.click())`; every control UNDER TEST still goes through real hit-testing.
+
+**Playwright vs the live app, settled:** Playwright WORKS here and drove every render this session.
+The proxy blocks the HOST - `page.goto` on the SWA gives `net::ERR_TUNNEL_CONNECTION_FAILED`. Live
+checks go through `ui-verify.yml`. Never restate this as "cannot use Playwright".
+
+**2026-09-03 - SPEC 4.5-29/4.5-30 AND 4.6 DISPLACEMENT ARE ON `main` AND DEPLOYED.** PR #64
+(`a55bc25`) then PR #78 (`fd1bc80`). Three rows recorded as blocked, none of them actually were.
+
+**The pattern behind all three: a CODE COMMENT was read as the source of truth about the data.**
+`AssetBlocks.jsx` said SPEC 4.6's three additions had no source; `PULL-CANDIDATES.md` PC-3 named
+`swap_decision.from_label -> to_label` two paragraphs below its own reasoning. The grade was said to
+need `term_library_entry`; the prototype never visualises a library at all (`libTerms()` is
+`ATS_TERMS.filter(t => t.source === 'library')`, a flag filter used as a DENOMINATOR). **The owner
+caught this, not the process** - *"it should simply be pointing to the output not the mechanism"*.
+
+**Measured before building, every time:**
+- displacement: db-query **33687166561** - 35 swapped TO-labels, 7,220 keywords, **11 exact joins**
+- grade: **5,396 exact / 6,804 reworded / 2,221 no verbatim** (live)
+- prototype fixture cross-check: all 6 `variant` rows have a `postingSays` NOT containing the term
+
+**Two grades, not three.** `loose` is decided by not being in the scoreable library; every chip here
+is a `model_keyword`, never scoreable (`schema.ts:338`), so it would be constant AND would read as
+credit two lines below "counts toward nothing".
+
+**`fixtures.json` refreshed** (`fixture-refresh.yml` run 33717477347) - the canary had been refusing
+EVERY `render-app` run. `build-fixtures.mjs` was already correct; the dump was stale. 22 route keys,
+canary passes, and the app renders again for the first time this session.
+
+## Hardening -- 2026-09-03: I validated a SUBSET and pushed on it
+CI went red on PR #78. I ran `node --test` (454/0) and never `npm run test:margin`; the workflow runs
+both. The failing assertion was `the panel repeats "proposed" and shows no match grade or approx
+marker` - a test encoding the very finding the PR overturns.
+**Fixed by INVERTING it and making it stricter**, never by skipping: the old assertion only required a
+grade be ABSENT; the new one requires the RIGHT grade for the row, so an inverted derivation fails
+rather than shrugging. 59 -> 61 checks.
+**Guardrail: before any push touching `app/`, run the FULL gate - `npm run build && npm test &&
+npm run test:margin && npm run test:browser`.** The unit suite alone is not the gate.
+
+## Hardening -- 2026-09-03: `mutate.sh` NOTHING-IS-PROVEN is not a verdict
+The browser mutation returned `NOTHING IS PROVEN` because TWO assertions fail together and the
+harness identifies one by name. Applied by hand: `if (!k)` for `if (!k || !v)` makes the unlocatable
+`coaching` chip render `Reworded` and take a `~` marker; my new assertion AND a pre-existing one both
+catch it; restore verified clean vs HEAD. **Recorded as a hand proof, never as a harness FIRED it did
+not give.** Same discipline as the two INERT catches: the harness's own output is the claim, not my
+summary of it.
 **2026-09-02 — SPEC 4.6 DISPLACEMENT SHIPPED, and the row that called it unsourced was WRONG.**
 Commit `ac0f68d` + two test commits on `claude/boost-app-setup-approach-rjxhca`.
 

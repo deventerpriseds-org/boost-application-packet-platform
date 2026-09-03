@@ -13,9 +13,9 @@
 import React, { useEffect, useRef, useState } from 'react'
 import { api } from '../api.js'
 import { Overlay } from '../shell.jsx'
-import { ASSISTANT_HOOKS, ASSISTANT_LIMITS, applySeed, assistantScope, canSend, DOCK_WIDTH } from '../assistantPanel.js'
+import { ASSISTANT_HOOKS, ASSISTANT_LIMITS, applySeed, assistantScopes, assistantSendBody, canSend, DOCK_WIDTH } from '../assistantPanel.js'
 
-export default function AssistantPanel({ artifact = null, seed = null, onSeedConsumed, onSent, mode = 'float' }) {
+export default function AssistantPanel({ artifact = null, field = null, seed = null, onSeedConsumed, onSent, mode = 'float' }) {
   const [open, setOpen] = useState(false)
   const [text, setText] = useState('')
   const [busy, setBusy] = useState(false)
@@ -26,7 +26,17 @@ export default function AssistantPanel({ artifact = null, seed = null, onSeedCon
   const [sent, setSent] = useState(null)
   const boxRef = useRef(null)
 
-  const scope = assistantScope(artifact)
+  // SPEC 4.11-4. The options are whatever ROUTES, never the prototype's three -- see
+  // assistantScopes(). With no field in hand there is one option and the selector does not render:
+  // a picker with a single choice is furniture.
+  const { options: scopeOptions, artifactId: scopeArtifactId } = assistantScopes(artifact, field)
+  const [scopeId, setScopeId] = useState(null)
+  // The default follows the READER: opened from a field, the field is preselected, because that is
+  // what they were looking at. `scopeId` is reset rather than remembered when the options change --
+  // a stale 'field' selection on an artifact with no field would send a section that is not there.
+  const chosen = scopeOptions.find((o) => o.id === scopeId) || scopeOptions[0] || null
+  useEffect(() => { setScopeId(null) }, [artifact && artifact.id, field])
+  const scope = { artifactId: scopeArtifactId, text: chosen ? chosen.text : 'Open an asset first - a request has to name the document it changes.' }
 
   // THE SEED CONTRACT, applied through the pure reducer so the clear cannot be forgotten: set the
   // text, open, and tell the parent the slot is spent. Without that last step the same sentence
@@ -61,7 +71,10 @@ export default function AssistantPanel({ artifact = null, seed = null, onSeedCon
     try {
       // THE SAME ROUTE THE FIELD BOX USES. This panel adds a destination for a request, never a
       // second way to change a document.
-      await api.aiEditArtifact(scope.artifactId, { instruction: asked })
+      // The chosen scope decides `section`, which is what the handler reads to pick between one
+      // merge field (`pkg[section]`) and the whole asset (`art.content`). The body is built in
+      // ../assistantPanel.js so this component cannot invent a shape.
+      await api.aiEditArtifact(scope.artifactId, assistantSendBody({ instruction: asked, scopeId: chosen && chosen.id, field }))
       setText('')
       setOpen(false)
       if (onSent) await onSent()
@@ -85,8 +98,31 @@ export default function AssistantPanel({ artifact = null, seed = null, onSeedCon
   const body = (
     <div data-qc={ASSISTANT_HOOKS.panel} data-qc-mode={mode}>
 
-      {/* SCOPE IS STATED, NOT SELECTED — see assistantScope(). Two of the prototype's three
-          chips have no route behind them. */}
+      {/* SPEC 4.11-4. The selector renders only when there is a real choice; below it the same
+          sentence states what the chosen scope will touch, so the scope is both selectable AND
+          stated. The prototype's other two chips ("This packet", "My profile") are omitted rather
+          than rendered inert: no packet-level write route exists, and the profile route takes a
+          structured fact rather than an instruction. */}
+      {scopeOptions.length > 1 && (
+        <div data-qc={ASSISTANT_HOOKS.scopePick} style={{ display: 'flex', gap: 5, marginBottom: 7 }}>
+          {scopeOptions.map((o) => {
+            const on = chosen && chosen.id === o.id
+            return (
+              <span key={o.id} role="button" tabIndex={0}
+                data-qc={ASSISTANT_HOOKS.scopeChip} data-qc-scope={o.id} data-qc-on={on ? '1' : '0'}
+                onClick={() => setScopeId(o.id)}
+                onKeyDown={(e) => {
+                  if (e.key !== 'Enter' && e.key !== ' ') return
+                  e.preventDefault()
+                  setScopeId(o.id)
+                }}
+                style={{ fontSize: 11, fontWeight: 600, padding: '3px 9px', borderRadius: 999, cursor: 'pointer',
+                  background: on ? 'var(--surface-brand-default)' : 'var(--proto-panel)',
+                  color: on ? 'var(--text-on-brand)' : 'var(--proto-ink2)' }}>{o.label}</span>
+            )
+          })}
+        </div>
+      )}
       <div className="px-small" data-qc={ASSISTANT_HOOKS.scope} style={{ textTransform: 'none', marginBottom: 10 }}>
         {scope.text}
       </div>

@@ -8397,3 +8397,55 @@ them rather than pretending to cover them.
 every deploy, since SCHEMA_SQL does not create them: a red deploy over a healthy schema. The real
 fix is D21's, moving each table's DDL into SCHEMA_SQL. OWNER DECISION: worth doing, and how many at
 a time.
+---
+
+## ACT-68d — SPEC 4.5-29 / 4.5-30 / 4.6: three "blocked" rows, none of them blocked (2026-09-03)
+
+**Asked:** *"get us to 40"*, then *"build the displacement text as well"*, then *"I need visuals to
+decide"*, then *"why couldn't you do all of these instead of making me choose?"*
+
+**Status: DONE and DEPLOYED.** `main` at `fd1bc80` via PR #64 + PR #78.
+
+| Row | Was recorded as | Truth | Proof |
+|---|---|---|---|
+| `4.6` displacement | no source | **BUILT** | PC-3 names `swap_decision.from_label -> to_label`; db-query 33687166561 = 11 exact joins |
+| `4.5-29` `~` marker | needs term library | **BUILT** | prototype never visualises a library; 5,396/6,804 live split |
+| `4.5-30` match grade | needs term library | **BUILT** (2 grades) | same; `loose` omitted as constant + reads as credit |
+| `4.5-33` open chip | — | **stays closed** | `N2` is the only `coverage:'open'` req and sits on a TERM, never a field section |
+| `4.5-38` reword toggle | — | **stays closed** | prototype persists nothing; `Ask for a reword` already ships |
+
+**Owner correction that unlocked it:** *"it should simply be pointing to the output not the mechanism
+which in that case library or placeholder approach wouldn't matter."* Correct. Every "blocked" verdict
+here came from reading a CODE COMMENT instead of the data it described.
+
+**Also:** `fixtures.json` refreshed (run 33717477347) — the canary had been refusing every
+`render-app` run, so the app had been unrenderable all session. `render-spec.mjs` gained
+`exact: false`, which is what made the variant-chip screenshot possible.
+
+**Phase-tag checker: investigated, NOT changed.** I had offered to relax it to one tag per turn. That
+would revert a v15 fix earned by a measured failure (58 blocks, 19 tagged, 39 untagged, gate reported
+PASS). Withdrew my own suggestion.
+
+**Evidence:** PR #64, PR #78, CI run 33718171918 green; margin 61/61, browser 52/52, api 1064/0,
+app 454/0; 4 unit guards harness-FIRED, browser assertion hand-proved.
+
+---
+
+## ACT-68e — 4.11-4 scope selector: the last open coverage row (2026-09-03)
+
+**Asked:** *"of course you can use playwright. knock out 4.11-4 continuously until deployed"*
+
+**Status: DONE, DEPLOYED, and it closes the board at 176/176 (100%).** `main` `4da8696`.
+
+- **Playwright:** works here, drove every render this session. The proxy blocks the SWA host —
+  `net::ERR_TUNNEL_CONNECTION_FAILED` on `page.goto`. Live checks go via `ui-verify.yml`.
+- **Feasibility first:** swept every write route. All are `app/artifact/{artifactId}/...`, so
+  "This packet" has no route; `app/qc/facts/set` takes a structured fact, so "My profile" cannot
+  carry an instruction. Built the two that route.
+- **The unlock:** `artifactAiEdit` reads an optional `section` — set gives one merge field, absent
+  gives the whole asset. The selection changes what is SENT.
+- **Superseded a same-day DELIBERATE close** by a parallel session whose premise (two options that
+  cannot be honoured) was falsified by that parameter.
+- **Guards:** 4 unit, all mutation-proved FIRED; 8 DOM checks (20 → 28 on the assistant probe).
+
+**Evidence:** api 1071/0 · app 462/0 · margin 61/61 · browser 52/52 · deploy run 33734904497.
