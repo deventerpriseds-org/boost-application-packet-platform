@@ -20,7 +20,7 @@ import { checkPrefColumns } from '../dist/functions/tests/checkPrefs.js'
 
 import { normalizePostingText, decodeEntities, groundingText } from '../dist/functions/tests/jdText.js'
 import { buildRequirements, locate, mapKind, sentenceBounds } from '../dist/functions/tests/requirements.js'
-import { onOmitList, omitEntries, similarity, itemTokens } from '../dist/functions/tests/swaps.js'
+import { onOmitList, omitEntries, similarity, itemTokens, attribute, ATTRIBUTION_THRESHOLD } from '../dist/functions/tests/swaps.js'
 import { runChecks, gateFor, attentionCount, COVERAGE_THRESHOLD, MIN_JUDGEABLE_TOKENS } from '../dist/functions/tests/checks.js'
 // DEFAULT_WEIGHTS joins this existing import so H:one-composite-formula can compare the
 // reviewer's inline weighted sum against the ONE implementation that is supposed to own it.
@@ -5735,4 +5735,80 @@ test('H:mastercontext-rollback-flag: both source branches are reachable from the
     if (before === undefined) delete process.env.MASTERCONTEXT_SOURCE
     else process.env.MASTERCONTEXT_SOURCE = before
   }
+})
+
+test('H:committed-fixture-passes-the-canary: the file every render uses must satisfy the rules the canary enforces', async () => {
+  const { execFileSync } = await import('node:child_process')
+
+  // WHY THIS EXISTS, and why the two tests above did not cover it.
+  //
+  // `H:canary-refuses-a-hollow-comparison` proves the canary's RULES are right. The build-fixtures
+  // passthrough test proves the BUILDER is right. Neither looks at `docs/qc-evidence/fixtures.json`
+  // - the artifact every `render-app.mjs` / `compare-ui.mjs` invocation actually loads. So a canary
+  // rule can land, the committed fixture can stop satisfying it, and the suite stays green while
+  // the file is unusable.
+  //
+  // That is not hypothetical. Measured 2026-09-02 in ONE measurement pass, twice:
+  //   1. the committed fixture carried `{prefs:{}}` with no `checks`, and the render refused;
+  //   2. mid-pass a parallel lane added the `comparison` rule, and the just-rebuilt fixture refused
+  //      too - its dump predated `apiRequirements` being captured.
+  // Each cost a full `fixture-refresh.yml` round trip, and each was discovered THREE tool calls into
+  // a measurement rather than by the suite. The canary did its job both times; the point of this
+  // case is that the suite should have said so first.
+  //
+  // THE SHIPPED PREDICATE, in a child process - `assertFixtureCanSee` calls `process.exit`, so the
+  // exit code is the verdict. Same technique as the hollow-comparison case above, and for the same
+  // reason: grading a local copy of the rules is how a guard goes inert.
+  const src = `import('${REPO}scripts/lib/fixture-canary.mjs').then(m => {`
+    + `const fx = JSON.parse(require('fs').readFileSync('${REPO}docs/qc-evidence/fixtures.json','utf8'));`
+    + `m.assertFixtureCanSee(fx, 'committed fixtures.json'); process.exit(0) })`
+  let status = 0, stderr = ''
+  try { execFileSync('node', ['-e', src], { stdio: 'pipe' }) }
+  catch (e) { status = e.status; stderr = String(e.stderr || '') }
+
+  assert.equal(status, 0,
+    'docs/qc-evidence/fixtures.json NO LONGER SATISFIES THE CANARY, so every render measured against '
+    + 'it is a claim about the fixture rather than about the app. Rebuild it: trigger '
+    + 'fixture-refresh.yml, then `git show origin/ui-fixtures:raw-dump.json > /tmp/raw.json` and '
+    + '`node scripts/build-fixtures.mjs --raw /tmp/raw.json --opp <oppId> --out '
+    + `docs/qc-evidence/fixtures.json\`. The canary said:\n${stderr}`)
+})
+
+test('H:attribution-follows-the-posting-line-not-the-keyword: a swap row never says which keyword drove it', () => {
+  // WHY THIS EXISTS. `swap_decision.requirement_id` looks like it answers "which keyword caused this
+  // swap". It does not, and the gap is invisible from the column name — which is exactly how a
+  // reader (this one, on 2026-09-02) concludes the two correlate and proposes UI that says so.
+  //
+  // MEASURED on the live eMoney packet, 30 `swapped` rows, 17 carrying a `requirement_id`:
+  //   **8 of those 17 share ZERO tokens** between the requirement's `model_keyword` and the
+  //   `to_label` that replaced the phrase — `AI governance` against `Risk Management`,
+  //   `lean governance` against `Operational Excellence`, at confidence **1.000**.
+  // Confidence is high in those rows because it scores the replacement against the POSTING LINE.
+  // The keyword is a sibling field on whichever line won; it took no part in the match.
+  //
+  // This is a BEHAVIOURAL demonstration rather than a source grep, deliberately: a grep forbidding
+  // `model_keyword` near `attribute` would fire on a legitimate future change (threading the keyword
+  // in to build the judge's SHORTLIST is planned — see docs/qc-evidence/SCOPE-swap-driving-keyword.md).
+  // What must never change is that the ATTRIBUTION itself is decided by the posting line.
+  const text = 'Global Engineering Teams'
+
+  // Matches on its VERBATIM, and its keyword is irrelevant to the text.
+  const byPostingLine = { seq: 1, kind: 'responsibility', item_text: 'global engineering organization',
+    verbatim: 'global engineering organization', model_keyword: 'zzz unrelated token' }
+  // The inverse: its KEYWORD is literally the text, but its verbatim has nothing to do with it.
+  const byKeyword = { seq: 2, kind: 'responsibility', item_text: 'quarterly finance compliance reporting',
+    verbatim: 'quarterly finance compliance reporting', model_keyword: 'Global Engineering Teams' }
+
+  const got = attribute(text, [byPostingLine, byKeyword])
+
+  assert.ok(got, 'the posting-line requirement clears the threshold, so an attribution is expected')
+  assert.equal(got.seq, 1,
+    'attribution must follow the VERBATIM POSTING LINE. It picked the requirement whose keyword '
+    + 'matched instead, which would make `requirement_id` a keyword link and the UI claim '
+    + '"this keyword took the place of X" true — it is not, and 8 of 17 live rows prove it')
+  assert.equal(attribute(text, [byKeyword]), null,
+    'a requirement whose ONLY connection to the text is its `model_keyword` must not attribute at '
+    + 'all — the keyword is not an input to the match')
+  assert.ok(similarity(text, byPostingLine.verbatim) >= ATTRIBUTION_THRESHOLD,
+    'the fixture must actually exercise the threshold, or this test proves nothing')
 })

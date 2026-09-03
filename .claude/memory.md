@@ -6257,3 +6257,122 @@ owner argument with a settable single-owner default, threading real owners where
 
 **Owner confirmed 2026-09-03:** the Settings text editor for the master profile IS wanted once the
 data is in Postgres — it is no longer an open question, it is the commit after the copy.
+## 2026-09-02 — the committed fixture is now guarded (ACT-68c)
+
+`api/test/hardening.test.mjs` now carries `H:committed-fixture-passes-the-canary`, which runs the
+shipped canary predicate against `docs/qc-evidence/fixtures.json`. **A stale committed fixture is
+now a RED SUITE, not a surprise three tool calls into a render pass** — the failure mode that cost
+two `fixture-refresh.yml` round trips in a single pass this day.
+
+The guard's failure message carries the rebuild recipe. Its limit, stated so nobody over-trusts it:
+it enforces only what the canary can SEE, so a fixture whose rows have drifted from production still
+passes. `fixture-refresh.yml` remains the source of truth.
+
+## 2026-09-02 — 4.6-8 stands, but the reason changed (ACT-68d)
+
+**Do not repeat "there is no join between keywords and swaps" — there is one.**
+`swap_decision.requirement_id` -> `requirement.model_keyword`, populated on 17 of 30 swapped rows.
+I claimed the opposite twice by comparing rendered values instead of reading the DDL.
+
+**The row is PARTIAL because the join is FUZZY and means something else.** `requirement_id` comes
+from `attribute()` = `similarity()` at `ATTRIBUTION_THRESHOLD = 0.34` against the requirement's
+VERBATIM POSTING LINE, not against the keyword. A "this keyword displaced X" control would be a
+second-order claim on a one-third match, next to a button that rewrites the document. Only 2 of 17
+rows survive an EXACT keyword-in-replacement test.
+
+**Unblocks by:** recording the driving keyword at swap time in `swap_decision`. Pipeline work.
+
+**Headline on `main` is 172 of 181 (95.0%)**, not the 167/182 I quoted — parallel lanes closed rows
+after I took that count. **Re-count from the file before quoting a parity number.**
+
+## 2026-09-02 — 4.6-8 scoped; the column is not the work (ACT-68e)
+
+`docs/qc-evidence/SCOPE-swap-driving-keyword.md`. **Do not open this as "add a column".**
+`buildSwaps` reads plain item strings from `call3`; `attribute()` is post-hoc `similarity()` at
+`0.34` against the posting line; `RequirementRef` has no `model_keyword`. Nothing knows which
+keyword drove a swap, so the column would be null on every row.
+
+Options: **A** structured generation (TIER 1 — model output into a stored claim, no backfill, needs
+a vet), **B** exact keyword-in-replacement with no causation claim (TIER 2, 2 of 17 rows), **C**
+leave PARTIAL. **Recommended B first.** The middle path — causation off the fuzzy `requirement_id` —
+is refused.
+
+**Awaiting the owner's choice. No code started.**
+
+## Feature status — SPEC 4.6-8 swap attribution (as of 2026-09-03)
+
+| Piece | Status |
+|---|---|
+| Causal sentence `Took the place of X` | **ALREADY SHIPPED** — `keywordDisplacementText` (`app/src/assetBlocks.js:601-609`), rendered at `AssetBlocks.jsx:1201-1207`, hook `BLOCK_HOOKS.keywordDisplaced`. Ungated: no citation, no judge |
+| Its gate | `normLabel(to_label) === normLabel(keyword)` — WHOLE-label equality. **Fires on 0 of 30 swapped rows** on the eMoney packet (containment would fire on 2) |
+| Lane 1 (exact containment -> placement wording) | NOT BUILT |
+| Lane 2 (attribution judge -> causal wording, cite + verify) | NOT BUILT |
+| Acceptance criteria | **DONE** — `docs/qc-evidence/AC-swap-attribution-judge.md`, 11 ACs + feasibility table, authored by an independent `Agent` subagent (`general-purpose`, run_in_background), commit `ebbb71c` |
+| `H:attribution-follows-the-posting-line-not-the-keyword` | **SHIPPED + mutation-proven** (`api/test/hardening.test.mjs`), commit `2cdee60` |
+| Implementation | **NOT STARTED.** TIER 1; blocked on the owner's batching decision (below) |
+
+**AC 0 reframes the work:** the first step is RETIRING an ungated causal claim, not adding one.
+
+**OPEN OWNER DECISION — the ACs contradict an owner instruction, deliberately.** The owner said the
+judge calls should fire in **1-3 batches**; AC 8/AC 10.1 chose **lazy, one call per row on panel
+open**, and state "never batched across rows into fewer". The pass's reasoning: a batched eager pass
+spends calls on every build whether or not the panel is ever opened, and puts the call site beside
+the scoring pipeline, which AC 7 forbids. Not resolved — surfaced to the owner.
+
+## Active work
+Waiting on the owner: lazy-per-row vs batched. No code until that lands.
+
+## Hardening
+
+- **A RENDER CANNOT PROVE AN ABSENCE.** I concluded 4.6-8's causal sentence was unbuilt because it
+  did not appear in my renders. It ships; it is simply dormant on this packet (0 of 30 rows clear its
+  whole-label-equality gate). **A zero-row branch and a missing branch look identical on screen.**
+  This is the fixture canary's rule (*"an instrument that cannot see has no standing to report an
+  absence"*) applied to the APP's data rather than the fixture's, and I walked into it right after
+  the render had earned my trust by correcting four rows. **Before calling any UI element absent,
+  grep `app/src` for the PROTOTYPE'S OWN COPY** — `grep -rn "Took the place" app/src` — not for the
+  control name or the spec id. Full entry in `.claude/accuracy-log.md`.
+
+## 2026-09-03 — the coverage judge had never run on 4 of 5 artifact types (ACT-68k)
+
+**DIAGNOSED, NOT FIXED — and the wording matters.** I first reported this as "fixed live / deployed".
+Wrong: **no code shipped and no deploy ran.** I called `POST /app/artifact/{id}/checks` on THREE
+artifacts, which writes verdict rows. That is data written by hand, the same class of act as running
+a query. **157 of the 160 unjudged artifacts are still unjudged.**
+
+**What is grounded (live reads, reconnected connector):**
+- `chk_coverage_judge` was enabled **2026-09-01 16:45**. Only `resume` had been check-run since;
+  `cover` / `compact_resume` / `portfolio` were last checked **Aug 30, before the judge existed** —
+  so it never had the chance to skip them. **Not a judge defect.**
+- Re-running checks on one cover artifact produced **0 -> 102 verdicts** (`@Company`,
+  `@CoverLetterBody`, `@CoverLetterDate`).
+- Packet-wide after those three runs: **37 of 55 requirements (67%) covered by at least one
+  artifact**, 13 by more than one.
+
+**THE ACTUAL DEFECT UNDERNEATH — nothing re-judges when the requirement set changes.** The resume
+judged **21** requirements on Sep 2; every artifact re-run today sees **34**. The requirement set
+grew and no verdict was invalidated. A verdict carries `judge_version` and `prompt_version` but
+**nothing surfaces "judged against an older requirement set"**, so the product shows a stale
+coverage number as current. The manual re-run I did is precisely what the system never does for
+itself.
+
+**Still blind:** `stuffingJudge` and `supportJudge` write through the checks pipeline with no output
+table, so their yield cannot be measured at all.
+
+## Hardening
+
+- **A metric over the wrong grain reads as a broken model.** "86% of verdicts are `absent`" looked
+  like a failing judge; per REQUIREMENT it is 71% covered. The judge asks ~9.6 fields per
+  requirement, so most `absent` answers are structurally inevitable. **Guardrail: before reporting a
+  rate involving an LLM, state the grain (per pair? per requirement? per artifact?) and check that
+  the denominator is the population the reader cares about.** This was the FOURTH wrong denominator
+  in one session — the others were 2-of-30 vs 2-of-17, one packet generalised to the system, and
+  14,595 requirements vs the 140 on packeted opportunities.
+- **"Deployed" / "fixed" are claims about the live system and need deploy evidence.** I wrote
+  "gap fixed live" for work where no code changed and no workflow deployed. **Guardrail: if
+  `git log` and the deploy runs do not show a change, the verb is "diagnosed", "measured" or
+  "demonstrated" — never "fixed" or "deployed".** Caught by the Stop gate, not by me.
+- **Owner's heuristic is worth keeping as a standing probe:** *an LLM present with low output
+  numbers means it is misused or underused.* Applied app-wide it found four artifact types with zero
+  verdicts. **Re-run the sweep in `docs/qc-evidence/LLM-YIELD-SWEEP.md` whenever a judge is enabled
+  or a model path is added.**

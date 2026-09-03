@@ -683,3 +683,62 @@ code around it.**
 
 For the trend table: `instrument-caught`, four of four, none reached the owner, and all four guards
 it was blocking were subsequently proved FIRED.
+---
+
+## 2026-09-02 — "4.6-8 is blocked: there is NO JOIN between keywords and swap rows" (reported to the owner TWICE)
+
+| | |
+|---|---|
+| **Claimed** | "30 swapped rows, 35 keywords, **zero joins** — the data to render `Put back "<original>"` in the keyword panel does not exist. Upstream pipeline change required." |
+| **Ground truth** | A join EXISTS and is populated. `swap_decision.requirement_id` is a FK to `requirement(id)`, and `requirement.model_keyword` is the ATS keyword the chips render. **17 of 30 swapped rows resolve through it to a keyword.** |
+| **The input error** | I compared **two derived proxies** — `swap_decision.to_label` text against `requirement.model_keyword` text — found no string overlap, and concluded no relationship existed. **I never read the schema for a relationship both derive from.** This is verbatim the failure the "Ground-truth before answering" rule describes, committed while quoting that rule's sibling in the same breath. |
+| **Single source that would have settled it** | `grep -n "create table if not exists swap_decision" -A 30 api/src/functions/tests/schema.ts` — `requirement_id uuid references requirement(id)` is line 8 of the definition. |
+
+**The conclusion survived; the reasoning did not.** 4.6-8 is still correctly PARTIAL, but for a
+sharper reason found only after the correction: `requirement_id` is written by `attribute()`
+(`swaps.ts:224`), which is `similarity()` — token-set containment — at
+`ATTRIBUTION_THRESHOLD = 0.34`, matched against the requirement's **verbatim posting line**, NOT
+against the keyword. So the chain is `swapped-in text ~fuzzy 0.34~> posting line --sibling attr-->
+keyword`. Rendering "this keyword took the place of X" is a **second-order claim on a one-third
+fuzzy match**, attached to a control that rewrites the owner's document — "fuzzy matching is for
+RANKING, never for ACCUSING", exactly.
+
+Measured for the honest subset: only **2 of 17** have the keyword appearing EXACTLY in the
+replacement text; the other 15 rest on the fuzzy attribution alone. And those 2 support a weaker
+claim than the control makes.
+
+**Guard this earns — a REFLEX, not a test.** "There is no link between A and B" is a claim about the
+SCHEMA, and it is never settled by comparing A's and B's rendered values. Read the DDL for a foreign
+key first. A guard cannot be written for this without crying wolf; the reflex is the deliverable, and
+the cost of not having it was telling the owner "upstream pipeline change required" twice for work
+that needed no such thing.
+
+---
+
+## 2026-09-03 — "the keyword panel does not carry the causal sentence" (said across ~10 turns; the AC pass found it)
+
+| | |
+|---|---|
+| **Claimed** | 4.6-8's *"Took the place of X"* is not built; the panel "does not carry a `Put back`"; the whole A/B/C/judge menu was framed as what to BUILD. |
+| **Ground truth** | `keywordDisplacementText` (`app/src/assetBlocks.js:601-609`) emits **`Took the place of ${from} in ${list}.`** verbatim, and `AssetBlocks.jsx:1201-1207` renders it in the open keyword panel today, hook `BLOCK_HOOKS.keywordDisplaced`. Tests pin it at `app/test/assetBlocks.test.mjs:1585-1652`. |
+| **Why I never saw it** | Its gate is `normLabel(s.to_label) === normLabel(keyword)` — the WHOLE replacement label must equal the keyword. Measured on the packet I rendered: **it fires on 0 of 30 swapped rows** (containment would fire on 2). **A live feature that is dormant on your data is invisible to a render**, and I had made rendering my primary instrument. |
+| **Single source that would have settled it** | `grep -rn "Took the place" app/src` — one command, from the prototype's own wording, at any point in the thread. I grepped for `Put back` and for `4.6-8`, never for the sentence itself. |
+
+**Two compounding errors, and the second is the instructive one.**
+1. I searched for the CONTROL (`Put back`) and the SPEC ID, never for the COPY the prototype shows.
+   The prototype's sentence is the most searchable string in the whole feature.
+2. **I over-trusted the render after it had just been vindicated.** Earlier the same session, rendering
+   corrected four rows that reading had wrong, so I promoted it to primary instrument — and then used
+   it to conclude an ABSENCE. A render proves what IS on screen for THIS data; it cannot prove a
+   feature is unbuilt, because a live branch with no matching rows draws nothing. That is the same
+   class as the fixture canary's rule (*"an instrument that cannot see has no standing to report an
+   absence"*), applied to the app's own data rather than to the fixture.
+
+**Guard this earns — a reflex with a command attached.** Before calling any UI element absent, grep
+`app/src` for the PROTOTYPE'S OWN COPY, not for the control name or the spec id. And never let a
+render alone carry an absence verdict: a zero-row branch and a missing branch look identical on
+screen.
+
+**Cost:** roughly ten turns of design debate about how to build a sentence that ships today, plus
+two `verify.sh` runs (~$2.78 each) briefed on the wrong premise. The independent AC pass found it in
+one read — which is the argument for the pass, not against it.

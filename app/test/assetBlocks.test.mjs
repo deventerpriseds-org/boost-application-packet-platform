@@ -14,6 +14,7 @@ import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import {
   keywordDisplacement, keywordDisplacementText,
+  keywordGrade, GRADE_WORD, GRADE_MARK,
   UNKNOWN_REQS_NOTE, UNKNOWN_TERMS_NOTE,
   countMismatchNote, deriveItems, draftSizeText, expectationFor, itemCountOf, joinLabels,
   latestRows, listBodyModel, listsOf, meterModel, normLabel, registerListOwners, reqsForRow,
@@ -1647,4 +1648,54 @@ test('H:displacement-tolerates-junk-input-without-throwing', () => {
   assert.equal(keywordDisplacement(blankTo, ''), null)
   assert.equal(keywordDisplacement(blankTo, null), null)
   assert.equal(keywordDisplacement([{ action: 'swapped', from_label: 'Real Predecessor' }], ''), null)
+})
+
+
+// ---------------------------------------------------------------------------------------------
+// SPEC 4.5-29 / 4.5-30 - the reworded marker and the match grade.
+//
+// The row was recorded as needing a term library. It does not: the prototype never visualises one
+// (`libTerms()` is a flag filter used as a denominator), and the grade is an OUTPUT comparison --
+// does the posting say the term the way the draft says it. Production 2026-09-02: 5,396 requirements
+// whose verbatim contains their model_keyword, 6,804 where it does not, 2,221 with no verbatim.
+
+test('H:grade-is-decided-by-the-posting-not-by-a-library', () => {
+  // The posting says it literally -> exact. Case and surrounding words do not matter.
+  assert.equal(keywordGrade('SOC 2 Type II', 'ownership of SOC 2 Type II'), 'exact')
+  assert.equal(keywordGrade('Multi-region AWS', 'multi-region AWS'), 'exact')
+  assert.equal(keywordGrade('Cloud-native Services', 'to cloud-native services'), 'exact')
+  // The posting frames it differently -> reworded. These are the prototype's own variant rows.
+  assert.equal(keywordGrade('Distributed Teams', 'a distributed organization of 60+'), 'reworded')
+  assert.equal(keywordGrade('P&L Ownership', 'P&L or budget ownership at $10M or above'), 'reworded')
+  assert.equal(keywordGrade('Cycle Time Reduction', 'reducing delivery cycle time in a regulated environment'), 'reworded')
+})
+
+test('H:grade-is-null-when-the-posting-line-was-never-located', () => {
+  // ABSENT EVIDENCE IS NOT A GRADE. 2,221 production requirements have no verbatim; calling those
+  // `reworded` would report "the posting says it differently" about a posting line nobody found.
+  for (const v of [null, undefined, '', '   ']) assert.equal(keywordGrade('Kubernetes', v), null)
+  for (const k of [null, undefined, '', '   ']) assert.equal(keywordGrade(k, 'Hands-on depth with Kubernetes'), null)
+  // And null must render nothing at all - no marker, no word.
+  assert.equal(GRADE_MARK[null], undefined)
+  assert.equal(GRADE_WORD[null], undefined)
+})
+
+test('H:grade-marks-only-the-reworded-chip', () => {
+  // The marker is what 4.5-29 IS. An exact chip carries none, and an empty string means the
+  // component renders no node rather than an empty span.
+  assert.equal(GRADE_MARK.exact, '')
+  assert.ok(GRADE_MARK.reworded)
+  assert.notEqual(GRADE_MARK.reworded, GRADE_MARK.exact)
+})
+
+test('H:grade-never-offers-a-third-word-that-would-be-constant', () => {
+  // The prototype's third grade, `loose`, is decided by NOT being in the scoreable library. Every
+  // chip here is a model_keyword, declared never scoreable, so `loose` would be the same answer on
+  // every chip - decoration, and worse, it reads as a scoring verdict the panel disclaims.
+  assert.deepEqual(Object.keys(GRADE_WORD).sort(), ['exact', 'reworded'])
+  for (const w of Object.values(GRADE_WORD)) assert.doesNotMatch(String(w), /loose|not scored/i)
+  // Whatever the inputs, only those two or null ever come back.
+  for (const [k, v] of [['a', 'a'], ['a', 'b'], ['', ''], ['x', null]]) {
+    assert.ok([null, 'exact', 'reworded'].includes(keywordGrade(k, v)))
+  }
 })
