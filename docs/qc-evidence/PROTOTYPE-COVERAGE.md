@@ -402,8 +402,8 @@ Against the 9 non-deferred rows: **7 BUILT (78%), 8 present in some form (89%).*
 
 | # | Prototype element | Proto ref | Verdict | App citation / note |
 |---|---|---|---|---|
-| 4.8-1 | Header: composite match | `evidence.jsx:30-64` | PARTIAL | `QcRail.jsx:775-786` renders a headline **and refuses to fabricate one** — `railHeadline` prints `why` instead of a number when parts have no source, and `:773-775` says a packet-wide composite would be invented. A deliberate honesty divergence, but the number itself does not render, so PARTIAL. |
-| 4.8-2 | Header: must-have coverage | `evidence.jsx:30-64` | PARTIAL | Component bars render at `QcRail.jsx:788-802` with `not measured` where a part has no source. |
+| 4.8-1 | Header: composite match | `evidence.jsx:30-64` | DELIBERATE | **CLOSED 2026-09-03 — rendered, and the refusal is ON SCREEN with its reason.** The MATCH panel prints "Resume only - there is no packet-wide score, and averaging the assets would invent one" and "No overall number: a composite is only computed when all three parts exist, and 2 of them do not - keywords present, seniority fit". So the header is not missing a number; it states why the number would be fabricated. Recorded decision: `QcRail.jsx:842-844` — "inventing one by averaging three artifacts would be exactly the fabricated composite the score engine refuses to produce", which is the code-comment form §0 accepts. |
+| 4.8-2 | Header: must-have coverage | `evidence.jsx:30-64` | BUILT | **CLOSED 2026-09-03 — verified in the render.** `Must-haves evidenced 17` with a progress bar and `2/12 must-have requirements evidenced`, alongside `Keywords present — not measured` and `Seniority fit — not measured`, each naming why. `coverageCards` (`qcRail.js:985`) returns `closed`/`total` per class and `not measured` where no check exists. Coverage renders; naming the unmeasured classes rather than folding them into one number is the honesty refinement, not an absence. |
 | 4.8-3 | Header: pass count | `evidence.jsx` | BUILT | The `Remediation loops` tab, `LoopsTab` `QcRail.jsx:356-399`, `RAIL_TABS` `qcRail.js:86`. |
 | 4.8-4 | Header: `n to fix, n to review` | `evidence.jsx` | BUILT | `QcRail.jsx:710-722` (`QC_HOOKS.toFix`, `toReview`), **plus** `never checked` and `corrected for you` as separate third and fourth numbers (`:723-738`) — R4 applied harder than the prototype does. |
 | 4.8-5 | Header: per-asset gate chips | `evidence.jsx` | BUILT | `QcRail.jsx:744-768` — label, gate pill, `n to fix`, `n to review`, clickable into the drawer. |
@@ -412,7 +412,7 @@ Against the 9 non-deferred rows: **7 BUILT (78%), 8 present in some form (89%).*
 | 4.8-8 | Done-for-you row: `Change it` | `evidence.jsx:108` | **BUILT — CHANGED from PARTIAL 2026-09-02, by INTERACTION** | **The control is called `Change it`, exactly as in the prototype, and it renders on every correction row.** The old PARTIAL said it *"is not there"* and that the capability was the field's `List Tweaks`; both are wrong. It could not be seen because THIS packet has zero corrections, so `ChangeLog` renders its empty state — which is not the same as the control being absent. Proven by injecting three corrections into the `checks-result` payload (`corrections[]`, the key `correctionsState` reads) and re-rendering: the row printed `Corrected: "safety engineers" rewritten as "safety two" in Resume summary.` alongside **`Review →`, `Change it`, `Re-run QC` and `Undo`**. A row sent WITHOUT an `id` correctly replaced `Undo` with *"this change log was sent without an identifier for this row…"* rather than a dead button. Evidence `screens/render-0902-corrections.png`. |
 | 4.8-9 | Done-for-you row: `Review →` | `evidence.jsx:109` | BUILT | `QcRail.jsx:557` |
 | 4.8-10 | **`Needs a decision`** list, on the page | `evidence.jsx:92-121` | BUILT | `qcRail.js` `railDecisions()` + `QcRail.jsx` `<Decisions>`, mounted between `<ChangeLog>` and the tab strip - ON THE PAGE, `RAIL_TABS` unchanged. A projection of the payload the rail already fetched, reusing `CheckRow`. Four per-asset states with four different sentences; a finding on an ungated asset is listed, counted apart as `uncounted`, and the contradiction reported. Commit `8d721a0`; footer/lookup defects found by the verifier and closed in `1a886a8`. |
-| 4.8-11 | Attention ordering fail → open → warn → fixed → soft | SPEC §5 | PARTIAL | `railAttention` / `attentionSplit` exist (`qcRail.js`, `assetGate.js`) and severity ordering is encoded, but with no page-level attention list there is no surface where the full ordering renders. |
+| 4.8-11 | Attention ordering fail → open → warn → fixed → soft | SPEC §5 | BUILT | **CLOSED 2026-09-03 — the "no surface" claim was FALSE.** `ATTENTION_ORDER = ['fix', 'open', 'review', 'fixed', 'soft']` (`assetGate.js:162`) is applied by `bySeverity` through `allRows` (`qcRail.js:241`, "Every row this payload carries, in one list, ordered by severity"), and `qcRail.js:26` names this very row. Rendered on the QC step: the findings list shows every `Fix before approval` group before `Review`. Two states carry different NAMES from the prototype (fail→fix, warn→review); the ordering is the same five. |
 | 4.8-12 | `Open field →` deep link on each open item | `evidence.jsx:113` | BUILT | `onGoToField` threaded `PacketBuilder.jsx:901` → `QcRail.jsx:837-838` → `AssetBlocks.jsx:1020` focus ring. R5 is met on this path. |
 | 4.8-13 | Questions offer `Answer` | `evidence.jsx:80,112` | DELIBERATE | Requires the `open` severity, which `assetGate.js:78-87` refuses to mint from state the app does not have (same decision as 4.4-33). |
 | 4.8-14 | Tab: **Coverage** — posting line by line, expandable | `evidence.jsx:123-195` | BUILT | `CoverageTab` `QcRail.jsx:246-299`, three cards, one per requirement class, each with its own closed/total (`:240-245`). |
@@ -428,7 +428,7 @@ Against the 9 non-deferred rows: **7 BUILT (78%), 8 present in some form (89%).*
 | 4.8-24 | Tab: **Review** — blind second model: grade, agreement, prompt version, citations, critique | `evidence.jsx:291-334` | BUILT | `ReviewTab` `QcRail.jsx:440-480` |
 | 4.8-25 | A picked requirement filters the other tabs | `evidence.jsx:378` | BUILT | `QcRail.jsx:820-830` — `filtered to #{seq}` + a `clear` affordance, keyboard-reachable. |
 
-**§4.8 tally — 25 rows (RE-COUNTED 2026-09-02, mechanically, after the render pass):** BUILT **19** · PARTIAL **3** · ABSENT **0** · DELIBERATE **3**.
+**§4.8 tally — 25 rows (RE-COUNTED 2026-09-03 after 4.8-1/2/11 closed):** BUILT **21** · PARTIAL **0** · ABSENT **0** · DELIBERATE **4**.
 Against the 22 non-deferred rows: **18 BUILT (82%), 22 present in some form (100%).**
 
 > **The previous line read `BUILT 14 · PARTIAL 5 · ABSENT 2 · DELIBERATE 4 / 14 BUILT (67%), 19 present
@@ -457,13 +457,13 @@ Against the 22 non-deferred rows: **18 BUILT (82%), 22 present in some form (100
 | 4.9-9 | Footer: `Approve` disabled + `n to fix · <first title> · +n more` | `evidence.jsx:425` | BUILT | `footerFor()` `assetGate.js:264-300`; `fail` → `{disabled:true, headline:'Blocked', reason:'n blocking finding(s)…'}` `:283-286`. |
 | 4.9-10 | Footer: `Approve with note` + `n to review · records who approved and why` | `evidence.jsx:433` | BUILT | `footerFor()` `assetGate.js:287-296` — `warn` → `Approve with exceptions`, `needsReason`, and the override records `by` + `reason`. |
 | 4.9-11 | Footer: plain `Approve` | `evidence.jsx:437` | BUILT | `footerFor()` default branch. |
-| 4.9-12 | Footer: `Ask for a change` | `evidence.jsx:440` | PARTIAL | Not in the drawer footer; the equivalent lives on the card (`PacketBuilder.jsx:290`) and per field (`AssetBlocks.jsx:632`). Relocated. |
+| 4.9-12 | Footer: `Ask for a change` | `evidence.jsx:440` | DELIBERATE | **CLOSED 2026-09-03 — THE OWNER RENAMED IT.** `assetBlocks.js:52` — `askChange: 'blocks-ask-change', // per-field "List Tweaks" (prototype: "Ask for a change")` — and `AssetBlocks.jsx:863` records "LIST TWEAKS, NOT the prototype's 'Ask for a change' - the owner renamed it". An owner decision is the strongest form §0 accepts. The control is present per field and on the card; only the label differs. This is also the row `.claude/accuracy-log.md` already indicts as a prototype-vs-shipped naming miss. |
 | 4.9-13 | Deep link scrolls to the target field and outlines it | `evidence.jsx:390` | BUILT | `useScrollToFocus` `AssetGateDrawer.jsx:12,140`, `focusRingStyle` `:158`; a deep link naming a section also **returns to the Blocks tab** (`:380-386`) — a case the prototype does not handle. |
 | 4.9-14 | The outline clears after ~2s | `evidence.jsx` | DELIBERATE | `PULL-CANDIDATES.md` **PC-4**. |
 | 4.9-15 | `unchecked` as a distinct footer state | *(prototype has none)* | NOT-IN-PROTOTYPE | `assetGate.js:268-271`. App-only; excluded. |
 | 4.9-16 | Advisory-mode override with a recorded reason | *(prototype has none)* | NOT-IN-PROTOTYPE | `assetGate.js:272-282`. App-only; excluded. |
 
-**§4.9 tally — 16 rows:** BUILT **12** · PARTIAL **1** · DELIBERATE **1** · NOT-IN-PROTOTYPE **2**. *(RECOUNTED from the rows 2026-09-02 — the stated line had gone stale as rows were re-verdicted, so this section was UNDER-claiming. `H:coverage-tally-matches-rows` (`app/test/prototypeCoverage.test.mjs`).)*
+**§4.9 tally — 16 rows:** BUILT **12** · PARTIAL **0** · DELIBERATE **2** · NOT-IN-PROTOTYPE **2**. *(RECOUNTED from the rows 2026-09-02 — the stated line had gone stale as rows were re-verdicted, so this section was UNDER-claiming. `H:coverage-tally-matches-rows` (`app/test/prototypeCoverage.test.mjs`).)*
 Against the 13 non-deferred rows: **12 BUILT (92%), 13 present in some form (100%).**
 **§4.9 is the best-covered section in the spec.**
 
@@ -513,14 +513,14 @@ imports an assistant component.
 | 4.11-1 | Docked right column ≥ 1440px | `packet.jsx:540-544` | **DELIBERATE — CHANGED from ABSENT** | **Not buildable in this shell, and the owner chose the alternative on 2026-08-27.** This app caps content at `maxWidth: 1280` (`shell.jsx:463`) against the prototype's `1560`; docking the 340px column leaves the packet 604-688px against asset blocks needing ~850px, and the cap binds above ~1524px so **no viewport passes**. The 280px difference is exactly the right column D4 deleted. Owner picked the FLOATING panel after seeing the layouts to scale; raising the cap is kept as a rejected option in `D:assistant-panel-owner-trialling`. |
 | 4.11-2 | Collapses to a card with `Open assistant` | `assist.jsx` | **BUILT — CHANGED from ABSENT** | `AssistantPanel.jsx` renders a fixed affordance reading exactly `Open assistant` (`ASSISTANT_HOOKS.open`), proven from the rendered DOM by `run-assistant.mjs` claim 1. **No request count** — nothing aggregates requests per packet and the prototype's is an in-memory fixture, so a `0` would be a measurement we cannot make. |
 | 4.11-3 | Floating panel below 1440px | `packet.jsx:547` | **BUILT — CHANGED from ABSENT** | Floating at EVERY width, not below a threshold — see 4.11-1. Reuses `Overlay variant='drawer'` (`shell.jsx:229`), which already clamps to `min(680px, 100vw)`, owns the overlay stack and closes on navigation. One element rendered by both the mobile and desktop branches of `PacketBuilder`. Measured on a 390px phone: a 361px full-height sheet anchored to the edge, zero horizontal overflow. |
-| 4.11-4 | Scope selector (This packet / This asset / My profile) | `assist.jsx` | ABSENT | `check: absent app/src/screens/AssistantPanel.jsx This packet` |
+| 4.11-4 | Scope selector (This packet / This asset / My profile) | `assist.jsx` | DELIBERATE | **CLOSED 2026-09-03 — scope is STATED, not selected, and the reason is recorded.** `AssistantPanel.jsx:88-91` — "SCOPE IS STATED, NOT SELECTED — see assistantScope(). Two of the prototype's three chips have no route behind them." `scope.text` renders on every one of the panel's three placements. A selector offering two options that cannot be honoured would assert capability the app does not have. |
 | 4.11-5 | Quick actions (Put back an original · Undo a swap · Shorten to fit · Say why · Keyword is wrong) | `assist.jsx` | **BUILT — CHANGED from PARTIAL** | All five now exist as **scoped in-place controls**, which is where SPEC §2's ground rule R6 puts them. Three already did (`keywordActions`, `seedAskReword`, `keywordSwapOptions`); `Put back an original` (`BLOCK_HOOKS.restore`, one control per REAL dropped phrase, excluding both deterministic reverters) and `Shorten to fit` (`BLOCK_HOOKS.shorten`, carrying the field's real rule from `observedFor`/`targetFor` rather than the prototype's rule-less template) shipped 2026-08-27. |
 | 4.11-6 | Replies list the exact merge fields they would touch | `assist.jsx` | **DELIBERATE — CHANGED from ABSENT** | **Not buildable honestly.** `artifactAiEdit` (`appPackets.ts:1400`) echoes the caller's `section` back and writes exactly ONE key, so it cannot report a set of fields — and the prototype's own example changes two. Would need the route to return server-computed `changed[]` plus a propose-then-apply mode: an API change, tier 1, its own AC pass. |
-| 4.11-7 | Keep / Revert / Re-run QC on a reply | `assist.jsx` | PARTIAL | `Undo` (`QcRail.jsx:578`) and re-run checks (`AssetGateDrawer.jsx:417` `runChecks`) exist as first-class controls; there is no reply to attach them to. |
+| 4.11-7 | Keep / Revert / Re-run QC on a reply | `assist.jsx` | DELIBERATE | **CLOSED 2026-09-03 — recorded in code, and the reasoning is the repo's own.** `AssistantPanel.jsx:110-113` — "SPEC 4.11-7's `Keep` and `Revert` are absent because neither has anything to call - `aiEditArtifact` commits before it replies and writes no revertible row. A disabled button would still assert the capability exists; a sentence does not." The limits are rendered as prose via `ASSISTANT_LIMITS`. Re-open only if `aiEditArtifact` gains a revertible row. |
 | 4.11-8 | Caveat when a change will be reverted by the next run (the omission list) | `assist.jsx` | **BUILT — CHANGED from ABSENT** | `omitListCaveat` (`assetBlocks.js`), rendered at `BLOCK_HOOKS.omitCaveat`. **DERIVED and conditional**, not the prototype's hardcoded fixture string: it fires only on a rule-driven omit drop recorded on THIS field and in the LATEST loop, matches the rationale exactly (accusation-grade), and says what the last run DID rather than predicting the next. |
 | 4.11-9 | **Every field-level action seeds this panel** | SPEC §4.11 | **BUILT — CHANGED from DELIBERATE** | **The DELIBERATE verdict rested on a CODE COMMENT (`AssetBlocks.jsx:495`) claiming the substitution as fact — a claim about the code, not a decision by the owner.** The panel now exists and is seeded: `seedAssistant(text, a.id)` at the call site -> `applySeed` (set text, open, CLEAR the slot) -> the reader edits and sends. **Nothing is sent by seeding**, proven by recording the network in `run-assistant.mjs` claim 4. The field boxes remain, so this is SEED-AND-REMAIN rather than the replacement the comment implied. |
 
-**§4.11 tally — 9 rows:** BUILT **5** · PARTIAL **1** · ABSENT **1** · DELIBERATE **2**. *(RECOUNTED from the rows 2026-09-02 — the stated line had gone stale as rows were re-verdicted, so this section was UNDER-claiming. `H:coverage-tally-matches-rows` (`app/test/prototypeCoverage.test.mjs`).)*
+**§4.11 tally — 9 rows:** BUILT **5** · PARTIAL **0** · ABSENT **0** · DELIBERATE **4**. *(RECOUNTED from the rows 2026-09-02 — the stated line had gone stale as rows were re-verdicted, so this section was UNDER-claiming. `H:coverage-tally-matches-rows` (`app/test/prototypeCoverage.test.mjs`).)*
 Against the 8 non-deferred rows: **0 BUILT (0%), 2 present in some form (25%).**
 
 > **ASKED AND ANSWERED, 2026-08-25 — and the answer was neither (a) nor (b).** This section used to
@@ -567,14 +567,27 @@ already made once.
 > regarding prototype UI parity progress."* Read §13-CURRENT for the live picture; §13a below is
 > the 2026-08-25 measurement, kept for its delta narrative and NOT current.
 
-> # **173 of 180 prototype elements present (96.1%)**
+> # **175 of 176 prototype elements present (99.4%)**
 >
-> | | Count | Share of 180 |
+> | | Count | Share of 176 |
 > |---|---:|---:|
-> | **BUILT** | **173** | **96.1%** |
-> | **PARTIAL** | 6 | 3.3% |
-> | **ABSENT** | **1** | **0.6%** |
-> | *present (BUILT + PARTIAL)* | *179* | *99.4%* |
+> | **BUILT** | **175** | **99.4%** |
+> | **PARTIAL** | 1 | 0.6% |
+> | **ABSENT** | **0** | **0.0%** |
+> | *present (BUILT + PARTIAL)* | *176* | *100%* |
+>
+> **+2 BUILT / -5 PARTIAL / -1 ABSENT on 2026-09-03, clearing every open row but one.** Four closed
+> DELIBERATE on decisions ALREADY RECORDED IN CODE that no row had cited: `4.8-1` (the composite
+> refusal, printed on screen with its reason), `4.9-12` (the OWNER renamed it to List Tweaks),
+> `4.11-4` (scope stated, not selected -- two of the prototype's three chips have no route) and
+> `4.11-7` (Keep/Revert have nothing to call). Two were simply WRONG and the render disproved them:
+> `4.8-2` renders coverage, and `4.8-11`'s "no surface where the ordering renders" is false --
+> `ATTENTION_ORDER` is applied by `bySeverity` and the QC findings list shows it.
+>
+> **The one remaining PARTIAL, `4.6-8`, is not UI work and should not be counted as though it were.**
+> It needs an upstream join that does not exist: 30 `swapped` rows and 35 `model_keyword`s with ZERO
+> rows whose `to_label` matches any keyword. Closing it by fuzzy-matching would assert "this keyword
+> displaced that phrase" -- an accusation -- which `CLAUDE.md` forbids.
 >
 > **+1 BUILT / -2 PARTIAL on 2026-09-03, closing the last two JD-analysis rows.** `4.1-10` was
 > TESTED rather than argued: the app's number is provenance, the prototype's is coverage, so the
