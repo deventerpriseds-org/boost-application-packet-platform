@@ -183,6 +183,16 @@ const rowToOpp = (r) => ({
   jdTitle: r.jd_title, jdCompany: r.jd_company, jdSummary: r.jd_summary,
   jdRequirements: r.jd_requirements, jdTable: r.jd_table,
 })
+// THE ENDPOINTS ANOTHER LANE ADDED WHILE THIS FILE WAS NOT LOOKING. Measured 2026-09-03 by
+// `compare-ui --all`: FOUR unmatched `/artifact/{id}/remediation` calls and one `/skill-bank`,
+// with the qc step rendering 72,477 FEWER characters than its previous recorded run -- which
+// reads as the APP having lost most of the QC surface. It had not; the instrument had.
+// Captured, never derived, for the reason in the block below.
+if (raw.apiRemediation) {
+  for (const [aid, body] of Object.entries(raw.apiRemediation)) f[`/artifact/${aid}/remediation`] = body
+}
+if (raw.apiSkillBank) f['/skill-bank'] = raw.apiSkillBank
+
 if (raw.apiOpportunity) {
   f[`/opportunity/${OPP}`] = raw.apiOpportunity
 } else {
