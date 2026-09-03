@@ -8,6 +8,54 @@ Status values: `open` | `in-progress` | `blocked` | `done`
 
 ## Open
 
+### ACT:coach-auth-bypass — two auth bypasses on the coach routes (2026-09-03)
+- **Origin:** found incidentally while auditing an inherited feature spec
+  (`BOOST_COPILOT_COLE_BRIDGE_SPEC.md`), not from an owner report. Nobody asked for a security
+  review; this is what the audit walked into.
+- **Finding 1 — body-`owner` bypass on `/api/app/coach/chat`.** `resolveOwner`'s fallback reads the
+  QUERY STRING only (`appSession.ts:63`); the handler reads `body?.owner` (`coachAgent.ts:198`). No
+  Bearer + no `?owner=` + `owner` in the JSON body ⇒ `requireWrite` passes on the demo branch, then
+  the full coach runs as that account. Same shape at `coachAgent.ts:334` and `:380`.
+- **Finding 2 — no guard whatsoever on `/api/app/voice/chat`.** `authLevel:'anonymous'`
+  (`appVoice.ts:120`), zero `requireWrite`/`resolveOwner` in the file. All 48 coach tools reachable
+  unauthenticated, `send_outreach` (real Graph email) included.
+- **Why this is urgent rather than theoretical:** finding 2 is harmless TODAY only because
+  `VOICE_OWNER` (`appVoice.ts:87`) points at an empty placeholder account. The spec's item C
+  proposes replacing that placeholder with the real user. Done without adding a guard, it converts
+  a harmless misconfiguration into anonymous internet access to the owner's real account. **The
+  ORDER is the mitigation: guard first (S1), identity second (B6).**
+- **Third item, same area:** the session-token signing key defaults to the Graph app secret, so
+  anyone able to mint a token can impersonate any user. Wants a dedicated `SESSION_SIGNING_SECRET`.
+- **Status:** OPEN, **not fixed, not exploited**. Verified by READING source at `a041d8f` — no live
+  call was made (egress blocks `azurewebsites.net`; both Postgres connectors were unauthorized this
+  session), so production behaviour is inferred from source, not observed.
+- **Owner decision needed** before any code lands: these are unrequested changes to live auth on a
+  deployed Function App, which is exactly the "confirm the plan before building" case. Proposed
+  Phase 0 (S1/S2/S3) is written up in `docs/COLE_BRIDGE_SPEC_v2.md`.
+- **Evidence:** `docs/spec-research/A-coach-engine.md` (per-claim, file:line).
+
+### ACT:cole-bridge-spec — corrected spec for the Huddle ↔ Boost coach bridge (2026-09-03)
+- **Origin:** owner, directly — *"another chat attempted to make a partially blind guess at a spec…
+  see where it's off and what it got wrong and create a more accurate spec based on the current
+  repos and code status."*
+- **What shipped:** `docs/COLE_BRIDGE_SPEC_v2.md` (supersedes the v1 spec), plus three evidence
+  files under `docs/spec-research/` and one in `huddle-extension-app/docs/spec-research/`. Docs
+  only; **no application code changed**. PRs: boost #83, huddle #39.
+- **v1 claims adjudicated:** 2 CONFIRMED (Cole's 7 persona fields, roster of 15), 3 PARTLY-TRUE
+  (48 tools not ~50; gpt-4o not fixed in code; tenants), 2 REFUTED (deep-link contract;
+  `personaOverlay`), 1 answered that v1 called unbuildable (Huddle per-agent tool execution =
+  `runAgentTurn` inside `runHuddleTurn`, `huddle.functions.ts:1885`, with FOUR wiring sites), plus
+  the two bypasses above that v1 never mentions.
+- **Owner-supplied fact the code cannot show:** one human, TWO addresses (`dev@`, `von.ellis@`).
+  v1's "shared identity = same email" would split `coach_memory` into two stores. Canonical-identity
+  resolver is `B1` and must precede any cross-app memory test.
+- **The one real decision awaiting the owner:** thin passthrough (v1) vs. giving Cole a Boost tool.
+  Recommended the tool — additive rather than subtractive (Huddle's CLAUDE.md forbids subtractive
+  prompt edits without explicit sign-off), a complete precedent in `groom_backlog`, and reversible.
+  Cole has the longest-tuned snapshot of all 15 agents; passthrough discards it.
+- **Status:** OPEN — spec delivered, **nothing built**. Awaiting the owner on the fork above and on
+  the Phase 0 security work.
+
 <!-- SessionStart extracts the range between the two headings that bracket this section. Before they
      existed it matched nothing and surfaced 0 lines out of 5,279 — measured 2026-08-29.
      DO NOT write either heading's literal text inside this range, including in a comment: the range
