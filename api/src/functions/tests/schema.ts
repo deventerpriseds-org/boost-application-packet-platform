@@ -1747,5 +1747,6 @@ export const EXPECTED_TABLES = [
   'term_library', 'term_library_entry', 'term_candidate', 'requirement',
   'skill_candidate', 'swap_decision', 'insertion', 'check_result', 'artifact_gate', 'artifact_score', 'owner_fact', 'review_verdict',
   'remediation_loop', 'escalation', 'requirement_evidence', 'comparison_dimension',
-  'packet_build_job', 'evidence_confirmation', 'requirement_coverage'
+  'packet_build_job', 'evidence_confirmation', 'requirement_coverage',
+  'owner_master_block'
 ]

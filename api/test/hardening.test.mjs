@@ -308,6 +308,44 @@ test('H11: every table this layer added is registered for migration', () => {
   }
 })
 
+// H:every-declared-table-is-registered -- H11's missing half, and the reason it was believed.
+//
+// H11 above walks a HAND-MAINTAINED list of table names. It can only check a table someone
+// remembered to add to it, so the guard against "you forgot to register your new table" itself
+// requires you to remember your new table -- in a THIRD place. It is structurally incapable of
+// catching a genuinely new one, and it passed while doing nothing.
+//
+// MEASURED 2026-09-03. `owner_master_block` shipped to main declared in SCHEMA_SQL and absent from
+// EXPECTED_TABLES. api-deploy went green, pg-migrate returned `ok: true` with the detail
+// "32/32 tables present", and the live database did not have the table. The count was 32/32 because
+// EXPECTED_TABLES held 32 names and every one of them existed -- a gate that passes by not looking,
+// which is exactly the vacuous-pass this repo bans ("absent evidence is not_applicable, never
+// pass"). H11 was green throughout.
+//
+// So this derives the list from SCHEMA_SQL instead of restating it. It needs no maintenance and
+// cannot be blind to a new table. H11 STAYS: its named list also asserts each table is still
+// DECLARED, which this does not, and two overlapping checks on a migration path is not ceremony.
+//
+// MUTATION that must make this FIRE: delete 'owner_master_block' from EXPECTED_TABLES in schema.ts.
+test('H:every-declared-table-is-registered: SCHEMA_SQL and EXPECTED_TABLES cannot diverge', () => {
+  const schema = src('schema.ts')
+  const body = schema.slice(schema.indexOf('SCHEMA_SQL = `'), schema.indexOf('\n`;'))
+  // Strip SQL line comments first. A comment is prose ABOUT the schema, not schema -- without this
+  // the phrase "create table if not exists is a NO-OP" in this file's own commentary is read as a
+  // table named `is`, and the guard cries wolf on its first run.
+  const code = body.split('\n').map((l) => l.replace(/--.*$/, '')).join('\n')
+  const declared = [...new Set([...code.matchAll(/create table if not exists (\w+)/g)].map((m) => m[1]))]
+  const registered = schema.slice(schema.indexOf('EXPECTED_TABLES'))
+  const unregistered = declared.filter((t) => !new RegExp(`'${t}'`).test(registered))
+  assert.deepEqual(unregistered, [],
+    `these tables are declared in SCHEMA_SQL but not in EXPECTED_TABLES: ${unregistered.join(', ')}. ` +
+    `pgMigrate reports "n/n tables present" against EXPECTED_TABLES, so an unregistered table makes ` +
+    `that number pass while the table itself is never checked -- a green deploy over a missing table.`)
+  assert.ok(declared.length >= 30, `only ${declared.length} tables parsed out of SCHEMA_SQL -- the ` +
+    `extraction broke, and an empty list would make this guard pass vacuously, which is the exact ` +
+    `failure it exists to catch`)
+})
+
 // ---------------------------------------------------------------------------------------------
 // H12 — Pure rule modules must stay testable without Azure or a database, or the rules stop being
 // tested and start being hoped for.
