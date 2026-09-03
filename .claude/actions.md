@@ -17,6 +17,45 @@ Status values: `open` | `in-progress` | `blocked` | `done`
      index of what is live, not a second copy of the ledger. Detail stays in the ACT entries below
      and in `.claude/DEFERRED.md`. -->
 
+### ACT:video-script-authoring — the chain is traced; five owner requirements are in an AC pass (2026-09-03)
+- **Status:** 🔵 OPEN. AC pass RUNNING, writing `docs/qc-evidence/AC-video-script-authoring.md`
+  incrementally. **No code written yet — TIER 1, so ACs come first.**
+- **The chain (full detail in `CLAUDE.md`, which is always loaded):** `runPacketBuild`→
+  `ensureArtifacts` creates the `video` row; **`artifactGenerate` (`appPackets.ts:271`) authors the
+  script**; `artifactVideoGenerate` (`appVideo.ts:35`) sends it to HeyGen; `artifactVideoStatus`
+  polls; `appVideoArchive.ts` archives. `runPacketBuild` SKIPS the type, so 39 of 40 video artifacts
+  are empty.
+- **Live defect, measured (api-test run 33758667340):** the whole prompt for Trinnex was
+  `ROLE / Comp: n/a / Persona: null / Why surfaced: Saved from a web page / Company signals: n/a /
+  Pain hypotheses: n/a`. No profile, no master context, **no raw JD** — so the model FABRICATED
+  "reducing operational costs by 30%". Invented metrics read as true; that is worse than the
+  `[X%]` placeholders the Cloudflare script shipped with.
+- **Owner's five requirements:** (1) same QC Review + right panel as the cover step; (2) draft
+  generation is a MANUAL click, never automatic per submission; (3) every stated fact must expose
+  what and where it came from — needs the raw JD; (4) trigger → editable script text → manual push
+  to video, three owner-controlled steps; (5) wire profile/master context AND company context into
+  `artifactGenerate`'s user message.
+- **Suspected ALREADY BUILT (AC pass to prove or refute):** the cover step's QC rail and the
+  per-artifact generate/edit controls; and this repo's evidence spine likely covers (3) by
+  EXTENSION. Requirement 5 may be partly gated on `D:master-context-lives-in-the-wrong-store`.
+- **Ledger:** `D:video-script-is-never-authored-by-the-build`,
+  `D:video-script-prompt-omits-the-candidate`. Evidence: commits `0209d21`, `8574a26`.
+
+### ACT:retrieval-window — three entries were written where nothing can read them (2026-09-03)
+- **Status:** ✅ CLOSED for the writing defect; the GATE HOLE below is open and unowned.
+- **What was wrong:** SessionStart loads bounded SLICES, not files — `memory.md` ~60 lines after the
+  FIRST `## Active work`, `accuracy-log.md` lines 1-45, this section only. Three correct entries were
+  appended at `memory.md:6659`, `accuracy-log.md:806`, `actions.md:8453` — **none inside any window**.
+  Other lanes PREPEND; I appended. Rule now in `CLAUDE.md`: *WRITE INTO THE RETRIEVAL WINDOW*.
+- **Trap worth knowing:** `memory.md` has TWO `## Active work` headings (~522, ~6402) and `sed` stops
+  at the FIRST — anything under the second is unreachable. Do not add a third.
+- **THE GATE HOLE, not fixed:** the Stop gate checks the tracking files were **TOUCHED**, not that the
+  content is **RETRIEVABLE**. An unreadable append passes it cleanly — the same shape as an inert
+  guard, believed because it ran. **Proof it is real: this very row was missed on the first pass** —
+  memory.md and accuracy-log.md were repaired and `actions.md` was left broken, and the gate passed
+  the turn that did that. A `retrievable-window` assertion is the fix; it is TIER 1 (it changes a
+  gate) and needs its own AC pass. **Owner's call.**
+
 ### ACT:runner-vehicle — the AC/verifier vehicle this repo was told to use is SUPERSEDED (2026-08-30)
 - **Status:** ✅ CLOSED as a documentation change. **Read the top of `## Active work` in
   `.claude/memory.md` before dispatching any long pass.**
