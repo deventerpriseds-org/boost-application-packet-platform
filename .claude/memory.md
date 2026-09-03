@@ -6199,3 +6199,17 @@ rows survive an EXACT keyword-in-replacement test.
 
 **Headline on `main` is 172 of 181 (95.0%)**, not the 167/182 I quoted — parallel lanes closed rows
 after I took that count. **Re-count from the file before quoting a parity number.**
+
+## 2026-09-02 — 4.6-8 scoped; the column is not the work (ACT-68e)
+
+`docs/qc-evidence/SCOPE-swap-driving-keyword.md`. **Do not open this as "add a column".**
+`buildSwaps` reads plain item strings from `call3`; `attribute()` is post-hoc `similarity()` at
+`0.34` against the posting line; `RequirementRef` has no `model_keyword`. Nothing knows which
+keyword drove a swap, so the column would be null on every row.
+
+Options: **A** structured generation (TIER 1 — model output into a stored claim, no backfill, needs
+a vet), **B** exact keyword-in-replacement with no causation claim (TIER 2, 2 of 17 rows), **C**
+leave PARTIAL. **Recommended B first.** The middle path — causation off the fuzzy `requirement_id` —
+is refused.
+
+**Awaiting the owner's choice. No code started.**

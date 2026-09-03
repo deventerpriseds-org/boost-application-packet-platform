@@ -7916,3 +7916,28 @@ now instead of hand-waved.
 **Also corrected here:** I reported the doc headline to the owner as `167 of 182`. `main` already
 read **172 of 181 (95.0%)** — parallel lanes closed rows in merges I pulled in after taking that
 count. Cover step unchanged at **83 of 84 (98.8%)**, 4.6-8 its only PARTIAL.
+
+### ACT-68e — SCOPE: the `swap_decision` driving-keyword record (2026-09-02)
+
+**Asked:** *"push it and scope the swap_decision keyword column."* #76 merged to `main` at
+`5d81c42` (docs only, nothing deployed). Scope written to
+`docs/qc-evidence/SCOPE-swap-driving-keyword.md`.
+
+**THE HEADLINE: the column is not the work.** Read from source, not assumed —
+`buildSwaps` consumes `splitItems(pkg[f.merge] ?? call3[f.passB])` (`swaps.ts:497`), i.e. plain item
+STRINGS with no per-item provenance; `attribute()` matches them post-hoc by `similarity()` at
+`0.34` against the requirement's verbatim posting line; and `RequirementRef`
+(`swaps.ts:213`) does not carry `model_keyword` at all. **Nothing upstream knows which keyword drove
+a swap**, so a column added today is null on every row — the write-only-field defect this repo
+already hit with `correction.frame`.
+
+**Three options costed.** A = structured generation (TIER 1: admits model output into a stored
+claim, no backfill possible, needs a vet); B = exact keyword-in-replacement with NO causation claim
+(TIER 2, reuses `keywordPresence`, measured 2 of 17 rows); C = leave PARTIAL.
+
+**Recommended: B first, A only if the owner wants true causation.** B de-risks A by building the
+slot and copy so A later swaps only the CONDITION. The middle path — rendering causation off the
+fuzzy `requirement_id` — is explicitly REFUSED (`CLAUDE.md:432`).
+
+**Owner decision required before any code.** Option A is Tier 1 and needs an independent AC pass
+first; Option B is Tier 2 and can start on a go-ahead.
