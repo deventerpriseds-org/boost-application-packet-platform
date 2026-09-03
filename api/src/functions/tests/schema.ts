@@ -1735,6 +1735,81 @@ do $$ begin
       'coreAccomplishments','resumeSummary','skills1','skills2','expertise',
       'relevantProficiencies','aboutMe1','aboutMe2','executiveProfile','softHardSkillsPool'));
 exception when undefined_table then null; end $$;
+
+-- ── judge_outcome ───────────────────────────────────────────────────────────────
+-- WHAT A JUDGE DID, INCLUDING WHEN IT DID NOTHING.
+--
+-- All three model passes persist their SUCCESSES and drop their FAILURES, by three different code
+-- paths that arrive at the same blindness:
+--   coverage  - runCoverageJudge returns refused/silent/failures, evaluateArtifact folds them into a
+--               judge object, and only the direct HTTP handler ever reads it. The packet build and
+--               the remediation loop discard it.
+--   support   - the escalation pass tallies into an in-memory escalation_refusals dict that is
+--               JSON-serialised into one response and then dies with the request.
+--   stuffing  - model-raised hits are merged into the single posting_wording_kept check_result with
+--               the count embedded in the message PROSE.
+-- Net: a judge that STOPPED ANSWERING is indistinguishable from a judge that FOUND NOTHING.
+--
+-- WHY A NEW TABLE, ruled against every existing candidate by name rather than by preference. This
+-- is the "extend, don't duplicate" argument and it is load-bearing:
+--   evidence_confirmation.missing - scoped to ONE owner decision on ONE excerpt, keyed by claim
+--     identity (requirement text, source key, offsets, record digest). A field-level transport
+--     failure has no excerpt, no offsets and often no requirement at all. Repurposing it would also
+--     break the null-vs-empty-array distinction its own comment above establishes. RULED OUT, and
+--     left exactly as it is - this table does not touch it.
+--   requirement_coverage - its own CHECK is (covered = (quote is not null)). A refusal has no quote,
+--     so storing one here needs either a constraint violation or a fabricated quote.
+--   requirement_evidence - requires a real span (length(quote) = char_end - char_start). A transport
+--     failure has no span.
+--   check_result - the GATE reads it. Putting operational judge failures in the same table as
+--     gate-deciding rows is precisely the "instrumentation that can fail a gate" failure this whole
+--     change is forbidden from creating. It is also artifact-scoped NOT NULL, and the support judge
+--     runs with no artifact at all.
+--   usage_metering - one layer BELOW where an outcome is known: logUsage is called from inside
+--     openAiJson, which has already returned by the time its caller can tell refused from answered.
+--     It is widened separately (see the outcome column below) to see a transport failure at all;
+--     it structurally cannot carry a parse-level outcome.
+--
+-- ONE ROW PER (run-or-call, judge, outcome_kind) WITH A COUNT, aggregated exactly the way the
+-- in-memory objects it replaces already aggregate. NEVER one row per requirement or per field: that
+-- is what keeps the volume O(distinct outcome kinds) per call instead of O(requirements), and
+-- H:judge-outcome-volume-bounded fails if that ever changes.
+--
+-- IT IS WRITE-ONLY WITH RESPECT TO EVERY DECISION. Nothing that computes a gate, a score, a
+-- coverage count or an evidence verdict reads this table, and H:judge-outcome-not-gating asserts it.
+create table if not exists judge_outcome (
+  id           bigserial primary key,
+  opp_id       uuid not null references opportunity(id) on delete cascade,
+  -- Provenance only, NEVER identity - the same discipline requirement_coverage.artifact_id carries.
+  -- Nullable because the support judge runs inside writeEvidence, which is opportunity-scoped and
+  -- has no artifact.
+  artifact_id  uuid references artifact(id) on delete set null,
+  -- The check run this belongs to, so "for THIS run" is answerable. Null for writeEvidence, which
+  -- has no run_id today; that absence is a fact about the caller, not a missing value.
+  run_id       uuid,
+  judge        text not null check (judge in ('coverage','support','stuffing','escalation')),
+  -- The EXACT strings the in-memory tallies already use - transport_failed, cap, cache_failed,
+  -- write_failed, refused, unanswered, support_span_disagreed, support_<refusal>, invoked, calls,
+  -- cache_hits, hits. Not a new vocabulary: a new one would have to be kept in step with the old.
+  outcome_kind text not null check (outcome_kind <> ''),
+  -- Always positive. A zero row would say "this happened, none of the time", which is what the
+  -- ABSENCE of a row already says, and two encodings of one fact is how a count comes to disagree
+  -- with itself.
+  count        int not null default 1 check (count > 0),
+  created_at   timestamptz not null default now()
+);
+-- The two reads this table is for: everything about one opportunity, newest first, and everything
+-- about one check run.
+create index if not exists judge_outcome_opp_idx on judge_outcome (opp_id, created_at desc);
+create index if not exists judge_outcome_run_idx on judge_outcome (run_id);
+
+-- usage_metering SEES A FAILED CALL NOW, and this column is why.
+--
+-- logUsage is called AFTER openAiJson's "if (!r.ok) throw", so a transport failure recorded NOTHING
+-- - not a failed row, no row at all. That is the same success-is-visible-failure-is-not shape as the
+-- three judges, one layer lower. 'ok' is the correct default for every row already in the table:
+-- each was written by the success path, which is what those rows have always meant.
+alter table usage_metering add column if not exists outcome text not null default 'ok';
 `;
 
 // Tables we expect to exist after migration (used by the runner to report).
@@ -1748,5 +1823,8 @@ export const EXPECTED_TABLES = [
   'skill_candidate', 'swap_decision', 'insertion', 'check_result', 'artifact_gate', 'artifact_score', 'owner_fact', 'review_verdict',
   'remediation_loop', 'escalation', 'requirement_evidence', 'comparison_dimension',
   'packet_build_job', 'evidence_confirmation', 'requirement_coverage',
-  'owner_master_block'
+  'owner_master_block',
+  // D1/H11 again: judge_outcome is a new store, so it is declared here or nothing proves the
+  // migration actually created it.
+  'judge_outcome'
 ]

@@ -42,18 +42,33 @@ export function openAiJson(opts: OpenAiCallOptions): FetchJson {
   return async (system: string, user: string): Promise<any> => {
     const key = process.env.OPENAI_API_KEY
     if (!key) throw new Error('OPENAI_API_KEY not set')
-    const r = await fetch('https://api.openai.com/v1/chat/completions', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
-      body: JSON.stringify({
-        model,
-        messages: [{ role: 'system', content: system }, { role: 'user', content: user }],
-        max_tokens: maxTokens,
-        temperature,
-        response_format: { type: 'json_object' },
-      }),
-    })
-    if (!r.ok) throw new Error(`OpenAI HTTP ${r.status}: ${(await r.text()).slice(0, 400)}`)
+    let r: Response
+    try {
+      r = await fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
+        body: JSON.stringify({
+          model,
+          messages: [{ role: 'system', content: system }, { role: 'user', content: user }],
+          max_tokens: maxTokens,
+          temperature,
+          response_format: { type: 'json_object' },
+        }),
+      })
+    } catch (e) {
+      // A CALL THAT NEVER LANDED IS STILL A CALL, and until this line it recorded nothing anywhere.
+      // `logUsage` sat AFTER the throw below, so a network failure produced ZERO usage_metering
+      // rows — not a failed one — and the ledger could describe only the calls that worked. The
+      // throw is unchanged and still reaches the caller: the caller must be able to tell "the model
+      // said no" from "we never reached the model", and that is exactly what this row now says too.
+      await logUsage(opts.feature, model, null, 'transport_failed')
+      throw e
+    }
+    if (!r.ok) {
+      const body = (await r.text()).slice(0, 400)
+      await logUsage(opts.feature, model, null, 'transport_failed')
+      throw new Error(`OpenAI HTTP ${r.status}: ${body}`)
+    }
     const raw = await r.json()
     // Metering is not optional and not the caller's to remember. A tier that can spend per
     // requirement is exactly the kind that must show up in `usage_metering` from its first call.

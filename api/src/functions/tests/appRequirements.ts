@@ -24,6 +24,9 @@ import { openAiJson, contentJson, type FetchJson } from './openaiJson'
 // IMPORTED, never redeclared — M3: the citation floors have one home (`reviewer.ts`), and the
 // escalation tier must clear the SAME floor the deterministic path does, not a copy of it.
 import { MIN_QUOTE_CHARS } from './reviewer'
+// INSTRUMENTATION ONLY, and it cannot throw. Nothing in this file reads back what it writes; see
+// judgeOutcome.ts and H:judge-outcome-not-gating.
+import { recordAndPrune } from './judgeOutcome'
 
 const HEADERS = { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': '*', 'Access-Control-Allow-Methods': 'GET,POST,OPTIONS' }
 
@@ -326,6 +329,10 @@ export async function writeEvidence(
   let escRefused = 0
   const escalation_refusals: Record<string, number> = {}
   const note = (k: string) => { escalation_refusals[k] = (escalation_refusals[k] || 0) + 1 }
+  // HOW MANY TIMES THE SECOND READ WAS ACTUALLY ASKED. `escalation_refusals` counts only what went
+  // WRONG, so "the support judge ran and every attempt failed" and "the support judge was never
+  // asked" produced the same evidence: nothing. Counting the attempts is what separates them.
+  let supportAttempts = 0
 
   // THREE conditions, all required. The owner's toggle is opt-in and its unconfigured state is OFF
   // (`resolveOptionsFrom`), and the transport must have been passed in — so no caller reaches the
@@ -428,6 +435,7 @@ export async function writeEvidence(
       let method = e.method
       let extra = e.extra
       if (opts.vetProposals) {
+        supportAttempts++
         try {
           const v = parseSupportVerdict(
             contentJson(await fetchJson(SUPPORT_SYSTEM, buildSupportUser(requirement, rec.text))), rec.text)
@@ -478,6 +486,39 @@ export async function writeEvidence(
   // refusals are counted in `escRefused` and reported through `escalation_refusals`; they never
   // reduce a number they are not part of.
   const evidenced = resolved.filter(r => r.evidence).length - refused
+
+  // THE SAME TALLY, STORED. `escalation_refusals` is returned in the HTTP body and then dies with
+  // the request — grep confirms nothing writes it to any table — so a run in which the second read
+  // disagreed with every proposal left no trace an hour later. This is a SECOND, structured view of
+  // the object above; the object itself is unchanged, because three tests and two callers read it.
+  //
+  // SPLIT BY WHICH MODEL PASS PRODUCED THE KEY, because they are two different judges sharing one
+  // dict: the `support_*` keys come from `supportJudge` (the second read that decides whether a
+  // proposal is VETTED), and everything else comes from `escalateOne` (the proposal pass itself).
+  // Filing them under one name would make a support outage look like an escalation outage.
+  //
+  // NON-FATAL AND AFTER EVERYTHING ELSE. `recordAndPrune` cannot throw, and by this line every
+  // deterministic row and every proposal is already committed, so an instrumentation failure costs
+  // the instrumentation and nothing else.
+  const supportOutcomes: Record<string, number> = {}
+  const escalationOutcomes: Record<string, number> = {}
+  for (const [k, n] of Object.entries(escalation_refusals)) {
+    if (k.startsWith('support_')) supportOutcomes[k] = n
+    else escalationOutcomes[k] = n
+  }
+  if (canEscalate) {
+    escalationOutcomes.invoked = 1
+    escalationOutcomes.escalated = escalated
+    escalationOutcomes.proposed = proposed
+  }
+  if (supportAttempts > 0) {
+    supportOutcomes.invoked = 1
+    supportOutcomes.attempts = supportAttempts
+    supportOutcomes.vetted = vetted
+  }
+  await recordAndPrune(client, { oppId, judge: 'escalation', outcomes: escalationOutcomes })
+  await recordAndPrune(client, { oppId, judge: 'support', outcomes: supportOutcomes })
+
   return {
     opp_id: oppId, total: rows.length,
     // Proposed rows ARE evidence — they are shown beside the requirement — so they count here. They

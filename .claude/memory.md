@@ -519,7 +519,91 @@ Key tables (PostgreSQL):
 - Android native testing: requires BrowserStack App Automate; CCR cannot run AVD (no KVM)
 - iOS testing: requires macOS runner or BrowserStack; categorically unavailable in Linux CCR
 
+## Hardening -- 2026-09-03: I asserted SELECTORS AND STRINGS FROM MEMORY, three times in one session
+Every `ui-verify` failure this session was MY INPUT, never the app. The app was correct all three
+times and the harness was right to refuse:
+
+| run | I passed | reality |
+|---|---|---|
+| 33735198012 | `expect "Keywords for this line"` | `innerText` returns RENDERED text; CSS uppercases it |
+| 33756564557 | `[data-qc="qc-go-to-field"]` on the RESUME route | that hook lives in `QcRail.jsx`, the QC step |
+| 33757673248 | `[data-qc="blocks-ask-assistant"]` | the hook is `blocks-forward-assistant` |
+
+Each cost a full dispatch-and-poll cycle, and each would have been settled by one grep taking
+seconds. The third is the worst: I had already read `BLOCK_HOOKS` earlier in the same session.
+
+**Guardrail: NEVER pass a selector or an expect string you have not just read out of the source.**
+Before dispatching `ui-verify`:
+
+    grep -n "<hook>:" app/src/*.js            # the hook's VALUE, not the name you remember
+    grep -rn "<hook name>" app/src/screens/   # and WHICH screen renders it
+
+And for `expect`: assert a `data-qc` COUNT rather than visible copy wherever possible. Copy is
+styled (`text-transform`), translated and edited; a hook is a contract. The one run that passed
+(33735472071, count 18) asserted a hook. Every run that failed asserted my memory.
+
+
+## Hardening -- 2026-09-03: a ONE-SHOT slot was carrying a binding that had to persist
+`assistantSeed` is a one-shot text slot -- `applySeed` clears it the instant the panel reads it,
+which is correct for the SENTENCE. The artifact was read off the SAME slot, so consuming the text
+unbound the panel. The fallback then required exactly one artifact on the step, and the resume step
+renders two (`resume` + `compact_resume`) -- **the step readers forward from most**. Live result
+(ui-verify **33757880817**): panel open, seeded text present, header "No asset open", Send DISABLED,
+defeating the seeder's own comment, *"never open a panel that cannot send"*.
+
+**The general shape, worth recognising elsewhere: a value with a SHORT lifetime and a value with a
+LONG lifetime sharing one slot.** The seed is consumed on read; the binding must survive until the
+reader moves on. Two lifetimes, two states. The fix also clears the binding on `activeStep` change,
+because the opposite failure -- a binding that outlives the step -- silently points the panel at a
+document the reader is not looking at, which is worse than refusing to send.
+
+**Neither bug was findable by reading, a unit test, or the DOM probe.** The probe mounts
+`AssistantPanel` directly with props, so it never exercises PacketBuilder's binding logic at all.
+Both needed the real app, on production, driven through two clicks. That is what `CLICK_SEL` as a
+sequence bought, and it paid for itself on its first two uses.
+
+## Hardening -- 2026-09-03: my own guards pinned a LITERAL, and broke on a rename
+Two guards written earlier the same session matched
+`setFieldFocus({ artifactId, section: section.trim() })` exactly. Refactoring the SAME behaviour to
+hoist `sec` broke both -- a guard that fails on a rename is noise, and the next person deletes it.
+Re-anchored: slice `seedAssistant`'s BODY out of the source, then assert the INVARIANT (a focus is
+written, and the write is conditional on a validated section). Any spelling passes; the defect does
+not. `H2` already says this -- *assert the invariant, not the incident* -- and I still wrote the
+incident twice.
+
+
 ## Active work
+**2026-09-03 - `ui-verify` CLICK_SEL IS A SEQUENCE, and it immediately found a real gap.** `main`
+`5b34b87`.
+
+`CLICK_SEL` is now `;`-separated and clicked IN ORDER (same separator `EXPECT` uses, so one selector
+with no `;` is unchanged). Proven live:
+`"[data-qc=\"qc-go-to-field\"] -> ok | [data-qc=\"assistant-open\"] -> ok"`.
+
+**Two bugs fixed on the way, and the second only existed because the first was built:**
+1. `locator.count()` DOES NOT WAIT. The old pre-check returned 0 for an element that had not
+   rendered yet - and step 2's target usually exists only BECAUSE step 1 fired. That 0 read as
+   `not found`, i.e. a harness race reported as an app gap. Each step now waits for its own target.
+2. **SPEC 4.11-4's field scope was effectively UNREACHABLE.** Only `goToField` wrote `fieldFocus`, so
+   a reader clicking "Ask the assistant" ON A FIELD got the asset scope. Measured live before the
+   fix (ui-verify **33756770327**): both clicks `ok`, picker still rendered **0 chips**. Fixed - both
+   seeders pass `row.merge_field`, `seedAssistant` writes the focus, and the section stays OPTIONAL
+   so a whole-asset ask cannot fabricate a field.
+
+## Hardening -- 2026-09-03: a source-grep guard matched a STRING that survived the defect
+Third time this session mutation-proving caught MY TEST rather than the code, and the sharpest one.
+The guard used `onSeedAssistant\([^)]*\)` plus `/row\.merge_field/`. **`[^)]*` stops at the FIRST
+`)`** - the one inside `fieldLabel(row.merge_field)` - so the FALLBACK STRING satisfied the match
+whether or not the ARGUMENT was passed. The guard would have gone green with the field dropped.
+`mutate.sh` reported `EQUIVALENT`; rewritten to assert the argument position (`, row.merge_field)`)
+it FIRED.
+**Guardrail: a source-grep guard must anchor on the CONSTRUCT it guards, never on a token that also
+appears in nearby prose or a fallback string.** `[^)]*` is not a call - it stops at the first nested
+paren. Split on the call name and inspect the argument list, or assert the argument position
+literally. This is the same class as `H2` ("precise enough never to cry wolf"), inverted: precise
+enough never to stay SILENT.
+
+
 **2026-09-03 - 4.11-4 BUILT AND DEPLOYED. PROTOTYPE COVERAGE IS 176 OF 176 (100%).** `main`
 `4da8696`. It was the last open row.
 
@@ -6600,6 +6684,149 @@ what it looks like where the fields are genuinely distinct (`@CoverLetterBody` v
   say "count Trinnex only" to stop it. **Guardrail: state the scope in the query itself (a `where`
   on packet or opp id), not in the prose around the result.**
 
+## 2026-09-03 — WHERE EACH JUDGE'S ANSWER ACTUALLY LANDS (read from the write paths, not grepped)
+
+I told the owner stuffingJudge and supportJudge have "no output table, so their yield cannot be
+measured at all." That came from ONE grep and it is wrong. Corrected by reading the writes:
+
+| judge | persisted where | queryable? |
+|---|---|---|
+| `coverageJudge` | `requirement_coverage`, own table, content-addressed `verdict_key` | fully |
+| `supportJudge` | `requirement_evidence.method='vetted'` + `vettedNote()` in `extra` (appRequirements.ts:432-441) | **wins only** |
+| `stuffingJudge` | merged into the ONE `posting_wording_kept` `check_result` (checks.ts:658-668); model-raised count lives in the message PROSE | **prose only** |
+
+**THE GAP, STATED CORRECTLY: both judges' successes are visible and both judges' FAILURES are not.**
+`support_span_disagreed`, `support_<refusal>` and `support_transport_failed` all go to
+`escalation_refusals` — an in-memory dict (appRequirements.ts:328) returned in the HTTP response and
+then dropped. A judge that stopped answering is indistinguishable from a judge that found nothing.
+
+**Guardrail earned:** "there is no output for X" is an ABSENCE claim and needs the write path read,
+not a filename grepped. The org rule already says never claim a capability is absent from a
+single-file grep; this is the same error against a data sink instead of a function.
+
+## The property that makes judge-trigger design easy (and why Trinnex read 71%)
+
+`verdict_key` digests requirement + field + field text + model + prompt version, and the insert is
+`on conflict do nothing`. **Re-judging unchanged text spends nothing.** Plus `chk_coverage_judge` is
+OFF by default. So a broader trigger is cheap by construction — the constraint was never cost, it
+was that **the only trigger in the system is a manual `POST /api/app/artifact/{id}/checks`, one
+artifact at a time.** Trinnex's cover, portfolio and compact_resume had simply never been asked.
+
+Proposed trigger points (owner delegated the design to me; ACs pending before any of it is built):
+artifact written (`pkg_json` changed), requirements re-extracted, and a QC-open top-up limited to
+requirements with no verdict.
+
+## 2026-09-03 — WHY TRINNEX READ 71%: a SETTINGS change, not a missing trigger (live DB, corrected twice)
+
+I told the owner twice and was wrong twice. Both corrections matter more than the original claim.
+
+**CORRECTION 1 — "the only trigger is a manual POST /api/app/artifact/{id}/checks" is FALSE.**
+`runPacketBuild` (appPackets.ts:1066) calls `evaluateArtifact` per artifact at **appPackets.ts:1189**
+and has since 2026-08-22; the comment there records why it was added (39 packets, 0 ever sent,
+because no built artifact had an `artifact_gate` row). **Build already judges.** I read appChecks.ts
+and never traced its CALLERS — the same single-source error the org rule already forbids, applied to
+a call graph instead of a grep.
+
+**CORRECTION 2 — my replacement proposal ("judge when artifact text is written") would NOT have
+fixed Trinnex either.** Disproved by the data below: the text never changed.
+
+**THE ACTUAL CAUSE, from the live DB** (packet `85cee965-f435-4b8e-910f-c806232092ce`),
+`check_result` runs grouped by type and minute:
+
+| when | ran |
+|---|---|
+| 08-22 23:29, 08-22 23:56, 08-23 02:26, 08-23 02:46, 08-28 02:51, 08-29 15:47 | **all four types** |
+| 09-01 15:39, 09-01 16:47, 09-02 15:49, 09-02 15:50 | **resume ONLY** |
+| 09-03 08:07 | cover, compact_resume, portfolio — me, manually |
+
+`owner_search_prefs` (NOT `check_prefs` — that table does not exist) for von.ellis@enterpriseds.io:
+`chk_coverage_judge = true`, `chk_coverage_judge_max = 12`, **`updated_at = 2026-09-02 15:45:28`**.
+
+The resume was re-checked at 15:49, four minutes after the toggle — hence its 201 verdicts. The other
+three still carried their **08-29** results, computed while the judge was OFF. Their text never
+changed; their questions were never asked.
+
+**THE DEFECT, STATED PROPERLY: a settings change neither invalidates nor re-runs prior check results,
+and nothing records which configuration an artifact was evaluated under.** A coverage number can be
+computed under a config that no longer exists with nothing on screen saying so. That is invisible
+staleness, not a missing trigger.
+
+Fork sent to the AC pass: (i) re-run on settings change — fixes it automatically, but a toggle could
+burst across every artifact of every packet; (ii) stamp each run with a config digest and surface
+"evaluated under older settings" — near-zero cost, owner acts. Not decided.
+
+**The five post-build `pkg_json` writers are a REAL but LESSER issue** (verdict_key digests field
+text, so an owner edit makes the verdict stop matching and the field reads unjudged):
+`artifactContent` (appPackets:1491), `artifactAiEdit` (appPackets:1549), `artifactRemediate`
+(appRemediation:266), `artifactOwnerEdit` (appCorrections:368), `correctionRevert`
+(appCorrections:283) — plus `ensurePackage` (appPackets:626) which is the build. Six writers, each
+running its own `update packet set pkg_json`; no shared funnel.
+
+## All THREE judges lose their failures, not two (independent AC subagent, verified by me)
+
+`evaluateArtifact` returns `judge: { ...failures: string[] }`. Three callers; only the manual HTTP
+route (appChecks.ts:368) reads it. `appPackets.ts:1189` discards the return entirely;
+`appRemediation.ts:185,272` bind it but touch only `.results`. So coverageJudge's transport errors,
+refusals, cap-hits and unanswered requirements vanish exactly as supportJudge's and stuffingJudge's
+do. **Verified by reading all three call sites, not taken on the subagent's word.**
+
+Also verified: `openaiJson.ts` throws on `!r.ok` at line 56 and calls `logUsage` at line 60 — so
+**a transport failure writes ZERO metering rows.** The shared usage ledger cannot see an outage.
+
+**Guardrail earned (second time this session for the same shape):** an absence claim about behaviour
+needs the CALL GRAPH walked, not the defining module read. "Nothing triggers X" is disproved by one
+caller, and there was one.
+
+## 2026-09-03 — AN ARTIFACT REACHES `review` UNCHECKED, and it is the RENDER route (corrected 3x)
+
+**THE FINDING SURVIVED THREE OF MY OWN WRONG ATTRIBUTIONS. Only the culprit changed.**
+
+`POST /api/app/artifact/{id}/document` (appPackets.ts:821) and `POST .../slides` (:901) both call
+`buildTemplatedArtifact`, whose render write at **appPackets.ts:802** is:
+
+    update artifact set doc_url=$1, content = coalesce(nullif(content,''), $2), template_id=$3,
+      status = case when status = 'todo' then 'review' else status end, updated_at=now() where id=$4
+
+It flips the artifact to **`review`** and `evaluateArtifact` is never called anywhere in 815-1000
+(verified by an awk sweep of that range). **So an artifact can be put in front of the owner marked
+ready-to-review with no gate row, no check results and no verdicts.**
+
+**LIVE PROOF — packet `487cb017`, the only packet created since build-judging landed on main
+(commit `4a0b961`, 2026-08-26; the comment's "Measured live 2026-08-22" is the MEASUREMENT date, not
+the commit date):**
+
+| type | status | content | doc_url | template_id | version_history | checks |
+|---|---|---|---|---|---|---|
+| resume | **review** | 4347 | yes | yes | **[]** | **0** |
+| portfolio | **review** | 2954 | yes | yes | **[]** | **0** |
+| cover / compact_resume / video | todo | 0 | no | no | [] | 0 |
+
+`packet.pkg_json` NULL.
+
+**MY WRONG ATTRIBUTION, and the single column that refuted it.** I said this was `artifactGenerate`
+(appPackets.ts:272). The AC subagent refuted it and I confirmed the refutation independently:
+`artifactGenerate`'s write at :302 appends to `version_history` UNCONDITIONALLY
+(`coalesce(version_history,'[]') || jsonb_build_object('len',$2)`), so `version_history = []` is
+proof it never ran. The row shape that IS present — doc_url + template_id + content via
+`coalesce(nullif(content,''), preview)` + untouched version_history — matches :802 exactly.
+
+**CORPUS (live):** 200 artifacts, **8 ever checked**. 40 packets, **2 ever checked**.
+`requirement_coverage` = 813 verdicts across **2** opportunities, against 14,632 requirements across
+976. Judging has effectively run on two packets, ever.
+
+**Consequence for "build already judges":** true in code (runPacketBuild -> evaluateArtifact,
+appPackets.ts:1189) and it has **never demonstrably executed in production** — the one packet built
+since it landed has zero check rows. It needs a proof-of-life test, not just a regression guard.
+
+**Also refuted by the AC pass, correctly:** only 4 of the 6 pkg_json writers are real gaps —
+`ensurePackage` and `artifactRemediate` already call `evaluateArtifact`. Real gaps:
+`artifactContent`, `artifactAiEdit`, `artifactOwnerEdit`, `correctionRevert`. And my "undo is free"
+claim holds ONLY for owner-edit reverts, not for build-time-correction reverts, which predate the
+first pkg_json persist.
+
+**Guardrail: a DB row's SHAPE identifies its writer better than my reading of the code does.** One
+unconditional-append column settled an attribution I had argued from behaviour. When attributing a
+row to a code path, find the column that path always touches and check it.
 ### The deploy gate was vacuous, and `owner_master_block` is now LIVE (2026-09-03)
 
 **What was broken.** `api-deploy.yml` polls `/api/health` for the sha it just deployed before letting
@@ -6656,6 +6883,81 @@ is the first deploy with a stamp on both sides, and the first to wait.
 - `H:deploy-sha-comes-from-the-bundle` -- health must report the compiled sha, and must not name
   `DEPLOYED_SHA` at all so the fallback cannot be reintroduced at the call site.
 
+## 2026-09-03 — EIGHT writers reached `review` unchecked, not one. Lane 1 shipped.
+
+`recheckAfterTextWrite` (new module `api/src/functions/tests/appRecheck.ts`) is now the ONE funnel
+every artifact-text writer calls. It cannot live in `appChecks.ts` or `appPackets.ts`: `appChecks:19`
+imports `listCorrections` from `appCorrections` and `appPackets:16` imports `applyCorrectionPass`
+from it, so either home creates `appCorrections -> X -> appCorrections`. It resolves
+`evaluateArtifact` by dynamic import — verified lazy in the emitted JS.
+
+| writer | file | was |
+|---|---|---|
+| render root (`buildTemplatedArtifact`, serving `/document` + `/slides`) | appPackets | UNCHECKED |
+| `artifactGenerate` | appPackets:306 | UNCHECKED — the **eighth**, found after the first seven |
+| `artifactContent`, `artifactAiEdit` | appPackets | no recheck |
+| `artifactOwnerEdit`, `correctionRevert` | appCorrections | no recheck |
+| `ensurePackage`/`runPacketBuild`, `artifactRemediate` | — | already evaluated; deliberately untouched |
+
+**A DEPARTURE FROM THE AC RULING, and it was right.** The AC pass said to delete `runPacketBuild`'s
+own `evaluateArtifact` once the render root checked. Lane 1 refused and passed `{check:false}`
+instead, because the build loop renders at `:1139` but `resolveEvidenceForOpp` only runs at `:1175` —
+checking at the render root would grade every build against `requirement_evidence` rows that do not
+exist yet. One evaluation per artifact per build, correctly ordered. **An AC ruling is a strong prior,
+not an instruction: the implementer holds the ordering facts the AC reader does not.**
+
+**Non-fatal everywhere.** A render or a save must never fail because checking failed; failures come
+back as `checksStale`/`checksError` beside `ok:true`. The two writers owning a transaction recheck
+AFTER commit — inside it, `evaluateArtifact`'s own begin/commit nests on one connection and a
+checking failure would roll back the very edit it is checking.
+
+## Hardening
+
+- **`mutate.sh`'s THIRD outcome earned itself, live, today.** My first M1 anchor grabbed four COMMENT
+  lines instead of the code at `:852`. The run reported **INERT** — honest, since the mutation did
+  apply and was behaviourally equivalent — and its own message told me to check for equivalence
+  before rewriting the guard. Re-anchored on the real block: **FIRED**. A two-outcome harness would
+  have said "your guard protects nothing" about a guard that is real. **Guardrail: when a mutation
+  reports INERT, re-read the anchor before you touch the guard.**
+- **`git status --short` before `git add`, when a lane is running.** Committing by explicit path kept
+  Lane 2's six in-flight files out of Lane 1's commit. `git add -A` would have committed another
+  agent's half-finished work under my message.
+
+## 2026-09-03 — Lane 2 shipped: a judge that STOPPED ANSWERING is no longer invisible
+
+New `judge_outcome` sink + two routes. All three judges recorded wins and dropped losses; the losses
+are the half worth seeing, because a dead judge and a judge that found nothing looked identical.
+
+**`usage_metering` never saw a transport failure** — `logUsage` sat AFTER the `!r.ok` throw in
+`openaiJson.ts`, so a network failure produced ZERO rows, not a failed one. The ledger could only
+describe the calls that worked. Fixed on both the throw path and the `!r.ok` path.
+
+**Two deviations from the ACs, both right.** (1) A3 is satisfied at OPPORTUNITY level, not
+requirement level — the AC's own `H:judge-outcome-volume-bounded` slug forbids per-requirement rows,
+so the two ACs contradicted each other and the volume bound wins. (2) The `judge` CHECK domain has
+FOUR values, not three: `escalation_refusals` is fed by two different model passes, and filing
+`escalateOne`'s failures under `support` would make an escalation outage look like a support outage.
+
+**Schema EXECUTED against a POPULATED database**, per the strict rule: main's SCHEMA_SQL applied to a
+fresh DB, seeded with real rows including a pre-existing `usage_metering` row, then this branch's
+applied on top — psql exit 0, and 0 again on a second apply. `to_regclass('judge_outcome')` was NULL
+beforehand, so the create was not skipped. The populated run proved what a fresh one cannot: the
+`not null default` ALTER BACKFILLED the existing row.
+
+Verified independently by me, not taken from the lane's report: build clean, hardening **159/159**,
+full suite **1082/1082**.
+
+## Hardening
+
+- **`mutate.sh` has a FOURTH outcome and it fired today: `UNDETERMINED`.** Deleting the sink call
+  made the suite fail — but under `H:judge-outcome-not-gating`, not the guard I named. The script
+  refused to credit it: *"a DIFFERENT test failed, so this run says nothing about your guard.
+  NOTHING IS PROVEN."* A harness that only checked the exit code would have reported my mutation
+  proven by an unrelated failure. **Guardrail: a red suite is not proof your guard caught anything —
+  the FAILING TEST'S NAME must be the one you claimed.** Re-run against the right name: FIRED.
+- **Second anchor lesson in one session.** Both non-FIRED results today were mine, not the guards':
+  one anchor on comment lines (INERT), one guard name that did not match the catching test
+  (UNDETERMINED). The guards were real in both cases.
 ### MasterContext CUT OVER — the app now reads the master profile from Postgres (2026-09-03)
 `MASTERCONTEXT_SOURCE=postgres`, declared in `api-deploy.yml` so the store is in the repo and
 diffable rather than a hand-set portal value. Landed `0da39b2`, deploy 33756518549 success.

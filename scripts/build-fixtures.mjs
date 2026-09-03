@@ -192,6 +192,10 @@ if (raw.apiRemediation) {
   for (const [aid, body] of Object.entries(raw.apiRemediation)) f[`/artifact/${aid}/remediation`] = body
 }
 if (raw.apiSkillBank) f['/skill-bank'] = raw.apiSkillBank
+if (raw.apiPacketAnalysis && raw.apiPacketAnalysis.id) {
+  f[`/packet/${raw.apiPacketAnalysis.id}/analysis`] = raw.apiPacketAnalysis.body
+}
+if (raw.apiConfigTemplates) f['/config/templates'] = raw.apiConfigTemplates
 
 if (raw.apiOpportunity) {
   f[`/opportunity/${OPP}`] = raw.apiOpportunity
