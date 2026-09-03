@@ -240,8 +240,13 @@ jobs:
           # carries `comparison`, whose absence silently disarms the compare surface, so it fails
           # the run. These are additive: a 404 means the route does not exist yet on the deployed
           # Function, which must not block refreshing everything else. Each miss is printed.
-          def capture(path):
-              u = f'https://job-platform-api.azurewebsites.net/api/app/{path}'
+          # `app_scoped=False` for routes that are NOT under /api/app/. This defaulted to always
+          # prefixing `app/` and `/config/templates` 404'd silently into the miss list -- the app
+          # calls `/api/config/templates`, and I read the unmatched URL with `/api/` stripped and
+          # did not notice the missing segment. Read the whole path, not the tail.
+          def capture(path, app_scoped=True):
+              base = 'https://job-platform-api.azurewebsites.net/api/'
+              u = f'{base}app/{path}' if app_scoped else f'{base}{path}'
               u += ('&' if '?' in u else '?') + 'owner=' + urllib.parse.quote(owner)
               rq = urllib.request.Request(u, headers={'Authorization': f'Bearer {token}'})
               try:
@@ -286,7 +291,7 @@ jobs:
                   dump['apiPacketAnalysis'] = {'id': pk_id, 'body': b}
                   print('captured /packet/{id}/analysis')
 
-          b, err = capture('config/templates')
+          b, err = capture('config/templates', app_scoped=False)
           if err: missed.append(f'config/templates: {err}')
           else:
               dump['apiConfigTemplates'] = b
