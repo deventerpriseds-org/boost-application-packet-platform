@@ -33,7 +33,9 @@ import { parseResumePackage, headingKeysFor } from '../dist/functions/tests/resu
 import { validateCitations, reviewerChecks, agreementFor } from '../dist/functions/tests/reviewer.js'
 import { extractFigures, scanEcho, claimKey, isMarked, generalize } from '../dist/functions/tests/figureEcho.js'
 import { planCorrections } from '../dist/functions/tests/correction.js'
-import { profileRecords, resolveEvidence } from '../dist/functions/tests/evidence.js'
+// MC_KIND joins this import so H:mastercontext-block-key-domain compares the SQL CHECK against
+// the module that OWNS the block list, never against a literal retyped in the test.
+import { profileRecords, resolveEvidence, MC_KIND } from '../dist/functions/tests/evidence.js'
 
 const SRC = new URL('../src/functions/tests/', import.meta.url).pathname
 const src = (f) => readFileSync(join(SRC, f), 'utf8')
@@ -5642,4 +5644,32 @@ test('H:mastercontext-one-accessor: only masterContext.ts reads the MasterContex
     `these product files read the MasterContext partition directly instead of calling ` +
     `readMasterContextEntity() from masterContext.ts: ${offenders.join(', ')}. ` +
     `Every raw read is one more file the store-swap has to touch at once.`)
+})
+
+// H:mastercontext-block-key-domain -- the SQL CHECK and MC_KIND cannot drift apart.
+//
+// `owner_master_block.block_key` is constrained to the blocks the owner's master profile actually
+// has, and `MC_KIND` (evidence.ts) is already the ONE place that knows what that set is -- its own
+// comment calls itself "the second lock on the same door" for `itemsToOmit`, the BANNED list that
+// must never become storable. Two homes for one list is the drift this repo keeps paying for, so
+// this reads the domain out of SCHEMA_SQL and compares it to the module rather than to a literal
+// retyped here (a retyped literal agrees with whichever side someone edited last).
+//
+// PROVEN AGAINST A REAL DATABASE, 2026-09-03, main's schema applied to a populated db then this
+// branch's on top (psql exit 0): inserting block_key 'skills1' succeeded, inserting 'itemsToOmit'
+// was REJECTED by owner_master_block_key_check, and the same key under two owner_emails coexisted.
+//
+// MUTATION that must make this FIRE: add a 15th key to MC_KIND in evidence.ts without widening the
+// CHECK in schema.ts (or drop one value from the CHECK).
+test('H:mastercontext-block-key-domain: the block_key CHECK matches MC_KIND exactly', () => {
+  const m = /alter table owner_master_block add constraint owner_master_block_key_check\s*\n?\s*check \(block_key in \(([\s\S]*?)\)\)/
+    .exec(src('schema.ts'))
+  assert.ok(m, 'the owner_master_block_key_check CHECK is missing from SCHEMA_SQL')
+  const inSql = [...m[1].matchAll(/'([^']+)'/g)].map((x) => x[1]).sort()
+  const inModule = Object.keys(MC_KIND).sort()
+  assert.deepEqual(inSql, inModule,
+    `the block_key CHECK and MC_KIND disagree. Only in SQL: ` +
+    `${inSql.filter((k) => !inModule.includes(k))}; only in MC_KIND: ` +
+    `${inModule.filter((k) => !inSql.includes(k))}. A block the module knows but the database ` +
+    `rejects is a row the migration silently drops.`)
 })

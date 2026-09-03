@@ -1691,6 +1691,50 @@ alter table evidence_confirmation add column if not exists missing text[];
 -- ruleEvidenceOf needs on every check run.
 create index if not exists evidence_confirmation_decision_idx
   on evidence_confirmation (opp_id, decision, withdrawn_at);
+
+-- ── owner_master_block ──────────────────────────────────────────────────────────────────────────
+-- THE OWNER'S MASTER PROFILE, MOVED OUT OF AZURE STORAGE.
+--
+-- It lived in the MasterContext Storage table under ONE GLOBAL PARTITION -- a single row for
+-- everybody -- while all 30 tables in this schema are keyed on owner_email. That is a data
+-- separation defect the moment a second owner exists, and diagSkillSources.ts already flagged it
+-- in its own comment as "a defect to inherit rather than invent".
+--
+-- IT IS A COPY, NOT A SYNC, and the owner settled why (2026-09-03): *"it was a one time update that
+-- seeds the storage it never gets updated or overwritten"* and *"storage will just be a backup once
+-- copy to postgres is done"*. Corroborated in code the same day -- ten Storage writers exist in this
+-- repo and NOT ONE targets the 'context' partition. With no second writer there is no dual-write
+-- window, no staleness digest and nothing to reconcile. The Storage row and its reading code stay
+-- in place afterwards as a cold backup (AC-9); deleting them is a separate, later, approved commit.
+--
+-- ONE ROW PER BLOCK rather than one row with fourteen columns. The blocks are exactly the keys
+-- MC_KIND enumerates in evidence.ts, which is already the ONE place that knows what this data
+-- holds -- a column per block would make that map and this table two homes for the same list, and
+-- adding a block would then be a migration instead of an insert.
+create table if not exists owner_master_block (
+  owner_email text        not null,
+  block_key   text        not null,
+  -- '' is a real state: a block the owner has deliberately emptied. NULL would be "never set", and
+  -- the two must not collapse -- the same absent-evidence-is-not-a-value rule the checks obey.
+  text        text        not null default '',
+  updated_at  timestamptz not null default now(),
+  primary key (owner_email, block_key)
+);
+
+-- THE DOMAIN IS CHECKED, and H:mastercontext-block-key-domain compares this list against
+-- Object.keys(MC_KIND) read from the module rather than against a literal retyped in the test --
+-- so the two cannot drift, and adding a block to MC_KIND without widening this CHECK fails the
+-- suite by name. itemsToOmit is absent on purpose and must stay absent: it is what the owner has
+-- BANNED, and MC_KIND's own comment calls it "the second lock on the same door".
+-- DROP-THEN-ADD per this file's rule: add constraint is not idempotent.
+alter table owner_master_block drop constraint if exists owner_master_block_key_check;
+do $$ begin
+  alter table owner_master_block add constraint owner_master_block_key_check
+    check (block_key in (
+      'workHistory1','workHistory2','workHistory3','workHistory4',
+      'coreAccomplishments','resumeSummary','skills1','skills2','expertise',
+      'relevantProficiencies','aboutMe1','aboutMe2','executiveProfile','softHardSkillsPool'));
+exception when undefined_table then null; end $$;
 `;
 
 // Tables we expect to exist after migration (used by the runner to report).
