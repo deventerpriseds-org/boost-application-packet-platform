@@ -32,6 +32,7 @@ jobs:
           AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
           AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
           AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+          SESSION_SIGNING_SECRET: ${{ secrets.SESSION_SIGNING_SECRET }}
           API_METHOD: ${{ github.event.inputs.method }}
           API_PATH: ${{ github.event.inputs.path }}
           API_BODY: ${{ github.event.inputs.body }}
@@ -41,15 +42,21 @@ jobs:
           python3 - <<'PYEOF'
           import os, json, urllib.request, urllib.parse, hmac, hashlib, base64, time, re
 
-          client_secret = os.environ['AZURE_CLIENT_SECRET']
+          # Mirror appSession.ts secret() EXACTLY: SESSION_SIGNING_SECRET first, else the Graph app
+          # secret. Mirroring the PRECEDENCE (rather than switching to the new name) is what removes
+          # the flag day -- this workflow keeps verifying before the secret exists AND after it is
+          # set, with no coordinated rollout. If it only used the new name it would break every
+          # dispatch until the secret was created; if it kept only the old name it would break every
+          # dispatch the moment the secret WAS created.
+          client_secret = os.environ.get('SESSION_SIGNING_SECRET') or os.environ['AZURE_CLIENT_SECRET']
           method = os.environ.get('API_METHOD', 'GET')
           path = os.environ['API_PATH']
           body = os.environ.get('API_BODY', '')
 
           # Mint a server-verified session token (same scheme as the API's signSession):
           # HMAC-SHA256 over base64url(header).base64url(payload) with the app's signing secret.
-          # The Function signs with SESSION_SIGNING_SECRET || MICROSOFT_CLIENT_SECRET (== AZURE_CLIENT_SECRET,
-          # which we have here), so this token verifies server-side and marks the request as an
+          # The Function signs with SESSION_SIGNING_SECRET || MICROSOFT_CLIENT_SECRET (== AZURE_CLIENT_SECRET);
+          # the resolution above matches that order, so this token verifies server-side and marks the request as an
           # authenticated owner — programmatic testing without an interactive OAuth sign-in. The owner
           # is taken from ?owner= in the path (default: the production owner).
           def b64url(b):

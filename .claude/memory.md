@@ -573,6 +573,90 @@ incident twice.
 
 
 ## Active work
+**2026-09-03 - I CONFLATED BOOST'S ConvAI VOICE BRIDGE WITH HUDDLE'S VOICE CALLS, and started
+building on it.** The owner said *"voicecalls work fine"* -- about HUDDLE. I took it as clearance and
+began implementing a shared-secret guard on BOOST's `/api/app/voice/chat`, its ElevenLabs ConvAI
+custom-LLM endpoint. Different systems. I compounded it by designing the guard from TAVILY SEARCH
+RESULTS describing the ConvAI `custom_llm` schema rather than from running code. The owner stopped
+me: *"the convo AI is a wild goose chase... don't move forward until you've researched how huddle
+agents work and the current model, text and voice settings."* Reverted before any commit; S2
+(`9d0788e`) and S3 (`8c94fd9`) are untouched and remain valid.
+
+**The tell:** I was about to write a literal (a header name) into a system I had not read, sourced
+from a web search -- the "NEVER TYPE A LITERAL THAT MUST EXIST IN SOMETHING YOU HAVE NOT READ" rule,
+with the weakest possible source.
+
+**HOW HUDDLE ACTUALLY RUNS, from source at `3148bcd`** -- what I should have established first:
+
+| | Text message | Voice call |
+|---|---|---|
+| Engine | `runHuddleTurn`, per-agent backend fork (`huddle.functions.ts:2881`) | OpenAI Realtime over WebRTC |
+| Model | `openai` or `lovable`, **defaulting to lovable** (`:1900`) | `REALTIME_MODEL = "gpt-realtime"` (`realtime.functions.ts:21`) |
+| Writes the reply | the app's own pipeline | **Realtime itself** -- `create_response: true` (`:110`) |
+| Voice | none -- text NEVER calls TTS | ElevenLabs `eleven_flash_v2_5` (`elevenlabs.server.ts:166`), cloned per agent |
+
+Realtime is minted `output_modalities: ["text"]` (`:89`), so OpenAI writes text and ElevenLabs speaks
+it; transcription is `gpt-4o-mini-transcribe`. And `agentsCfg = data.agents ?? {}` (`:856`) -- the
+per-agent backend config arrives in the REQUEST PAYLOAD from the client, not from server settings,
+so any per-agent toggle must live where that payload is built.
+
+**THE FINDING THAT CHANGES THE COLE BRIDGE SPEC — a FIFTH registration site.** A voice call does
+**not** pass through `runHuddleTurn`; it carries its own toolset (`realtime.functions.ts:116` <-
+`realtime-tools.server.ts`). A Boost tool registered only at the four text dispatch sites would work
+when the owner TYPES to Cole and **silently not exist when he TALKS to him** -- the worst failure
+shape, because it reads as the agent choosing not to use the tool rather than as a missing wire.
+`COLE_BRIDGE_SPEC_v2.md` H2 mentions voice as a trailing clause; it is load-bearing.
+
+**Still open, deliberately not asserted:** whether Huddle's own ConvAI code (`/v1/convai/agents`,
+`get-signed-url` in `elevenlabs.server.ts`) is LIVE or dead scaffolding. That is the real question
+behind the owner's remark; a background pass is tracing every caller.
+
+**2026-09-03 - TWO AUTH BYPASSES FOUND ON THE COACH ROUTES. Both read in source, neither exploited.**
+Found while auditing an inherited feature spec, not while looking for them. Recorded here because the
+second one makes an innocuous-looking change dangerous, and the next session will not see that from
+the diff.
+
+1. **`requireWrite` is bypassable on `/api/app/coach/chat` via the request BODY.** `resolveOwner`'s
+   fallback reads only the query string - `appSession.ts:63`, `{ owner: req.query.get('owner') ||
+   DEMO_EMAIL, verified: false }` - so with no Bearer and no `?owner=` the guard sees the demo owner
+   and returns null (allowed). The handler then takes `body?.owner` (`coachAgent.ts:198`). Net: an
+   `owner` in the JSON body runs the full coach as that account. The guard's own comment claims it
+   "closes the ?owner= spoof"; it closes the query-string one only. Same shape at `:334` and `:380`.
+2. **`/api/app/voice/chat` has NO guard at all.** Registered `authLevel:'anonymous'`
+   (`appVoice.ts:120`); the file contains zero `requireWrite`/`resolveOwner` calls. Anonymous access
+   to all 48 coach tools, `send_outreach` (real Graph email) included.
+
+**THE COMPOSITION IS THE FINDING, and it inverts an obvious-looking fix.** Bypass 2 is harmless
+TODAY only because `VOICE_OWNER` (`appVoice.ts:87`,
+`process.env.VOICE_DEFAULT_OWNER || 'voice@executive-engine.local'`) points at an account with no
+data. The inherited spec's item C says to replace that placeholder with the real user - which, with
+no guard added, converts a harmless misconfiguration into anonymous internet access to the real
+account. **Guard first, identity second. Never the reverse.** Tracked as `ACT:coach-auth-bypass`.
+
+**Also found, and worth knowing before anyone builds on them:** the coach has exactly **48** tools
+(not the "~50" the spec claims); `gpt-4o` is NOT fixed in code though `maxHops = 8` is
+(`coachAgent.ts:141`); `coach_config` is a **single global row** (`id INT PRIMARY KEY DEFAULT 1`, no
+owner column) shared with the voice path, so a per-owner prompt overlay is a schema change rather
+than a param; and **`coach_triples` is created but never read or written** while the system prompt
+(`:23`) and `Settings.jsx:1042` both tell users it holds a knowledge graph.
+
+**The deep-link contract in that spec is REFUTED, and the reason generalises.** The product frontend
+is HASH-routed (`app/src/state.jsx:21`, default `#/today`; `go()` at `:32` sets
+`window.location.hash`), and `app/src/shell.jsx`'s NAV defines flat collection routes only - a grep
+for `'/<seg>/:<param>'` in `app/src` returns nothing. So `/pipeline/{id}` and `/packets/{id}` are
+not routes with or without the `#`. Any instruction telling the coach to emit those URLs produces
+confidently-broken links, which is worse than emitting none. Full corrected spec:
+`docs/COLE_BRIDGE_SPEC_v2.md`; evidence `docs/spec-research/`.
+
+**Calibration lesson from the same pass, logged because I got it wrong twice in opposite
+directions.** On whether Boost and Huddle share an Entra tenant: `api-deploy.yml:82` shows Boost
+deployed on `ee633423`; Huddle's `.env:2` shows `b9791c7d`, but that is LOCAL DEV, and
+`deploy-swa.yml:199` bakes `VITE_ENTRA_TENANT_ID=${AZURE_TENANT_ID}` into the deployed build. Three
+artefacts, each authoritative-looking alone. I asserted "same tenant" from two of them, then nearly
+asserted "different tenants" from the third. **Correct verdict: UNDETERMINED**, high confidence they
+match in production by inference from the org secret - not an observation. It gates nothing, because
+the recommended transport is the shared secret that sidesteps tenant identity entirely.
+
 **2026-09-03 - `ui-verify` CLICK_SEL IS A SEQUENCE, and it immediately found a real gap.** `main`
 `5b34b87`.
 

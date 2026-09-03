@@ -75,6 +75,35 @@ export function requireWrite(req: HttpRequest): HttpResponseInit | null {
   return { status: 401, headers: HEADERS, jsonBody: { error: 'sign in required to modify this workspace', owner } }
 }
 
+// Guard for a mutation whose BODY may carry a client-asserted `owner`.
+//
+// WHY THIS EXISTS, and why requireWrite() alone was not enough. resolveOwner() reads identity from
+// the Bearer token, the UAT header, or the ?owner= QUERY STRING — it never sees the request body.
+// Three coach handlers then did `_ro.verified ? _ro.owner : (body?.owner || DEMO_EMAIL)`, taking an
+// owner the guard had never inspected. So a request with no Bearer, no ?owner= and
+// {"owner":"real-user@..."} in the JSON body passed requireWrite() on the demo branch and then ran
+// as that real account. The guard's own comment claimed it closed the ?owner= spoof; it closed the
+// query-string one only.
+//
+// The fix is structural rather than a patched comparison: the guard and the handler now derive the
+// owner from ONE function, so they cannot disagree again. A body that ASSERTS a non-demo owner
+// without verification is rejected outright rather than silently downgraded to demo — 401 is also
+// the self-healing answer, because the app registers an on-401 session refresher (app/src/api.js)
+// that re-mints the token and retries the same request.
+//
+// Returns { reject } to return immediately, or { owner } to proceed with THAT owner.
+export function resolveOwnerForWrite(req: HttpRequest, body: any): { owner?: string; reject?: HttpResponseInit } {
+  const guard = requireWrite(req)
+  if (guard) return { reject: guard }
+  const { owner, verified } = resolveOwner(req)
+  if (verified) return { owner }               // a verified session always wins over the body
+  const claimed = (body?.owner ?? '').toString().trim()
+  if (claimed && claimed !== owner) {
+    return { reject: { status: 401, headers: HEADERS, jsonBody: { error: 'sign in required to modify this workspace', owner } } }
+  }
+  return { owner }
+}
+
 // Standard 5xx for a genuine server/integration failure (DB down, upstream error, unexpected
 // exception). Use in catch blocks instead of returning 200-with-error so uptime monitors and
 // status-code clients see the failure. Business/validation errors should still use 400/404.
