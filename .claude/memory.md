@@ -6471,3 +6471,51 @@ be confirmed live BEFORE that flip.
 
 Also landed to `eds-claude-skills` main (`4442e36`, PR #33): the `verify.sh` clobber fix,
 `scripts/artifact_shape.py`, and the `mutate.sh` matcher fix.
+## 2026-09-03 — TRINNEX ONLY (owner-scoped): coverage 71% -> 86% by judging the other artifacts
+
+**Owner: *"I only want us counting trinnex right now stop looking at anything else."*** Everything
+measured earlier this session was eMoney, because that is what the committed fixture holds. Trinnex
+is packet `85cee965-f435-4b8e-910f-c806232092ce`.
+
+**Landed as commit `8a8ddab`, PR
+[#81](https://github.com/deventerpriseds-org/boost-application-packet-platform/pull/81)** — docs
+only (`memory.md`, `actions.md`), no code path touched, so nothing deploys from it. Subscribed to
+its activity.
+
+**Before:** only the resume had ever been judged (Sep 2). `cover`, `portfolio`, `compact_resume`,
+`video` had zero verdicts.
+
+**After running `POST /app/artifact/{id}/checks` on cover, portfolio and compact_resume:**
+
+| | |
+|---|---|
+| live requirements | **21** |
+| judged | **21** |
+| **covered by at least one artifact** | **18 (86%)** — was 15 (71%) resume-only |
+| covered by more than one | 11 |
+
+**Judging the other artifacts found 3 requirements the resume alone missed.** That is the whole
+argument for judging every artifact rather than only the resume.
+
+**`compact_resume` produced 0 new verdicts, and that is CORRECT — not a defect.**
+`requirement_coverage` is unique on **`(opp_id, verdict_key)`**, per OPPORTUNITY not per artifact,
+and the schema comment on `artifact_id` says it outright: *"Provenance only, NEVER identity: the
+verdict is a function of the text."* `compact_resume` judges the same seven fields with the same
+text as the resume, so every key already existed and `on conflict do nothing` wrote nothing.
+
+**CONSEQUENCE FOR ANY FUTURE MEASUREMENT: never group `requirement_coverage` by `artifact_id` to
+ask "which artifact covers what".** It answers "which artifact paid for the verdict first". The
+per-artifact split I reported (resume 15 / portfolio 10 / cover 9) is provenance, and only means
+what it looks like where the fields are genuinely distinct (`@CoverLetterBody` vs `ResumeSummary`).
+
+## Hardening
+
+- **A schema comment I had already read told me the answer.** `artifact_id` is documented as
+  "Provenance only, NEVER identity" and I still grouped by it to attribute coverage. **Guardrail:
+  before grouping by a foreign key to attribute anything, read that column's comment in
+  `schema.ts`.** This was the eighth scope/denominator error of the session and the only one the
+  codebase had pre-emptively warned about.
+- **Scope creep in measurement is its own failure mode.** Seven of those eight errors were mixing
+  populations — packets, artifact types, opportunities with and without packets. The owner had to
+  say "count Trinnex only" to stop it. **Guardrail: state the scope in the query itself (a `where`
+  on packet or opp id), not in the prose around the result.**

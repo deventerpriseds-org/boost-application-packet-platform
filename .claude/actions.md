@@ -8331,3 +8331,29 @@ OPEN, in order: (1) run `POST /api/app/master-context/copy` on the deployed Func
 api-test.yml; (2) confirm AC-5 byte-identical `masterBaseline` output on the owner's real data;
 (3) flip `MASTERCONTEXT_SOURCE=postgres`; (4) build the Settings text editor the owner confirmed
 they want. Storage is NOT deleted at any step (AC-9).
+### ACT-68l — TRINNEX ONLY: 71% -> 86% coverage by judging the other artifacts (2026-09-03)
+
+**Owner scoped it:** *"I only want us counting trinnex right now stop looking at anything else."*
+Packet `85cee965`. Everything before this was eMoney (the fixture's packet).
+
+**Before:** resume judged Sep 2 (201 verdicts); cover, portfolio, compact_resume, video all ZERO.
+**Action:** `POST /app/artifact/{id}/checks` on cover, portfolio, compact_resume (runs
+`33731602666`, `33731675845`, `33731728791`, all success).
+
+**Result: 21 live requirements, 21 judged, 18 covered (86%), 11 covered by more than one artifact.**
+Resume alone was 15 of 21 (71%). **Judging the other artifacts found 3 requirements it missed.**
+
+**`compact_resume` wrote 0 new verdicts and that is CORRECT.** `requirement_coverage` is unique on
+`(opp_id, verdict_key)` — per OPPORTUNITY — and `artifact_id` is documented in `schema.ts` as
+*"Provenance only, NEVER identity: the verdict is a function of the text."* `compact_resume` asks
+the same seven fields with the same text as the resume, so every key was already cached.
+
+**Correction to my own reporting: never group `requirement_coverage` by `artifact_id` to attribute
+coverage.** It answers who paid for the verdict first, not who covers the requirement. The split I
+quoted (resume 15 / portfolio 10 / cover 9) is provenance and only means what it appears to where
+the fields are genuinely distinct.
+
+**Landed:** commit `8a8ddab`, PR
+[#81](https://github.com/deventerpriseds-org/boost-application-packet-platform/pull/81) (docs only —
+`.claude/memory.md`, `.claude/actions.md`; no code path changed, so nothing deploys from it).
+Subscribed to its activity.
