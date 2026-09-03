@@ -7880,3 +7880,39 @@ pre-mutation copy AND clean against HEAD, suite back to 141/141. **FIRED**, not 
 **What this does NOT do:** it cannot tell a fixture that is merely OLD from one that is wrong — it
 only enforces what the canary can see. A dump whose rows have drifted from production still passes.
 That is the honest limit, and the reason `fixture-refresh.yml` stays the source of truth.
+
+### ACT-68d — 4.6-8 re-examined: my "no join exists" was WRONG; the row still stands (2026-09-02)
+
+**Asked:** *"now do 4.6-8 if it hasn't been worked on already."* Not worked on — `origin/main` was
+still at `1038353` with the row PARTIAL. So I re-derived it, and the re-derivation overturned my own
+earlier reasoning.
+
+**WHAT I GOT WRONG.** I told the owner twice that 4.6-8 was blocked because *"30 swapped rows, 35
+keywords, zero joins — the data does not exist"*. **A join exists and is populated.**
+`swap_decision.requirement_id` is a FK to `requirement(id)` (`schema.ts:642`) and
+`requirement.model_keyword` is the chip's keyword — **17 of 30 swapped rows resolve through it.**
+I had compared two DERIVED VALUES (`to_label` text vs `model_keyword` text), found no string
+overlap, and concluded there was no relationship. A link between two tables is a question about the
+SCHEMA. Logged in `.claude/accuracy-log.md`.
+
+**WHY THE ROW STILL STAYS PARTIAL — the real reason, sharper than the wrong one.**
+`requirement_id` is written by `attribute()` (`swaps.ts:224`), which is `similarity()` token-set
+containment at **`ATTRIBUTION_THRESHOLD = 0.34`**, matched against the requirement's **verbatim
+posting line**, never against the keyword. The chain is
+`swapped-in text ~fuzzy 0.34~> posting line --sibling attribute--> keyword`. Rendering *"this
+keyword took the place of X"* is therefore a SECOND-ORDER claim on a ONE-THIRD fuzzy match, printed
+beside a button that rewrites the owner's document. `CLAUDE.md:432`: *"fuzzy matching is for
+RANKING, never for ACCUSING."*
+
+**The honest subset was measured rather than assumed:** only **2 of 17** have the keyword appearing
+EXACTLY in the replacement text (`global engineering` -> `Global Engineering Teams`, twice); the
+other 15 rest on the fuzzy attribution alone. Those 2 support *"the keyword is in the item that
+replaced X"* — which is not what the control asserts. **Not enough to ship a claim on.**
+
+**WHAT WOULD UNBLOCK IT:** record the driving keyword AT SWAP TIME — a `swap_decision` column the
+swap engine writes, not an association inferred afterwards. Real pipeline work, correctly scoped
+now instead of hand-waved.
+
+**Also corrected here:** I reported the doc headline to the owner as `167 of 182`. `main` already
+read **172 of 181 (95.0%)** — parallel lanes closed rows in merges I pulled in after taking that
+count. Cover step unchanged at **83 of 84 (98.8%)**, 4.6-8 its only PARTIAL.

@@ -6182,3 +6182,20 @@ two `fixture-refresh.yml` round trips in a single pass this day.
 The guard's failure message carries the rebuild recipe. Its limit, stated so nobody over-trusts it:
 it enforces only what the canary can SEE, so a fixture whose rows have drifted from production still
 passes. `fixture-refresh.yml` remains the source of truth.
+
+## 2026-09-02 — 4.6-8 stands, but the reason changed (ACT-68d)
+
+**Do not repeat "there is no join between keywords and swaps" — there is one.**
+`swap_decision.requirement_id` -> `requirement.model_keyword`, populated on 17 of 30 swapped rows.
+I claimed the opposite twice by comparing rendered values instead of reading the DDL.
+
+**The row is PARTIAL because the join is FUZZY and means something else.** `requirement_id` comes
+from `attribute()` = `similarity()` at `ATTRIBUTION_THRESHOLD = 0.34` against the requirement's
+VERBATIM POSTING LINE, not against the keyword. A "this keyword displaced X" control would be a
+second-order claim on a one-third match, next to a button that rewrites the document. Only 2 of 17
+rows survive an EXACT keyword-in-replacement test.
+
+**Unblocks by:** recording the driving keyword at swap time in `swap_decision`. Pipeline work.
+
+**Headline on `main` is 172 of 181 (95.0%)**, not the 167/182 I quoted — parallel lanes closed rows
+after I took that count. **Re-count from the file before quoting a parity number.**

@@ -538,3 +538,33 @@ All of these are `instrument-caught`; none reached the owner. And none would hav
 `eds-accuracy-log.py` itself — no `REFUTED` verdict artifact was involved in any of them. That is
 the **fifth** independent confirmation of the narrow scope published with it, which is the one thing
 in this whole exercise that has held up unchanged across three verification loops.
+
+---
+
+## 2026-09-02 — "4.6-8 is blocked: there is NO JOIN between keywords and swap rows" (reported to the owner TWICE)
+
+| | |
+|---|---|
+| **Claimed** | "30 swapped rows, 35 keywords, **zero joins** — the data to render `Put back "<original>"` in the keyword panel does not exist. Upstream pipeline change required." |
+| **Ground truth** | A join EXISTS and is populated. `swap_decision.requirement_id` is a FK to `requirement(id)`, and `requirement.model_keyword` is the ATS keyword the chips render. **17 of 30 swapped rows resolve through it to a keyword.** |
+| **The input error** | I compared **two derived proxies** — `swap_decision.to_label` text against `requirement.model_keyword` text — found no string overlap, and concluded no relationship existed. **I never read the schema for a relationship both derive from.** This is verbatim the failure the "Ground-truth before answering" rule describes, committed while quoting that rule's sibling in the same breath. |
+| **Single source that would have settled it** | `grep -n "create table if not exists swap_decision" -A 30 api/src/functions/tests/schema.ts` — `requirement_id uuid references requirement(id)` is line 8 of the definition. |
+
+**The conclusion survived; the reasoning did not.** 4.6-8 is still correctly PARTIAL, but for a
+sharper reason found only after the correction: `requirement_id` is written by `attribute()`
+(`swaps.ts:224`), which is `similarity()` — token-set containment — at
+`ATTRIBUTION_THRESHOLD = 0.34`, matched against the requirement's **verbatim posting line**, NOT
+against the keyword. So the chain is `swapped-in text ~fuzzy 0.34~> posting line --sibling attr-->
+keyword`. Rendering "this keyword took the place of X" is a **second-order claim on a one-third
+fuzzy match**, attached to a control that rewrites the owner's document — "fuzzy matching is for
+RANKING, never for ACCUSING", exactly.
+
+Measured for the honest subset: only **2 of 17** have the keyword appearing EXACTLY in the
+replacement text; the other 15 rest on the fuzzy attribution alone. And those 2 support a weaker
+claim than the control makes.
+
+**Guard this earns — a REFLEX, not a test.** "There is no link between A and B" is a claim about the
+SCHEMA, and it is never settled by comparing A's and B's rendered values. Read the DDL for a foreign
+key first. A guard cannot be written for this without crying wolf; the reflex is the deliverable, and
+the cost of not having it was telling the owner "upstream pipeline change required" twice for work
+that needed no such thing.
