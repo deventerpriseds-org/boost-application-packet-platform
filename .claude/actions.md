@@ -8323,3 +8323,25 @@ silently absorbed:
 3. **The open-item count moved with the merge.** `.claude/DEFERRED.md` was 90 rows / 43 `OPEN` at
    `2c693d1`; at the merged tree it is **95 rows / 45 `OPEN` / 50 `CLOSED`**, counted with the
    ledger's own parser, not by eye.
+
+### ACT-68l — TRINNEX ONLY: 71% -> 86% coverage by judging the other artifacts (2026-09-03)
+
+**Owner scoped it:** *"I only want us counting trinnex right now stop looking at anything else."*
+Packet `85cee965`. Everything before this was eMoney (the fixture's packet).
+
+**Before:** resume judged Sep 2 (201 verdicts); cover, portfolio, compact_resume, video all ZERO.
+**Action:** `POST /app/artifact/{id}/checks` on cover, portfolio, compact_resume (runs
+`33731602666`, `33731675845`, `33731728791`, all success).
+
+**Result: 21 live requirements, 21 judged, 18 covered (86%), 11 covered by more than one artifact.**
+Resume alone was 15 of 21 (71%). **Judging the other artifacts found 3 requirements it missed.**
+
+**`compact_resume` wrote 0 new verdicts and that is CORRECT.** `requirement_coverage` is unique on
+`(opp_id, verdict_key)` — per OPPORTUNITY — and `artifact_id` is documented in `schema.ts` as
+*"Provenance only, NEVER identity: the verdict is a function of the text."* `compact_resume` asks
+the same seven fields with the same text as the resume, so every key was already cached.
+
+**Correction to my own reporting: never group `requirement_coverage` by `artifact_id` to attribute
+coverage.** It answers who paid for the verdict first, not who covers the requirement. The split I
+quoted (resume 15 / portfolio 10 / cover 9) is provenance and only means what it appears to where
+the fields are genuinely distinct.
