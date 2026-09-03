@@ -176,9 +176,57 @@ schema change — arriving back where B starts, having lost the snapshot.
 
 ---
 
-## 9. Not verified
+## 9. Live schema — CONFIRMED against production
 
-No code executed; no live call (egress blocks `azurewebsites.net`, both Postgres MCP connectors
-unauthorized this session). Specifically unproven: the live `coach_config` row, both bypasses
-**in production** (verified in source, not exploited), and the deployed Huddle tenant. Every one
-has a settling command in `docs/spec-research/`.
+Run `33773656095` (`db-query.yml`, `success`, 15:37Z) against
+`eds-postgresql / boost_resume_n_packet_builder`, 87 rows. This replaces v1's §1.1, whose own text
+cited a **different app's** Supabase project ref before correcting itself mid-sentence.
+
+| Table | Confirmed live | Note |
+|---|---|---|
+| `artifact` | `doc_url`, `drive_url`, `content`, `version_history`, `heygen_video_id`, `type`, `status` | The deep-link DATA is real. Only the app ROUTES are missing (§3) |
+| `swap_decision` | every column v1 named — `from_candidate_id`, `to_candidate_id`, `from_label`, `to_label`, `requirement_id`, `verbatim_quote`, `confidence`, `driver`, `rationale`, `loop` | **plus `list`, `seq`, `action`, which v1 omitted** — `action` is what `override_swap` must write |
+| `correction` | `char_start`, `char_end`, `before_sha256`, `applied_seq`, `reverted_by`, `reverted_at`, `frame` | Offset + hash + revert trail. Confirms it as the right model for **B5** |
+| `coach_memory` | `owner`, `kind`, `text`, `source`, `embedding` (USER-DEFINED = pgvector), `metadata` | Keyed by `owner` **text** — so the alias split in §5 is real, not hypothetical |
+| `coach_thread` | `owner`, `messages` (jsonb), `updated_at` | Keyed by `owner` |
+| `coach_activity` | `owner`, `user_msg`, `reply`, `tools`, `instructions` | Keyed by `owner` |
+| `coach_triples` | `owner`, `subject`, `predicate`, `object`, `confidence`, `source_id` | Table EXISTS; the audit finding is that **no code reads or writes it** |
+| `packet` | `status`, `round`, `ats_score`, `must_haves`, `covered_kw`, `pkg_json`, `last_build` | As described |
+
+**What this changes:** `list_swaps` (**B4**) and `override_swap` (**B5**) are confirmed buildable on
+real columns — `override_swap` writes `action` and mirrors `correction`'s hash-verified revert
+pattern. And because all four `coach_*` tables key on a bare `owner` text column, **B1 is load-bearing
+rather than tidy-up**: two addresses produce two disjoint memory stores by construction.
+
+### Production row counts — run `33775383895` (`success`, 15:54Z)
+
+| Table | Rows | What it settles |
+|---|---|---|
+| `coach_triples` | **0** | The dead-table finding is now CONFIRMED IN PRODUCTION, not inferred from a grep |
+| `coach_memory` | 129 | The coach is heavily used... |
+| `coach_activity` | 92 | ...so an empty `coach_triples` is not "new and unused". Its siblings fill; it does not |
+| `coach_thread` | 7 | |
+| `coach_config` | **1** | **Single global row CONFIRMED** — a per-owner overlay is a schema change, exactly as §3 says |
+| `swap_decision` | 79 | Real rows for **B4**/**B5** to work against |
+
+The 0-against-129 contrast is the falsification test, not just a number: if any code path wrote
+triples, the table would fill like its siblings. **B7 is now evidence-backed** — the system prompt
+(`:23`) and `Settings.jsx:1042` advertise a knowledge graph that has never held a single row.
+
+## 10. Not verified
+
+
+
+Narrowed after two live runs. **Still unproven:**
+
+- **Both auth bypasses in production.** Verified by READING source at `a041d8f`; deliberately not
+  exploited. Settling them means calling the deployed routes, which is a live security test and
+  needs the owner's say-so first.
+- **The deployed Huddle tenant** (§4) — read the bundle or the SWA app setting.
+- **Which header ElevenLabs ConvAI can send**, for S1.
+
+**No longer unproven:** the live `coach_config` row (1 row, confirmed), `coach_triples` being dead
+(0 rows against 129/92 in its siblings), and the whole `swap_decision` / `artifact` / `correction`
+column set. Sourced from `db-query.yml` runs `33773656095` and `33775383895` — the MCP connectors
+were reconnected mid-session but their tools do not re-register into a running CCR session, so the
+workflow fallback carried both queries.
