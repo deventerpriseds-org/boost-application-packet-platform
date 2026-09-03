@@ -8449,3 +8449,26 @@ app 454/0; 4 unit guards harness-FIRED, browser assertion hand-proved.
 - **Guards:** 4 unit, all mutation-proved FIRED; 8 DOM checks (20 → 28 on the assistant probe).
 
 **Evidence:** api 1071/0 · app 462/0 · margin 61/61 · browser 52/52 · deploy run 33734904497.
+
+---
+
+## ACT-68f — `ui-verify` click sequence, and the unreachable field scope it exposed (2026-09-03)
+
+**Asked:** *"go ahead and add click_sel for whenever we need it"*, then *"do it"* (the `fieldFocus` gap).
+
+**Status: DONE, on `main` `5b34b87`.**
+
+- `CLICK_SEL` is `;`-separated and clicked in order. Single-selector callers unchanged.
+- Fixed a race that only bites from step 2: `locator.count()` does not wait, so a not-yet-rendered
+  target read as `not found` — a harness race reported as an app gap.
+- Stops at the first failing step **and names it**; a partial sequence is a failure, never a pass.
+- **Found and fixed:** SPEC 4.11-4's field scope was unreachable from the one control a reader would
+  use. `ui-verify 33756770327` — both clicks `ok`, picker rendered 0 chips. Both seeders now pass
+  `row.merge_field`; the section is optional so a fieldless ask cannot invent a focus.
+
+**Guards:** `H:seeding-from-a-field-focuses-that-field`,
+`H:seeding-without-a-field-must-not-invent-a-focus` — both mutation-proved `FIRED`, the first only
+after `mutate.sh` reported `EQUIVALENT` and exposed that the guard matched a fallback string rather
+than the argument.
+
+**Evidence:** api 1060/0 · app 464/0 · margin 61/61 · browser 52/52 · deploy 33757482867.

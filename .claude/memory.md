@@ -520,6 +520,37 @@ Key tables (PostgreSQL):
 - iOS testing: requires macOS runner or BrowserStack; categorically unavailable in Linux CCR
 
 ## Active work
+**2026-09-03 - `ui-verify` CLICK_SEL IS A SEQUENCE, and it immediately found a real gap.** `main`
+`5b34b87`.
+
+`CLICK_SEL` is now `;`-separated and clicked IN ORDER (same separator `EXPECT` uses, so one selector
+with no `;` is unchanged). Proven live:
+`"[data-qc=\"qc-go-to-field\"] -> ok | [data-qc=\"assistant-open\"] -> ok"`.
+
+**Two bugs fixed on the way, and the second only existed because the first was built:**
+1. `locator.count()` DOES NOT WAIT. The old pre-check returned 0 for an element that had not
+   rendered yet - and step 2's target usually exists only BECAUSE step 1 fired. That 0 read as
+   `not found`, i.e. a harness race reported as an app gap. Each step now waits for its own target.
+2. **SPEC 4.11-4's field scope was effectively UNREACHABLE.** Only `goToField` wrote `fieldFocus`, so
+   a reader clicking "Ask the assistant" ON A FIELD got the asset scope. Measured live before the
+   fix (ui-verify **33756770327**): both clicks `ok`, picker still rendered **0 chips**. Fixed - both
+   seeders pass `row.merge_field`, `seedAssistant` writes the focus, and the section stays OPTIONAL
+   so a whole-asset ask cannot fabricate a field.
+
+## Hardening -- 2026-09-03: a source-grep guard matched a STRING that survived the defect
+Third time this session mutation-proving caught MY TEST rather than the code, and the sharpest one.
+The guard used `onSeedAssistant\([^)]*\)` plus `/row\.merge_field/`. **`[^)]*` stops at the FIRST
+`)`** - the one inside `fieldLabel(row.merge_field)` - so the FALLBACK STRING satisfied the match
+whether or not the ARGUMENT was passed. The guard would have gone green with the field dropped.
+`mutate.sh` reported `EQUIVALENT`; rewritten to assert the argument position (`, row.merge_field)`)
+it FIRED.
+**Guardrail: a source-grep guard must anchor on the CONSTRUCT it guards, never on a token that also
+appears in nearby prose or a fallback string.** `[^)]*` is not a call - it stops at the first nested
+paren. Split on the call name and inspect the argument list, or assert the argument position
+literally. This is the same class as `H2` ("precise enough never to cry wolf"), inverted: precise
+enough never to stay SILENT.
+
+
 **2026-09-03 - 4.11-4 BUILT AND DEPLOYED. PROTOTYPE COVERAGE IS 176 OF 176 (100%).** `main`
 `4da8696`. It was the last open row.
 
