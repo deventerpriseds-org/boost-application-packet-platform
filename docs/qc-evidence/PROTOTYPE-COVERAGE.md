@@ -1481,3 +1481,52 @@ with every divergence carrying a recorded reason.
   prose, but there is no systematic inventory of what the app does that the prototype never had.
   That is the real remaining gap in this document, and it is the half that would say what has been
   GAINED rather than what is owed.
+
+---
+
+## 20. THE OTHER DIRECTION — what the app has that the prototype never did (2026-09-03)
+
+§19 established that `compare-ui` cannot answer *"what is missing"*. This section answers the half
+the owner actually asked about and that this document had never covered: **what was GAINED.** Same
+mechanical method, run in reverse on the 179 `panelsOnlyInApp` entries.
+
+| | count |
+|---|---|
+| app-only panels, raw | **179** |
+| after de-duplicating (one subtitle counted once per step) | 81 distinct |
+| minus renames of a prototype panel | 52 |
+| minus the app's own tenant data and row ids | **34 capabilities** |
+
+**Read the subtractions, not the headline.** `179` is inflated the same way `147` is: `your master
+profile (Settings > Facts)` is ONE subtitle counted on all seven steps, `RESP #0`-`RESP #19` and
+`RQ-MH #25/#29` are row ids, and `Enterprise Architecture` / `Risk Management` / `Predictive
+Analytics` are eMoney's own skill labels — the mirror image of the prototype's `sixty-two
+engineers`. None of those is a capability.
+
+### The 34, and they fall into three groups
+
+**Named QC checks the prototype does not have** — `Every change cites the posting`, `No empty
+blocks`, `No stray spacing`, `No machine-sounding phrases`, `Expertise phrases are the right
+length`, `Responsibilities addressed`, `Skill count and split`, `Section word counts`,
+`Fix before approval`.
+
+**Per-field granularity** — `2 / 3 / 7 merge fields`, `N open findings with no field of their own`,
+`Open on this field`, `Keywords for this line`, `Taken out of this list`, `Why it changed`,
+`14 items to fix across 5 assets`. The prototype reports at asset level; the app reports at field
+level and can say when a finding belongs to no field at all.
+
+**Provenance and refusal-to-fabricate states** — `model-written`, `From profile`,
+`not in this text`, `Posting analysis - the source`, `What the models found`, plus `Not checked`,
+`Not compared`, `Nothing found`, `not measured`. The prototype prints a confident number for every
+slot. The app says where each number came from, and prints a REASON instead of a number when it has
+no source. Several DELIBERATE rows above (`4.8-1`, `4.8-2`) are exactly this and were verdicted
+PARTIAL against the prototype for it — the divergence is the app declining to invent a composite.
+
+### An honesty note on this section's own method
+
+A first pass eyeballed the leading entries of each step and concluded the additions were
+*"overwhelmingly provenance"*. Classifying all 117 mechanically put provenance at 11 occurrences,
+so that reading came from a biased sample of what happened to sort first. The dominant real group is
+**named checks and per-field granularity**, with provenance third. The correction is recorded rather
+than quietly fixed, because reading a trend off the first screen is the same error as quoting a
+blind instrument.
