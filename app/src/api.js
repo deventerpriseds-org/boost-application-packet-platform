@@ -300,6 +300,16 @@ export const api = {
   // its siblings so a typo in a caller is a dropped field rather than a silently ignored save — the
   // route applies partial updates, so omitting a key means "leave it", never "clear it".
   searchPrefsSet: ({ targetGeoIds, remoteOnly, tempThresholds, checks }) => post(`/app/search-prefs?owner=${encodeURIComponent(_owner)}`, { targetGeoIds, remoteOnly, tempThresholds, checks }),
+  // The owner's own master profile — the 14 free-text blocks every resume and packet is built from.
+  // A SEPARATE endpoint from search-prefs on purpose: these blocks run to tens of thousands of
+  // characters, and folding them in would drag the whole profile over the wire on every unrelated
+  // settings read. `?owner=` is required on the GET like every owner-scoped read; on the POST the
+  // API ignores it entirely and takes the owner from the verified session, so a spoofed query
+  // string cannot write someone else's profile.
+  masterProfileGet: () => get(`/app/master-profile?owner=${encodeURIComponent(_owner)}`),
+  // Send ONLY the blocks that changed. The route applies partial upserts, so an omitted key keeps
+  // its stored text — never clears it — and an empty string is a real value meaning "I emptied this".
+  masterProfileSet: (blocks) => post(`/app/master-profile?owner=${encodeURIComponent(_owner)}`, { blocks }),
   // D24 — the comparison dimension set per role family. The API half has been live and uncalled;
   // the run warning literally names "Settings ▸ Comparison dimensions" as the place to change it.
   // D:remediation-never-ran — P3 has been deployed and has executed ZERO times in production, because

@@ -54,3 +54,73 @@ test('H:settings-uses-the-shared-mapper: the screen does not re-derive the looku
   assert.match(src, /chkValueFor\(column, p\.checks\)/, 'Settings must read values through the mapper')
   assert.ok(!/p\.checks\[\s*k\s*\]/.test(src), 'the inline camel lookup is back — that is the defect')
 })
+
+// ── The master profile editor's UI half ─────────────────────────────────────────────────────────
+//
+// These three are SOURCE guards, and that is a deliberate second-best. The component is not
+// extractable without a refactor nobody asked for, so what a runtime test cannot reach is asserted
+// against the source instead -- with the comments stripped first, because a guard that fires on
+// prose is one people learn to ignore (this repo has shipped two of those).
+
+/** The body of the MasterProfileSettings component, comments removed. */
+const masterProfileSource = () => {
+  const all = readFileSync(new URL('../src/screens/Settings.jsx', import.meta.url), 'utf8')
+    .replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '')
+  const i = all.indexOf('function MasterProfileSettings()')
+  assert.ok(i > 0, 'MasterProfileSettings must exist -- the slice is the guard, so an absent component is a failure')
+  const j = all.indexOf('\nconst SECTIONS', i)
+  assert.ok(j > i, 'the component must still sit above SECTIONS, or this slice silently reads the wrong code')
+  return all.slice(i, j)
+}
+
+// H:master-profile-ui-keeps-edits-on-failure -- AC10. A save that fails must not cost the owner
+// their typing. The mechanism is ordering: `saved` (the baseline the boxes are diffed against) is
+// reconciled ONLY after the response has been checked, so on the failure path every edit is still
+// in its textarea. Asserted as ordering rather than as presence, because a `setSaved` moved above
+// the check reads identically line by line and loses the edit.
+//
+// MUTATION that must make this FIRE: move `setSaved({ ...saved, ...patch })` above the
+// `if (!r || r.ok === false) throw` line, or add a `setSaved`/`setVals(saved)` into the catch block.
+test('H:master-profile-ui-keeps-edits-on-failure: the baseline moves only after a checked success', () => {
+  const body = masterProfileSource()
+  const check = body.indexOf('r.ok === false) throw')
+  const commit = body.indexOf('setSaved({ ...saved, ...patch })')
+  assert.ok(check > 0, 'the save must check the response before believing it')
+  assert.ok(commit > 0, 'a successful save must reconcile the baseline')
+  assert.ok(check < commit,
+    'the failure check must come BEFORE the baseline is moved -- reversing them discards the edit')
+  const cat = body.slice(body.indexOf('} catch (e) {', check))
+  assert.ok(!/setSaved|setVals/.test(cat.slice(0, cat.indexOf('finally'))),
+    'the catch block must not touch the edited text or the baseline')
+})
+
+// H:master-profile-ui-sends-only-changed -- AC2/AC4 on the client side. The route upserts partially,
+// but that only helps if the screen sends a partial body: posting all 14 blocks would rewrite the
+// thirteen the owner did not touch with whatever the form was holding, and bump their updated_at.
+//
+// MUTATION that must make this FIRE: build the patch from `blocks` instead of `changed`.
+test('H:master-profile-ui-sends-only-changed: an untouched block is not in the request body', () => {
+  const body = masterProfileSource()
+  assert.match(body, /for \(const k of changed\) patch\[k\]/,
+    'the patch must be built from the CHANGED keys, not from every block')
+  assert.ok(!/for \(const b of blocks\) patch\[/.test(body),
+    'building the patch from every block is the full-resave defect')
+  assert.match(body, /api\.masterProfileSet\(patch\)/, 'and it is the patch that gets sent')
+})
+
+// H:master-profile-ui-standing-note -- AC11. "Packets already built keep their original wording" is
+// STANDING copy: true whether or not a save just happened. A version of it that only appears after a
+// successful save is one the owner reads once and never again, which is exactly when they need it.
+//
+// MUTATION that must make this FIRE: delete the note, or move it inside a `note?.ok &&` conditional.
+test('H:master-profile-ui-standing-note: the already-built warning is not gated on a save', () => {
+  const body = masterProfileSource()
+  const NOTE = 'Packets already built keep their original wording'
+  const at = body.indexOf(NOTE)
+  assert.ok(at > 0, 'the standing note must be on the screen')
+  // The 240 characters before it must not open a conditional render on save state. `note` is the
+  // save-result banner; the standing copy must sit outside it.
+  const before = body.slice(Math.max(0, at - 240), at)
+  assert.ok(!/\{\s*note[?.\w]*\s*&&/.test(before) && !/note\.ok\s*\?/.test(before),
+    'the standing note must not be conditional on a save having happened')
+})
