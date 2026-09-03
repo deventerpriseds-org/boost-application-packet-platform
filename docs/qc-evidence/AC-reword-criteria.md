@@ -410,3 +410,56 @@ assumed to "just work":
   as it does for `frame` — no new test is required here, only remembering to update the fixture
   (§9's guard table makes this an explicit, mutation-proved line item rather than an implicit
   expectation).
+
+## 10. AC-9 — every new guard, each mutation-provable with `scripts/mutate.sh`
+
+Per this repo's rule, every guard below must be run through
+`/workspace/eds-claude-skills/scripts/mutate.sh <file> <anchor-file> <replacement-file> <test-cmd>
+<must-fail-pattern>` at implementation time, with an ABSOLUTE `cd` in the test command and a test
+command that emits raw TAP (never piped through `grep -q`, which the harness cannot parse for a
+verdict). This table names, for each guard, the file it lives in, the exact mutation that must make
+it fire, and which prior AC it proves.
+
+| Guard | Lives in | Proves | Mutation that must make it FIRE |
+|---|---|---|---|
+| `H:correction-ensure-table-widens-source-too` | `api/test/correctionDdlParity.test.mjs` | AC-7a/AC-8a | Delete the `drop constraint if exists correction_source_check` / `add constraint` pair from `ensureCorrectionTable()` in `appCorrections.ts`, leaving only the inline CREATE. Guard must fail. |
+| `H:correction-source-widened-by-alter` (extended) | `api/test/correctionDdlParity.test.mjs` (existing test, new value set) | AC-7a | In `schema.ts`, widen the inline CREATE's `source` CHECK to include the 4th value but leave the ALTER at 3 values. Guard must fail (inline/ALTER mismatch). |
+| `H:correction-ddl-parity` (existing, unchanged) | `api/test/correctionDdlParity.test.mjs` | AC-7a/AC-8 | Add the 4th `source` value to `schema.ts`'s inline CREATE only, leave `appCorrections.ts`'s inline CREATE at 3 values. Guard must fail. |
+| `H:correction-ddl-column-parity` (existing, unchanged) | `api/test/correctionDdlParity.test.mjs` | AC-7b | Add `requirement_text text` to `test/sql/correction.sql`'s CREATE but omit it from `schema.ts`'s and `appCorrections.ts`'s inline CREATEs (which per AC-7b never declare it inline — they add it by ALTER). Guard must fail on the asymmetry. |
+| `H:reword-span-matches-phrase` | reuses existing `correction_span_matches_phrase`/`correction_span_ordered` (no new test — AC-2a) | AC-2a | Insert a `source='reworded'` row with `char_end - char_start <> length(phrase)` directly against a live/local Postgres. Insert must be REJECTED by the existing CHECK (no application code involved). |
+| `H:reword-requirement-text-required` | new DB CHECK in `schema.ts` + `ensureCorrectionTable()`: `check (source <> 'reworded' or requirement_text is not null)` | AC-2b | Attempt to insert a `source='reworded'` row with `requirement_text` NULL. Insert must be REJECTED. |
+| `H:reword-fields-are-resumesummary-only` | new test, likely `api/test/reword.test.mjs` | AC-0a / §1(a) | In the reword module, add `'SkillsBullets1'` to `REWORD_FIELDS`. Guard must fail. |
+| `H:reword-never-touches-owner-edit-span` | new test, `api/test/reword.test.mjs` | AC-6c | Remove the owner-edit-span exclusion filter from the candidate-span scan. Feed a fixture with an owner-edit row overlapping a detectable near-echo span; guard must fail (the reword touches the owner's span). |
+| `H:reword-pending-until-accepted` | new test, `api/test/reword.test.mjs` | AC-0c | With `rewordAuto` at its seeded `false` default, make the pass write a `correction` row directly instead of appending to `last_build.pendingRewords`. Guard must fail (a `correction` row exists before acceptance). |
+| `H:reword-introduces-no-new-figure` | new test, `api/test/reword.test.mjs` | AC-1b | Feed a candidate reword containing a fabricated figure not in the original span or the profile. Remove (or don't call) the `scanEcho` gate on the candidate; guard must fail (the reword is accepted despite the new figure). |
+| `H:ats-shipped-fields-excludes-resume-summary` | new test or extension of `api/test/atsKeywords.test.mjs` | AC-5a | Add `'ResumeSummary'` to `ATS_SHIPPED_FIELDS` in `atsKeywords.ts`. Guard must fail. |
+| `H:reword-link-count-separate-from-phrase-count` | new test, `api/test/atsKeywords.test.mjs` or `appChecks.test.mjs` | AC-4a/AC-5b | Merge the reword-link count into the same `covered`/`total` pair `ATS_SHIPPED_FIELDS` already produces instead of reporting it as a separate, labelled component. Guard must fail (the two provenances become indistinguishable in the output). |
+| `H:mark-reword-is-a-third-treatment` | extends `app/test/highlight.test.mjs`'s existing "two highlights" assertions (line 163) | AC-4b | Reuse `'keyword'`'s `HIGHLIGHT_CLASS`/theme swatch for the reword mark instead of a distinct one. Existing "different colours AND different treatments" guard, extended to three, must fail. |
+
+**Every guard above that touches `correction` reuses the SAME three-home parity machinery
+(`correctionDdlParity.test.mjs`) rather than inventing a second — this is the "extend, don't
+duplicate" rule applied to the guard suite itself, not only to the schema.**
+
+## 11. The smallest first commit
+
+**Contains, and proves something on its own:**
+1. The schema half only — `source` widened to include the 4th value (name it `'reworded'`) in all
+   three homes (`schema.ts` inline + ALTER, `appCorrections.ts` inline + NEW ALTER per AC-7a,
+   `test/sql/correction.sql` inline), the new `requirement_text` column (nullable, ALTER-only per
+   AC-7b, declared inline ONLY in the test fixture per §9's column-parity note), and the new DB
+   CHECK from `H:reword-requirement-text-required`.
+2. All THREE existing DDL-parity tests re-run and pass unchanged (proving the widening did not
+   desync the three homes), plus the ONE new test, `H:correction-ensure-table-widens-source-too`.
+3. The local-Postgres schema-execution discipline this repo requires for every schema change: apply
+   `main`'s schema to a populated database, seed a few `correction` rows under the OLD 3-value
+   domain, then apply this branch's schema on top and confirm exit 0 — proving the ALTER widens a
+   database that already has rows, not only a fresh one.
+
+**Deliberately does NOT contain:** the detector, the reword pass itself, the pending-storage
+mechanism, the accept/reject routes, the `ATS_SHIPPED_FIELDS` change, or any UI mark. A schema
+change with no reader is inert and safe to revert independently if the design in §0-9 above turns
+out to need revision once real detector output is in hand — which is exactly the property "smallest
+first commit, independently revertable" is asking for. It also means the highest-risk, most
+speculative part of this feature (the detector's precision, and whether `rewordAuto`'s default is
+right) is decided AFTER the boring, mechanically-verifiable part has already landed and been proven
+correct against a populated database.
