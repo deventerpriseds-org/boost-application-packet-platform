@@ -71,7 +71,17 @@ whether scoring the pre-reword text and carrying the number forward is defensibl
 `correction` (`schema.ts`) already has `phrase`, `replacement`, `char_start`, `char_end`,
 `before_sha256`, `applied_seq`, `reason`, `source`, `frame`, `loop`, revert columns, and a
 constraint that the span must match the phrase length. The implementer claims the reword is
-**a new `source` value plus ONE new column (`requirement_id`)** on that table — not a new table.
+**a new `source` value plus ONE new column** on that table — not a new table.
+
+> **DESIGN CORRECTED 2026-09-02, loop 1 §3c: the column is `requirement_text`, NOT
+> `requirement_id`.** The AC pass refuted the FK before any code was written. `writeRequirements`
+> (`appRequirements.ts:506`, `:535`) runs an unconditional `delete from requirement where opp_id=$1`
+> on every re-extraction of the posting and re-inserts with `default uuid_generate_v4()`, so
+> `requirement.id` does not survive a JD re-parse. **Both existing tables that face the same problem
+> already made the same choice for the same stated reason** — `requirement_coverage`
+> (`schema.ts:553-555`) and `evidence_confirmation` (`:518-520`) each key on the extracted TEXT and
+> say in their own comments that an id or seq is *"destroyed or silently reused"*. A third FK would
+> have broken on the owner's next re-parse and taken every reword link with it.
 
 **Verify or refute that.** If `correction` is the wrong home, say why. Note `source` has a CHECK
 constraint that a fresh value must be added to, and this repo's H39/H39b rule: on production,

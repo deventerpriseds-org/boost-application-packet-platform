@@ -6169,6 +6169,41 @@ assuming a format is equivalent.
   bold. Two Stop cycles were spent on this. Write `Fact Finding: ...`, unformatted, every block.
 
 
+### Feature status, end of 2026-09-02
+
+**LIVE on `main` `b8e3246`** — the unread-analysis reader. `GET /app/packet/{id}/analysis`,
+`packetAnalysis.js`, `AnalysisPanel` on the JD step, semi-dynamic cache keyed `(packetId, builtAt)`.
+Five guards, all mutation-proved. Deploys confirmed: api `33690495389`, web `33690495375`. ~16,000
+characters per build that had been stored since P7 and never displayed now have a reader.
+
+**DESIGN READY, NOT BUILT — the reword link.** `correction.requirement_text`, never
+`requirement_id`. The FK was refuted before any code existed because `writeRequirements` deletes and
+re-inserts every requirement on a JD re-parse. Two existing tables already made this exact choice for
+this exact reason and say so in the schema.
+
+**STARTED, NOT BUILT — MasterContext into Postgres.** AC pass running. The sweep found **no single
+accessor**: 10 raw read sites, 9 files, `pipeline.ts` twice. The migration is therefore two commits,
+not one — introduce the accessor, then swap the store.
+
+**BLOCKED ON A FACT, not a decision:** who WRITES `MasterContext`. The sweep found readers only. If
+the writer is outside this repo the move is the wrong first step, and no amount of AC work changes
+that.
+
+### The accuracy measurement now exists, and its first act was to correct me
+
+`scripts/accuracy-trend.mjs` counts verdicts across every `VERIFY-*.md`. Baseline: **19 passes, 31
+refuted / 171 = 18%**, earlier half 20%, recent half 16%.
+
+**It caught my own reported figures within a minute.** I had told the owner "~398 confirmed, ~67
+refuted" from `grep -c CONFIRMED`, which counts every line containing the WORD — including prose like
+*"confirmed by reading the source"*. The real counts are 140 and 31: inflated ~2.5x, and already
+written into the accuracy log as its baseline. **The inflated version flattered me** — a bigger
+denominator makes the rate look smaller.
+
+The lesson is not "grep carefully". It is that **a number produced by a convenient command is a
+claim, and claims get checked** — including, especially, the ones measuring my own reliability. The
+tool refuses to weight by severity for the same reason: that is the knob that makes a bad month look
+fine.
 ### Citation resolution: measured, not guarded (2026-09-02)
 
 682 H-tests defined, 97 cited by name, **6 resolve to nothing** (see `actions.md` ACT-2026-09-02-k
@@ -6212,6 +6247,56 @@ because the rewrite removed the single-file `readFileSync` the row names, so `de
 failed. A stale-row guard reporting its own row stale is the mechanism working exactly as designed —
 row CLOSED, not silenced. api 1063/1063, app 441/441, `tsc` clean.
 
+## 2026-09-03 — verify.sh was destroying the artifacts its own passes wrote
+
+**The root cause behind every "hollow AC artifact" in this repo.** Every AC/verifier brief tells the
+pass to write into `docs/qc-evidence/<the artifact>` AS IT GOES and commit per section (the standing
+defence against a container restore). `verify.sh` then wrote `header + the model's closing reply` to
+that SAME path at the end of the run. The reply wins. Measured: `AC-reword-criteria.md` was 40,222
+bytes / 24 criteria at 04:25 and a 2,833-byte summary at 04:28, replaced by its own run. Recovered
+from HEAD only because per-section commits existed.
+
+Fixed in `eds-claude-skills` `184560f`: `$OUT` is fingerprinted before the run; if the pass wrote it,
+that content is kept and the reply becomes a `## Run reply` appendix. Also `fe097dd` (`artifact_shape.py`
+— one predicate for "does this artifact hold its deliverable", wired into verify.sh at production
+time and test_verdict_contract at gate time) and `d7a9b54` (`mutate.sh` matched `FAIL  <name>` with
+TWO spaces; ten of twelve checkers here print one — a matcher whose comment claimed it had ended the
+misreport worked for one suite in twelve). All three mutation-proved.
+
+**Feature status — two TIER 1 AC passes landed with real criteria, implementation NOT started:**
+- `AC-reword-criteria.md` (24 criteria) — the ResumeSummary reword + paraphrase→requirement link.
+  Settles the `figureEcho.ts:422-445` refusal tension with three code-enforced narrowings, keeps
+  `ResumeSummary` OUT of `ATS_SHIPPED_FIELDS` (AC-5a) and adds a SEPARATE labelled count for
+  reword-linked coverage (AC-5b) so link-coverage never silently merges with phrase-match coverage.
+  Smallest first commit is the SCHEMA HALF ONLY — `source` 4th value `'reworded'` in all three DDL
+  homes, `requirement_text` by ALTER, the `H:reword-requirement-text-required` CHECK, and
+  `H:correction-ensure-table-widens-source-too` (a real gap: `ensureCorrectionTable()` has no
+  `source`-widening ALTER, so the deploy window would reject reword rows).
+- `AC-mastercontext-to-postgres.md` (9 criteria) — sequencing confirmed (one accessor first, store
+  swap second). AC-9 requires a NON-DESTRUCTIVE migration: the Storage row and the raw-read code
+  stay for a full release cycle. **Owner confirmed 2026-09-03: the Storage row is a one-time seed
+  with no writer, and becomes a cold backup once the copy lands.** Three open questions for the
+  owner are recorded in §5 of that artifact.
+
+### MasterContext move — commits 1 and 2a are LANDED on the branch (not on main)
+- `5f4c0c9` one accessor (`api/src/functions/tests/masterContext.ts`), Storage backing unchanged.
+  Six product call sites behind it; MT-XX harness exempt (not the product). Guard
+  `H:mastercontext-one-accessor`, mutation-proved.
+- `d85934d` `owner_master_block` table, per-owner PK, `itemsToOmit` unstorable by CHECK. Executed
+  against a POPULATED local Postgres (main's schema, seeded rows, then this on top: psql exit 0)
+  and proven behaviourally. Guard `H:mastercontext-block-key-domain` compares the SQL CHECK to
+  `Object.keys(MC_KIND)`, mutation-proved.
+- 1065/1065 tests pass, api build clean.
+
+**NEXT AND IT NEEDS ONE DECISION.** The copy + reader-switch is blocked on the thing the AC pass
+called out as AC-8: `readMasterContextEntity()` takes no owner, and three of its six callers have no
+owner in scope (`pipeline.loadProfile`, `appFacts`, `diagSkillSources`) — the Storage row had no
+owner concept at all, so nothing ever needed one. Options recorded for the owner: (a) an optional
+owner argument with a settable single-owner default, threading real owners where they exist
+(reversible, additive), or (b) thread an owner through all six first.
+
+**Owner confirmed 2026-09-03:** the Settings text editor for the master profile IS wanted once the
+data is in Postgres — it is no longer an open question, it is the commit after the copy.
 ## 2026-09-02 — the committed fixture is now guarded (ACT-68c)
 
 `api/test/hardening.test.mjs` now carries `H:committed-fixture-passes-the-canary`, which runs the
@@ -6239,3 +6324,164 @@ rows survive an EXACT keyword-in-replacement test.
 
 **Headline on `main` is 172 of 181 (95.0%)**, not the 167/182 I quoted — parallel lanes closed rows
 after I took that count. **Re-count from the file before quoting a parity number.**
+
+## 2026-09-02 — 4.6-8 scoped; the column is not the work (ACT-68e)
+
+`docs/qc-evidence/SCOPE-swap-driving-keyword.md`. **Do not open this as "add a column".**
+`buildSwaps` reads plain item strings from `call3`; `attribute()` is post-hoc `similarity()` at
+`0.34` against the posting line; `RequirementRef` has no `model_keyword`. Nothing knows which
+keyword drove a swap, so the column would be null on every row.
+
+Options: **A** structured generation (TIER 1 — model output into a stored claim, no backfill, needs
+a vet), **B** exact keyword-in-replacement with no causation claim (TIER 2, 2 of 17 rows), **C**
+leave PARTIAL. **Recommended B first.** The middle path — causation off the fuzzy `requirement_id` —
+is refused.
+
+**Awaiting the owner's choice. No code started.**
+
+## Feature status — SPEC 4.6-8 swap attribution (as of 2026-09-03)
+
+| Piece | Status |
+|---|---|
+| Causal sentence `Took the place of X` | **ALREADY SHIPPED** — `keywordDisplacementText` (`app/src/assetBlocks.js:601-609`), rendered at `AssetBlocks.jsx:1201-1207`, hook `BLOCK_HOOKS.keywordDisplaced`. Ungated: no citation, no judge |
+| Its gate | `normLabel(to_label) === normLabel(keyword)` — WHOLE-label equality. **Fires on 0 of 30 swapped rows** on the eMoney packet (containment would fire on 2) |
+| Lane 1 (exact containment -> placement wording) | NOT BUILT |
+| Lane 2 (attribution judge -> causal wording, cite + verify) | NOT BUILT |
+| Acceptance criteria | **DONE** — `docs/qc-evidence/AC-swap-attribution-judge.md`, 11 ACs + feasibility table, authored by an independent `Agent` subagent (`general-purpose`, run_in_background), commit `ebbb71c` |
+| `H:attribution-follows-the-posting-line-not-the-keyword` | **SHIPPED + mutation-proven** (`api/test/hardening.test.mjs`), commit `2cdee60` |
+| Implementation | **NOT STARTED.** TIER 1; blocked on the owner's batching decision (below) |
+
+**AC 0 reframes the work:** the first step is RETIRING an ungated causal claim, not adding one.
+
+**OPEN OWNER DECISION — the ACs contradict an owner instruction, deliberately.** The owner said the
+judge calls should fire in **1-3 batches**; AC 8/AC 10.1 chose **lazy, one call per row on panel
+open**, and state "never batched across rows into fewer". The pass's reasoning: a batched eager pass
+spends calls on every build whether or not the panel is ever opened, and puts the call site beside
+the scoring pipeline, which AC 7 forbids. Not resolved — surfaced to the owner.
+
+## Active work
+Waiting on the owner: lazy-per-row vs batched. No code until that lands.
+
+## Hardening
+
+- **A RENDER CANNOT PROVE AN ABSENCE.** I concluded 4.6-8's causal sentence was unbuilt because it
+  did not appear in my renders. It ships; it is simply dormant on this packet (0 of 30 rows clear its
+  whole-label-equality gate). **A zero-row branch and a missing branch look identical on screen.**
+  This is the fixture canary's rule (*"an instrument that cannot see has no standing to report an
+  absence"*) applied to the APP's data rather than the fixture's, and I walked into it right after
+  the render had earned my trust by correcting four rows. **Before calling any UI element absent,
+  grep `app/src` for the PROTOTYPE'S OWN COPY** — `grep -rn "Took the place" app/src` — not for the
+  control name or the spec id. Full entry in `.claude/accuracy-log.md`.
+
+## 2026-09-03 — the coverage judge had never run on 4 of 5 artifact types (ACT-68k)
+
+**DIAGNOSED, NOT FIXED — and the wording matters.** I first reported this as "fixed live / deployed".
+Wrong: **no code shipped and no deploy ran.** I called `POST /app/artifact/{id}/checks` on THREE
+artifacts, which writes verdict rows. That is data written by hand, the same class of act as running
+a query. **157 of the 160 unjudged artifacts are still unjudged.**
+
+**What is grounded (live reads, reconnected connector):**
+- `chk_coverage_judge` was enabled **2026-09-01 16:45**. Only `resume` had been check-run since;
+  `cover` / `compact_resume` / `portfolio` were last checked **Aug 30, before the judge existed** —
+  so it never had the chance to skip them. **Not a judge defect.**
+- Re-running checks on one cover artifact produced **0 -> 102 verdicts** (`@Company`,
+  `@CoverLetterBody`, `@CoverLetterDate`).
+- Packet-wide after those three runs: **37 of 55 requirements (67%) covered by at least one
+  artifact**, 13 by more than one.
+
+**THE ACTUAL DEFECT UNDERNEATH — nothing re-judges when the requirement set changes.** The resume
+judged **21** requirements on Sep 2; every artifact re-run today sees **34**. The requirement set
+grew and no verdict was invalidated. A verdict carries `judge_version` and `prompt_version` but
+**nothing surfaces "judged against an older requirement set"**, so the product shows a stale
+coverage number as current. The manual re-run I did is precisely what the system never does for
+itself.
+
+**Still blind:** `stuffingJudge` and `supportJudge` write through the checks pipeline with no output
+table, so their yield cannot be measured at all.
+
+## Hardening
+
+- **A metric over the wrong grain reads as a broken model.** "86% of verdicts are `absent`" looked
+  like a failing judge; per REQUIREMENT it is 71% covered. The judge asks ~9.6 fields per
+  requirement, so most `absent` answers are structurally inevitable. **Guardrail: before reporting a
+  rate involving an LLM, state the grain (per pair? per requirement? per artifact?) and check that
+  the denominator is the population the reader cares about.** This was the FOURTH wrong denominator
+  in one session — the others were 2-of-30 vs 2-of-17, one packet generalised to the system, and
+  14,595 requirements vs the 140 on packeted opportunities.
+- **"Deployed" / "fixed" are claims about the live system and need deploy evidence.** I wrote
+  "gap fixed live" for work where no code changed and no workflow deployed. **Guardrail: if
+  `git log` and the deploy runs do not show a change, the verb is "diagnosed", "measured" or
+  "demonstrated" — never "fixed" or "deployed".** Caught by the Stop gate, not by me.
+- **Owner's heuristic is worth keeping as a standing probe:** *an LLM present with low output
+  numbers means it is misused or underused.* Applied app-wide it found four artifact types with zero
+  verdicts. **Re-run the sweep in `docs/qc-evidence/LLM-YIELD-SWEEP.md` whenever a judge is enabled
+  or a model path is added.**
+
+## 2026-08-29 — EDS discipline stack v19 armed in-session; boost-pg-mcp-write is the live-DB path
+
+New parallel session on this repo. `setup.sh` from `eds-claude-skills` (`cbf8f7b`, v19) run and
+**verified from disk rather than from its own exit code**. Full evidence in `actions.md`
+(`ACT-2026-08-29-a`); the parts worth carrying forward:
+
+**What is now enforced mechanically, not by my memory of a rule.** Six hooks at `_eds_version: 19`
+in `/home/user/.claude/settings.json` — the project-root file, never `launcher-settings.json`, which
+is regenerated from a stock template on every launch and would silently drop them. The `Stop` gate
+runs as a haiku agent and hard-blocks a completion claim; a second `Stop` hook checks the phase tag
+in code, because the model-judged version raced the transcript flush. `PostToolUse` mirrors every
+edit to `refs/heads/eds-wip/<branch>`; `UserPromptSubmit` checks for a container rewind and for
+orphaned subagents, and demands the phase tag on the reply.
+
+**A clean-tree autosave that pushes nothing is the guard working.** `eds-git-guard.sh:87` exits 0 on
+an empty `git status --porcelain`. I nearly recorded "autosave pushed no ref" as a defect; the source
+line settles it, and five `eds-wip/*` refs from other lanes prove the push path works through the CCR
+proxy in this repo. Worth remembering because the same shape — an absent artefact read as a broken
+mechanism — is what the ground-truth rule exists to catch.
+
+**`boost-pg-mcp-write` is the one Postgres connector, and it is live.** `connected: true`,
+`enabledInChat: true`; queried directly: `boost_resume_n_packet_builder` as `mcp_readwrite_boost`,
+PG 17.10, 50 public tables, `opportunity`/`persona`/`packet`/`correction`/`requirement` all present.
+The other two were deliberately **not** queried (owner-instructed) — both are `enabledInChat: false`,
+and `Azure_pg_mcp` is a different database entirely. GitHub Actions (`db-query.yml`) stays the
+FALLBACK for when this connector lapses, never the default. Reminder that survives from before: the
+Azure Storage **tables** (`MasterContext`, `AppConfig`, `Prompts`, `JobApplications`) are not in
+Postgres and no connector reaches them — those go through a Function route via `api-test.yml`.
+
+**One honest gap.** `SessionStart` fired before the hooks existed, so `/workspace/eds-claude-skills`
+is absent this session and the banner did not print. Not load-bearing — the org repo is attached at
+`/home/user/eds-claude-skills` and bootstrap was closed with `register_repo_root`. Self-heals next
+session.
+
+**Parallel-session posture.** Started at `2c693d1` with local == `origin/<branch>` == `origin/main`
+and a clean tree. Other sessions are on this same codebase, so the rewind/drift rule is doing double
+duty: `git fetch origin` before every commit, push, deploy **and before answering any status
+question** — a stale local checkout is the specific way a parallel session gets contradicted.
+
+**And that is exactly what happened, within the hour.** By merge time `origin/main` had moved
+`2c693d1` → `1f07992`, ~250 commits from parallel lanes. The fetch-before-answering rule paid twice:
+
+- **A count I had already given the owner went stale.** I answered "43 `OPEN`" for
+  `.claude/DEFERRED.md` from the pre-merge tree; the merged tree is **45 `OPEN` / 50 `CLOSED` / 95
+  rows**. Counted both times with the ledger's own parser rather than by eye, which is the only
+  reason the drift was visible at all. **A count from a repo with active parallel lanes is valid
+  only for the SHA it was taken at — quote the SHA with the number, or it will be wrong by the time
+  it is read.**
+- **An ID I minted was already taken, twice.** `ACT-2026-08-29-a` existed on `main` from two other
+  lanes. Renamed mine to `ACT-2026-08-29-e`.
+
+## Hardening — 2026-08-29: `actions.md` has no duplicate-ID guard, and it shows
+
+`DEFERRED.md` is machine-checked by `api/test/deferredLedger.test.mjs`, whose `one-id-one-row`
+assertion makes a duplicate `D` row fail the suite. **`actions.md` has no equivalent**, and the
+consequence is measurable on `main` right now: `ACT-2026-08-29-a` (x2), `ACT-68` and `ACT-69` each
+name two rows, none of them mine, all pre-existing (`git show origin/main:.claude/actions.md |
+grep -oE '^## ACT-[A-Za-z0-9-]+' | sort | uniq -d`).
+
+Root cause is the one `H26` already named for the `H`-counter and the `D`-counter: **a per-file
+numeric or date-sequential ID requires coordination between branches that cannot see each other.**
+`DEFERRED.md` solved it with slugs plus a guard. `actions.md` adopted the date format but never got
+the guard, so it inherited the collision without the detection.
+
+Not fixed here, deliberately: the rows belong to other lanes and repairing them would widen a
+tracking-docs PR into someone else's history. The guard itself — a `one-act-id-one-row` assertion
+mirroring `one-id-one-row` — is the right fix and is a change to a file that decides a gate, so it
+is TIER 1 and needs its own AC pass. Left as the owner's call rather than bolted on here.

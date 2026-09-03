@@ -10,6 +10,7 @@ import { parseAgentJson, isEmptyResult } from './agentJson'
 import { loadPipelineSettings, requireDriveId, isDriveId, isEmailish, CONFIG_KEYS, PipelineSettings } from './pipelineConfig'
 import { copyThen, deleteDriveFile } from './packetTemplates'
 import { buildScopedPrompt } from './remediation'
+import { readMasterContextEntity } from './masterContext'
 
 const CONN = process.env.AZURE_STORAGE_CONNECTION_STRING!
 const HEADERS = {
@@ -204,9 +205,7 @@ export function runOutcome(o: { caught: boolean; docCount: number; emailsSent: n
 
 /** Load the MasterContext profile on its own. The loop needs it; a full generation does not. */
 export async function loadProfile(): Promise<{ profileText: string; omitList: string }> {
-  const ctxClient = TableClient.fromConnectionString(CONN, 'MasterContext')
-  let mc: any = {}
-  for await (const e of ctxClient.listEntities({ queryOptions: { filter: "PartitionKey eq 'context'" } })) mc = e
+  const { entity: mc } = await readMasterContextEntity()
   return profileFromMasterContext(mc)
 }
 
@@ -386,9 +385,7 @@ export async function buildPackageForJD(opts: { key: string; jd: string; roleTyp
     warnings.push(`Prompts "${a}" and "${b}" are byte-identical (${prompts[a].length} chars) — one of the two roles is not being performed. Edit it in the dev console's Prompts screen.`)
   }
 
-  const ctxClient = TableClient.fromConnectionString(CONN, 'MasterContext')
-  let mc: any = {}
-  for await (const e of ctxClient.listEntities({ queryOptions: { filter: "PartitionKey eq 'context'" } })) mc = e
+  const { entity: mc } = await readMasterContextEntity()
 
   // `temperature` was never sent, so the Chat Completions default applied to all three calls —
   // including the reconciliation pass, which is the one call in the run that should be the least

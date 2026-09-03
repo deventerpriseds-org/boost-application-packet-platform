@@ -2,15 +2,14 @@
 //
 // All derivation logic is in `ownerFacts.ts`, which imports neither @azure/functions nor pg (H12).
 import { app, HttpRequest, HttpResponseInit, InvocationContext } from '@azure/functions'
-import { TableClient } from '@azure/data-tables'
 import { resolveOwner, requireWrite } from './appSession'
 import { getPgClient } from './pgClient'
 import { FACT_CATALOGUE, FACT_BY_KEY, deriveFacts, proposeMissingFacts, OwnerFact } from './ownerFacts'
 import { getGoogleOAuthToken } from './googleAuth'
 import { templateText, RESUME_TEMPLATE_ID } from './packetTemplates'
 import { profileRecords, ProfileRecord } from './evidence'
+import { readMasterContextEntity } from './masterContext'
 
-const CONN = process.env.AZURE_STORAGE_CONNECTION_STRING!
 const HEADERS = { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': '*', 'Access-Control-Allow-Methods': 'GET,POST,OPTIONS' }
 
 export async function loadFacts(client: any, owner: string): Promise<OwnerFact[]> {
@@ -43,8 +42,7 @@ export async function sourceText(): Promise<{ text: string; sources: string[]; r
   } catch (e) { sources.push(`resume template UNREADABLE: ${String((e as any)?.message || e)}`) }
 
   try {
-    const ctx = TableClient.fromConnectionString(CONN, 'MasterContext')
-    for await (const e of ctx.listEntities({ queryOptions: { filter: "PartitionKey eq 'context'" } })) mc = e
+    mc = (await readMasterContextEntity()).entity
   } catch (e) { sources.push(`MasterContext UNREADABLE: ${String((e as any)?.message || e)}`) }
 
   // ONE membership rule, in ONE place. `profileRecords` decides what counts as the profile — EVERY

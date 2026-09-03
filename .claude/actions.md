@@ -7721,6 +7721,38 @@ regex only, not a semantic rewrite. Inherent to string matching.
 (different formula), and the 4th `fixture-canary.mjs` REQUIRED entry (blocked until
 `fixture-refresh.yml` is dispatched).
 
+
+## ACT:reword-link + ACT:mastercontext-move — design corrected, migration started (2026-09-02)
+
+Owner: *"fix the reword design and start mastercontext in parallel."* Both landed on
+`claude/incumbent-wins-swap` at **`86e0e0b`**; the reader that preceded them is LIVE on `main`
+**`b8e3246`** (api run `33690495389`, web run `33690495375`, both success).
+
+**ACT:reword-link — DESIGN CORRECTED, not yet built.** `correction.requirement_id` is REFUTED and
+replaced by `correction.requirement_text`. Evidence: `AC-reword-carries-the-link.md` §3c, which
+found `writeRequirements` (`appRequirements.ts:506`, `:535`) runs an unconditional
+`delete from requirement where opp_id=$1` on every re-extraction and re-inserts with
+`default uuid_generate_v4()`. The id does not survive a JD re-parse. `requirement_coverage`
+(`schema.ts:553-555`) and `evidence_confirmation` (`:518-520`) already key on the extracted TEXT and
+each say in its own comment that an id or seq is *"destroyed or silently reused"*. A third FK would
+have broken on the owner's next re-parse and taken every reword link with it. **Status: design ready,
+implementation NOT started.**
+
+**ACT:mastercontext-move — AC pass launched, and the sweep resized the work before the brief was
+written.** `grep -rn "PartitionKey eq 'context'" api/src` returns **10 raw read sites across 9
+files** — five in the product (`pipeline.ts` TWICE at `:209`/`:391`, plus `appApply`, `appFacts`,
+`appInsertions`, `diagSkillSources`), the rest the legacy MT-XX harness. There is **no single
+accessor**; `loadMasterBaseline` is the nearest thing and most sites bypass it. Proposed sequencing,
+handed to the pass for confirmation rather than asserted: introduce ONE accessor with the Storage
+backing UNCHANGED, then swap the store. Swapping first is nine simultaneous edits with no way to
+bisect a failure.
+
+**THE OPEN QUESTION THAT COULD RESIZE IT AGAIN:** the sweep found READERS ONLY. Who WRITES
+`MasterContext`? If the writer is the Jotform/zap pipeline or a manual Storage edit, a move Postgres
+owns is overwritten or orphaned on the owner's next edit, and the real first step is a writer. The
+brief forbids assuming a writer exists here because readers do — the same absence-claim error this
+repo's accuracy log is full of, in reverse. **Status: AC pass running, implementation NOT started,
+and it should not start until the writer question is answered.**
 ### ACT-2026-09-02-k — citation resolution MEASURED; six danglers found; guard NOT built, with a reason
 
 Follow-on to ACT-j, which deferred this as "not binary". The owner asked for a visual to weigh the
@@ -7851,6 +7883,27 @@ the custom connectors i added in claude"*.
 **Evidence:** setup output "Skills registered: 16 / Agents registered: 1 / … eds hooks installed
 (version 19)"; `execute_sql` result above; `ListConnectors` output.
 
+### ACT:verify-sh-clobber — CLOSED 2026-09-03
+`verify.sh` overwrote the artifact its own pass had written. Fixed + mutation-proved in
+`eds-claude-skills` `184560f`; the shape guard that surfaced it is `fe097dd`, and the `mutate.sh`
+matcher that could not prove it is `d7a9b54`. Evidence: this repo's `.claude/accuracy-log.md`
+entry "2026-09-03 — I LAUNCHED TWO AC PASSES AND READ NEITHER ARTIFACT" plus its two corrections.
+
+### ACT:reword-carries-the-link — ACs LANDED, implementation OPEN
+`docs/qc-evidence/AC-reword-criteria.md` (24 criteria, commit `058ee4d`). First commit is defined in
+§11 and is the schema half only. TIER 1: needs an independent verifier after implementation.
+
+### ACT:mastercontext-to-postgres — ACs LANDED, BLOCKED on three owner questions
+`docs/qc-evidence/AC-mastercontext-to-postgres.md` (9 criteria, commit `ccc28c6`). §5 asks: (1) which
+owner the one-time copy targets, (2) whether `answersFromQuestions` gets real owner resolution now,
+(3) whether a writer for the owner's master text is in scope here or a follow-on. Commit 1 (one
+accessor, Storage backing unchanged) does not depend on any of them.
+
+### ACT:mastercontext-to-postgres — commits 1 + 2a landed, 2b needs one decision
+Landed on `claude/incumbent-wins-swap`: `5f4c0c9` (accessor), `d85934d` (table). Both guards
+mutation-proved; schema executed against a populated local Postgres.
+OPEN: the accessor has no owner parameter and three callers have no owner in scope. Owner has
+already confirmed the Settings text editor is wanted after the copy.
 ### ACT-68c — guard the COMMITTED fixture, not just the canary's rules (2026-09-02)
 
 **Asked:** fix the thing that made the fixture canary fire twice in one measurement pass.
@@ -7917,6 +7970,359 @@ now instead of hand-waved.
 read **172 of 181 (95.0%)** — parallel lanes closed rows in merges I pulled in after taking that
 count. Cover step unchanged at **83 of 84 (98.8%)**, 4.6-8 its only PARTIAL.
 
+### ACT-68e — SCOPE: the `swap_decision` driving-keyword record (2026-09-02)
+
+**Asked:** *"push it and scope the swap_decision keyword column."* #76 merged to `main` at
+`5d81c42` (docs only, nothing deployed). Scope written to
+`docs/qc-evidence/SCOPE-swap-driving-keyword.md`.
+
+**THE HEADLINE: the column is not the work.** Read from source, not assumed —
+`buildSwaps` consumes `splitItems(pkg[f.merge] ?? call3[f.passB])` (`swaps.ts:497`), i.e. plain item
+STRINGS with no per-item provenance; `attribute()` matches them post-hoc by `similarity()` at
+`0.34` against the requirement's verbatim posting line; and `RequirementRef`
+(`swaps.ts:213`) does not carry `model_keyword` at all. **Nothing upstream knows which keyword drove
+a swap**, so a column added today is null on every row — the write-only-field defect this repo
+already hit with `correction.frame`.
+
+**Three options costed.** A = structured generation (TIER 1: admits model output into a stored
+claim, no backfill possible, needs a vet); B = exact keyword-in-replacement with NO causation claim
+(TIER 2, reuses `keywordPresence`, measured 2 of 17 rows); C = leave PARTIAL.
+
+**Recommended: B first, A only if the owner wants true causation.** B de-risks A by building the
+slot and copy so A later swaps only the CONDITION. The middle path — rendering causation off the
+fuzzy `requirement_id` — is explicitly REFUSED (`CLAUDE.md:432`).
+
+**Owner decision required before any code.** Option A is Tier 1 and needs an independent AC pass
+first; Option B is Tier 2 and can start on a go-ahead.
+
+### ACT-68f — 4.6-8 DECIDED: exact settles what it can, judge takes the rest (2026-09-02)
+
+**Owner's decision**, after rejecting my three-option menu as the wrong menu: *"I thought that's when
+the judge llm was supposed to come into play? we know keyword is insufficient"*, then
+*"I want a hybrid ... the keyword can try and land x% and the judge can cleanup and confirm/settle
+the rest"*, sharpened to **confirm what exact containment tried to settle AS WELL AS the remainder**.
+
+**The design — TWO LANES, no overlap, each claiming only what its own evidence supports.**
+1. **Exact containment settles what it can, with no model.** Where `requirement.model_keyword`
+   appears verbatim in `to_label`, the panel says so as PLACEMENT — *"'global engineering' is in
+   'Global Engineering Teams', which replaced 'Agile Transformation'"*. True by containment.
+2. **The judge takes the remainder.** There it may make the causal statement (*"Took the place of
+   X"*), because it must CITE and code verifies the citation byte-exact. No citation -> `absent`,
+   and the panel stays quiet.
+
+**The judge does NOT re-check the exact matches.** An intermediate version of this entry said it
+should. That was mine, not the owner's: I read their "confirm what exact containment tried to settle"
+as requiring a second pass over the deterministic rows, wrote it into the brief, and read it back.
+The owner withdrew it — *"forget I corrected you on confirmation... what you read back seemed super
+complicated"* — and they were right. **What made it complicated was my insisting both lanes make the
+SAME claim.** They need not: placement and causation are different statements with different
+evidence, and once each lane says only what it can prove, the confirmation pass disappears. Spending
+model calls to re-confirm a string comparison is cost with no finding.
+
+**MY MISS, and it is the reason this took four turns.** I proposed three NEW mechanisms (change the
+generation contract / exact-only / posting-line-anchored) without grepping for the system that
+already does exactly this. **Three judges ship on one contract** — `coverageJudge`, `supportJudge`,
+`stuffingJudge` — each built because an exact rule was too blunt, each leaving that exact rule in
+place as the cheap half, each requiring the model to CITE and code to VERIFY the citation byte-exact.
+`coverageJudge.ts:18-24` even records that the owner already moved the house rule
+(*"a model may PROPOSE, only an exact rule may ACCUSE"*) for precisely this case. **"Extend, don't
+duplicate" names this failure and I walked past it.** Logged in `.claude/accuracy-log.md`.
+
+**Also corrected: I over-priced the judge.** I told the owner Option A meant a generation-contract
+change with no backfill and "never on today's packets". That is true of A and FALSE of the judge:
+a judge runs after the fact on stored rows, so generation is untouched and **existing packets can be
+re-judged**.
+
+**Measured inputs the ACs must reckon with:** 30 `swapped` rows; 17 carry `requirement_id`;
+**8 of those 17 share ZERO tokens** between keyword and replacement (`AI governance` vs
+`Risk Management`, at confidence **1.000** — because confidence scores the replacement against the
+POSTING LINE, never the keyword); only **2 of 17** contain the keyword verbatim.
+
+**TIER 1** — a stored verdict is a claim. Independent AC pass launched via
+`eds-claude-skills/scripts/verify.sh --kind AC swap-attribution-judge`; artifact
+`AC-swap-attribution-judge.md`. **No implementation until those ACs land.**
+
+**The 0.34 fuzzy link is DEMOTED**, not deleted: it becomes a shortlist handed to the judge to narrow
+which requirements to ask about, and must never reach the screen as a claim.
+
+### ACT-68g — scope refreshed, cost sized, attribution guard shipped (2026-09-03)
+
+**Asked:** *"go ahead on all 3, refresh scope first."* All three done.
+
+**1. `SCOPE-swap-driving-keyword.md` REWRITTEN** to the two-lane decision, and it opens by naming
+what the first version got wrong: it offered three options and none was the judge, and it over-priced
+the judge as a generation-contract change when a judge runs after the fact on stored rows.
+
+**2. `COST-swap-attribution-judge.md` — sized from real counts, and the headline is uncomfortable.**
+One call per swap row (`coverageJudge`'s shape is many-requirements-against-one-text, so 28 calls,
+not 980). **Lane 1 removes only 2 of 30 rows — about 7%.** The owner asked what percentage the
+keyword lane lands; that is the answer, and it means **this is a judge feature with a free fast
+path, not a keyword feature with a judge safety net.** Named plainly so nobody plans as though the
+deterministic half carries the load.
+
+**3. `H:attribution-follows-the-posting-line-not-the-keyword` — MUTATION-PROVEN.**
+Behavioural, not a source grep, deliberately: a grep banning `model_keyword` near `attribute` would
+fire on the planned legitimate change (threading the keyword in to build the judge's shortlist).
+What must never change is that the ATTRIBUTION is decided by the posting line. Mutation: made
+`attribute()` also match on `model_keyword` -> **142 pass became 141 pass / 1 fail**; restored via
+`git checkout HEAD --`, verified clean against HEAD, back to 142/142. **FIRED, not INERT.**
+
+**THE AC PASS FAILED AND MUST BE RE-RUN.** `verify.sh --kind AC swap-attribution-judge` reported
+`RUN_STATUS: OK` after 28 turns / 319s / **$2.775**, and wrote **no feasibility table and no
+criteria** — the artifact body is a single line of the agent's own process commentary about run
+state. Probable cause: the killed first run had left an artifact at the same path, and the brief
+told the agent to write there incrementally, so it reasoned about the file it found instead of
+producing the document. **Clearing the stale artifact before relaunching.** Cost of the lesson:
+$2.775 and five minutes, and it is worth recording that `RUN_STATUS: OK` says the process exited
+cleanly, NOT that the pass produced anything.
+
+### ACT-68h — the AC pass landed, and it corrected two of my numbers (2026-09-03)
+
+**Criteria:** `docs/qc-evidence/AC-swap-attribution-judge.md` — feasibility table where every row
+cites the command it ran, 45 numbered ACs in A-K groups, then a section on what the brief gets wrong.
+Authored by an independent `Agent` subagent (`general-purpose`, backgrounded, 46 tool uses, 505s).
+**No source file was modified by it.**
+
+**A CONCURRENT LANE WROTE TO THE SAME PATH.** The subagent reported it mid-pass and rewrote its own
+document atomically. Consequence for the record, stated plainly rather than quietly fixed:
+- `ebbb71c` committed a **539-line, 11-AC document that was the OTHER lane's**, and I described its
+  findings to the owner as my subagent's.
+- `4372cdb` (the memory.md commit, `git add -A`) then swept up my subagent's **381-line** document,
+  which is what HEAD carries now.
+**Both documents independently found the same headline defect**, which is corroboration rather than
+confusion — but the provenance in my report was wrong and is corrected here.
+**Lesson: `docs/qc-evidence/` is shared ground in a multi-lane session. An agent writing there needs
+a lane-unique filename.**
+
+**FINDING 1 — the causal sentence already ships.** `keywordDisplacement`/`keywordDisplacementText`
+(`assetBlocks.js:591,609`) print *"Took the place of X"* from a purely deterministic match, rendered
+at `AssetBlocks.jsx:1202-1206`, guarded by four `H:displacement-*` tests. **So the work is moving a
+live causal sentence behind a judge and re-wording the exact lane — a behaviour change to shipped
+UI, not a greenfield addition.**
+
+**FINDING 2 — my COST doc's denominator was wrong, and the owner was told it twice.**
+I reported *"lane 1 lands 2 of 30 — about 7%"*. That mixes populations: only **17** of the 30 swapped
+rows carry a `requirement_id`, and without one no keyword is associated with the row at all.
+**Correct: 2 of 17 = 12%, and the judgeable remainder is 15 pairs, not 28** — my figure overstated
+the population by ~87%. Verified independently before accepting it. Cost doc corrected.
+
+**FINDING 3 — the shipped exact lane is EQUALITY, not containment, and fires zero times here.** The
+code comment at `AssetBlocks.jsx:1187` cites a production-wide "11 of them joining exactly"
+(run 33687166561) which does not hold on this packet: the intersection of the 35 normalised keywords
+and the 30 normalised swapped `to_label`s is **empty**.
+
+**FINDING 4 — `Put back` exists but is DROP-scoped.** `restoreOptions` filters `action === 'dropped'`;
+the swap case is genuinely absent (both producers and consumers swept). AC 22 requires EXTENDING that
+control rather than composing a second `Put back` string.
+
+**Every measured claim in my brief reproduced exactly** — 43 rows, 30 swapped, 17 with
+`requirement_id`, 8 of 17 at zero overlap, 2 of 17 verbatim, including the worked example.
+
+**Could not verify:** no live DB (the connector reports *requires authentication*), so every number
+is from the committed dump; and the pass did not read the prototype at `docs/qc-evidence/qc/assets.jsx`.
+
+**Still open for the owner:** the ACs choose **one request per packet per loop** (splitting per list
+only on overflow, per-pair prompts so batching cannot change a cached answer) — which now AGREES with
+the owner's 1-3 batch instruction. The earlier 11-AC document's lazy-per-row design was the other
+lane's, not this pass's, and my previous message attributed it wrongly.
+
+### ACT-68j — one lane, not two; `added` is a breach; LLM yield swept app-wide (2026-09-03)
+
+**Owner, on my two-lane design:** *"why do I care about only 2 matching the keyword when we added a
+judge llm? explain to me why an llm doesn't make all of this mute? everything you showed me in the
+artifact is about word matching."* **They are right and the artifact was measuring the wrong thing.**
+
+`buildCoverageUser(reqs, fieldName, fieldText)` (`coverageJudge.ts:114`) takes CANDIDATE
+REQUIREMENTS and a TEXT. It never consults `requirement_id`. So the whole word-matching funnel I
+published constrains only the free lane. Live reach: exact containment **3 of 35**; the judge
+**35 of 35**. Lane 1 saves 2-3 decisions inside a call that is batched anyway — **zero calls saved**
+— for a second code path, a second wording and its own tests.
+**SCOPE SIMPLIFIED TO ONE LANE.** The 0.34 matcher is not needed even as a shortlist.
+
+**Owner, on `added`:** *"there is no such thing as added everything proposed to be added must swap a
+item if lesser relevance from the template."* **Confirmed from the code, which already says it:**
+`swaps.ts:656` — *"UNPAIRED FINAL LEFTOVER — more items shipped than the baseline had. The other
+half of the same violation."* An `added` row is a recorded FIXED-SLOT BREACH, not a category.
+**8 live: 7 Trinnex, 1 eMoney.** I had proposed pulling them into scope; wrong twice over.
+
+**Owner's heuristic, applied app-wide:** *"if there is any instance with an llm but low numbers
+something is likely off."* Swept every model-output store -> `docs/qc-evidence/LLM-YIELD-SWEEP.md`.
+
+- **Fair denominator matters and I nearly botched it again.** Against all 14,595 requirements the
+  judge looks like 1.4%. But only **40 of 2,310 opportunities have a packet**, carrying **140
+  requirements** — the only ones anything runs on. Judged: **21 of 140 (15%)**.
+- **NOT a defect, and I am not calling it one.** `chk_coverage_judge = true` live; the code default
+  is `false` deliberately (it changes a check's state); and `chk_coverage_judge_max = 12` counts
+  **one call per FIELD, not per requirement** (`checks.ts:131-133`), so the cap is not a throttle.
+  15% is consistent with a recently-enabled judge and two built packets.
+- **What IS open: 86% of verdicts are `absent`** (173 of 201; 28 covered). Either the documents
+  really do not address those lines, or `judgeableFields` is handing the judge text that was never
+  going to. **One query separates them** — group `absent` by `field`; clustered means field
+  selection, spread means honest. **Not run yet, and recorded as the next measurement rather than
+  guessed.**
+- **Instrument gap:** `stuffingJudge` and `supportJudge` write through the checks pipeline with no
+  table of their own, so this sweep **cannot see their yield at all.** Fix the instrument before
+  repeating the exercise on them.
+
+### ACT-68i — went to the LIVE DB; the "2 of 30" was one packet and the wrong action (2026-09-03)
+
+**Owner corrected a standing rule.** `CLAUDE.md` said NUDGE AND STOP when `boost-pg-mcp-write` is
+lapsed, and forbade "quietly rerouting" through `db-query.yml`. Owner: *"forgoing data is absolutely
+unacceptable."* **Rule rewritten: take the fallback AND ask for a refresh, in the same turn.** The old
+wording traded the DATA for the owner's convenience in picking a transport. Real cost, same day: the
+AC pass shipped with every number from a committed fixture and an explicit "no live DB read was
+possible" — while `db-query.yml` was available throughout.
+
+**What the live DB then showed (runs 33725299168, 33725363643):**
+
+| packet | action | rows | with_req | kw exact |
+|---|---|---:|---:|---:|
+| eMoney `4860ae3b` | swapped | 30 | 17 | 2 |
+| eMoney `4860ae3b` | **added** | 1 | 0 | 0 |
+| Trinnex `85cee965` | swapped | 5 | 2 | **1** |
+| Trinnex `85cee965` | **added** | 7 | 7 | **1** |
+
+**TWO defects in my own measurement, both of the shape the owner predicted:**
+1. **Single-packet sample generalised.** Every figure I gave came from one saved snapshot. The DB
+   holds two packets and the second behaves nothing like the first — Trinnex lands **1 of 2** matched
+   swaps against eMoney's 2 of 17. **No single percentage describes this feature**, so the "12%"
+   was one packet's number wearing a general claim's clothes.
+2. **`added` rows were never in the population.** I only queried `action='swapped'`. There are
+   **8 `added` rows, 7 carrying a matched requirement** — a HIGHER hit rate than swaps. An added item
+   displaced nothing so "Took the place of X" does not apply, but "this keyword landed here" does.
+   **The keyword lane has been sized against the wrong denominator throughout.**
+
+**Consequence for the ACs:** the AC pass's feasibility table is fixture-derived and its population is
+swapped-only. It needs a live re-grounding pass before implementation, and the ACs must say whether
+`added` rows are in scope.
+
+**Lineage published** — every table, column and transform, with the live counts and both defects:
+`https://claude.ai/code/artifact/cba98e9b-a9e4-4f5a-9165-29b3abe78f9c`
+
+### ACT-68k — the judge was never run on 4 of 5 artifact types; fixed, no code (2026-09-03)
+
+**Owner:** *"merge 79.. run the query then run it again after fixing the instrument gap. go
+continuously until all done ...the connection is refreshed."* #79 merged to `main` at `6d0bb80`.
+Connector live again — every query below is ~1s direct, no workflow.
+
+**ROUND 1 — the query inverted the finding.** Grouping `absent` by field showed it SPREAD across all
+seven fields, not clustered, so it was never a `judgeableFields` selection bug. The cause is the
+metric: the judge asks **9.6 fields per requirement**, so most `absent` answers are structurally
+inevitable.
+
+| metric | value | reads as |
+|---|---|---|
+| absent / field-question pairs | 173 of 201 = **86% absent** | broken |
+| requirements covered by >=1 field | **15 of 21 = 71%** | working well |
+
+**My fourth wrong denominator of the day**, and the same shape as the other three.
+
+**ROUND 2 — the real finding, and the owner's heuristic paying off.** Four of five artifact types had
+**ZERO** coverage verdicts: `cover`, `compact_resume`, `portfolio`, `video`. 160 of 200 artifacts,
+including the cover letter this whole session has been about.
+
+**NOT a judge defect — and I nearly called it one.** `chk_coverage_judge` was enabled
+**2026-09-01 16:45**; only `resume` had been check-run since (2 runs). The others were last checked
+**Aug 30 12:10, before the judge existed.** It never had the chance to skip them.
+
+**FIXED WITH NO CODE CHANGE.** `POST /app/artifact/{id}/checks` on one artifact of each type. The
+cover letter went **0 -> 102 verdicts** on the first run (`@Company`, `@CoverLetterBody`,
+`@CoverLetterDate`).
+
+| type | requirements judged | covered | % |
+|---|---:|---:|---:|
+| resume | 21 | 15 | 71% |
+| compact_resume | 34 | 20 | 59% |
+| cover | 34 | 12 | 35% |
+| portfolio | 34 | 10 | 29% |
+
+**ACROSS THE PACKET: 37 of 55 requirements (67%) covered by at least one artifact; 13 by more than
+one.** That is the number `must_have_coverage` should be reflecting.
+
+**NEW ISSUE FOUND: the resume's verdicts are STALE.** It judged 21 requirements on Sep 2; every type
+re-run today sees 34. The requirement set grew and nothing re-judged the resume. **That staleness is
+invisible in the product** — a verdict carries `judge_version`/`prompt_version` but nothing surfaces
+"this was judged against an older requirement set."
+
+**STILL OPEN:** `stuffingJudge` and `supportJudge` have no output table, so this sweep cannot see
+their yield at all. That instrument gap is unfixed.
+
+## ACT-2026-08-29-e — EDS setup.sh v19 armed on the `lkjoid` lane + boost-pg-mcp-write confirmed live
+
+**Request (owner):** run `setup.sh` from the eds-claude-skills repo, summarise every hook / skill /
+subagent officially registered, state the resulting function-development approach, and add the
+`boost-pg-mcp-write` custom connector. Session runs in PARALLEL with other sessions on this repo.
+
+**Status: DONE — verified on disk, not from the script's own success message.**
+
+- `bash setup.sh` (repo `deventerpriseds-org/eds-claude-skills`, HEAD `cbf8f7b`, `CURRENT_VERSION = 19`)
+  exited **0**. Log: `scratchpad/setup-run.log`.
+- **6 hook objects across 4 events**, all `_eds_version: 19`, written to
+  `/home/user/.claude/settings.json` (re-read from disk to confirm persistence):
+  `SessionStart` (discipline banner + workspace clone + memory/actions/accuracy-log replay),
+  `Stop` x2 (haiku verification-gate agent + `eds-phase-tag.py`),
+  `PostToolUse[Write|Edit|NotebookEdit]` (`eds-git-guard.sh autosave`),
+  `UserPromptSubmit` x2 (`eds-git-guard.sh check` + `eds-agent-guard.sh reconcile`; phase-tag printf).
+- `launcher-settings.json` carries **only** `permissions.allow`
+  (`Skill`, `mcp__github__create_repository`, `mcp__github__fork_repository`) and
+  `autoMode.allow` (`$defaults`, `Bash(git push*)`). `grep -c '_eds'` on it = **0** — the v7+
+  migration is correct and no hook can fire twice.
+- Guard scripts installed and **executed**, not merely present: `eds-git-guard.sh` (9684 B),
+  `eds-agent-guard.sh` (3929 B), `eds-phase-tag.py` (7967 B) — all exit 0.
+- **16 org skills** copied to `/root/.claude/skills/`; `verifier` subagent at
+  `/root/.claude/agents/verifier.md`.
+- Bootstrap closed with `register_repo_root(deventerpriseds-org/eds-claude-skills,
+  /home/user/eds-claude-skills)` → `context_reload_requested`.
+
+**`boost-pg-mcp-write` — ground-truthed, not assumed.** `ListConnectors` reports
+`installState: connected`, `connected: true`, `enabledInChat: true`. Live query returned
+`db=boost_resume_n_packet_builder`, `user=mcp_readwrite_boost`, PostgreSQL 17.10, 50 public tables,
+all 5 key tables (`opportunity`, `persona`, `packet`, `correction`, `requirement`) present.
+Per CLAUDE.md the other two Postgres connectors were **not** queried — `Azure_pg_mcp` and
+`Boost_DB_Connector` are both `enabledInChat: false` and neither is the connector the owner refreshes.
+
+**Observation vs interpretation — one thing that reads like a failure and is not.** `autosave` pushed
+**no** WIP ref for this branch. That is correct behaviour, not a broken guard: `eds-git-guard.sh:87`
+is `[ -n "$(git status --porcelain)" ] || exit 0` — a clean tree is a deliberate few-ms no-op. The
+push path itself is proven working in this repo through the CCR proxy by five refs already on origin
+from other lanes (`eds-wip/claude/assistant-panel-float`, `…/incumbent-wins-swap`, `…/jd-field-rename`,
+`…/qc-ledger-live`, `…/qc-p8-1-wire`).
+
+**Known gap, stated rather than papered over.** `SessionStart` had already fired before the hooks were
+installed, so it will not run again in this session: `/workspace/eds-claude-skills` is **absent** and
+the discipline banner / memory replay did not auto-print here. Neither is load-bearing — the org repo
+is attached at `/home/user/eds-claude-skills` and both tracking files were read directly. The hook
+fires normally from the next session onward.
+
+**Parallel-session baseline at start:** boost repo local `HEAD` == `origin/claude/boost-app-setup-approach-lkjoid`
+== `origin/main` == `2c693d1`, clean worktree. Re-fetch before every commit/push per the rewind rule.
+
+**Evidence:** `/home/user/.claude/settings.json` (6 hooks, v19); `scratchpad/setup-run.log:162-164`;
+`ListConnectors` + live `execute_sql` result above.
+
+**MERGE UPDATE — `origin/main` moved from `2c693d1` to `1f07992` while this lane worked.** Roughly
+250 commits from parallel lanes landed. Two things the merge exposed, both recorded rather than
+silently absorbed:
+
+1. **ID collision, avoided.** This row was first written as `ACT-2026-08-29-a`. That ID was ALREADY
+   used twice on `main` by two other lanes (L5412 `…-approach-*` arming, L6199 `…-approach-ejv09v`).
+   Renamed to `ACT-2026-08-29-e`. **Three duplicate IDs remain and are NOT mine** —
+   `ACT-2026-08-29-a` (x2), `ACT-68`, `ACT-69` — all confirmed pre-existing on `origin/main` by
+   `git show origin/main:.claude/actions.md | grep -oE '^## ACT-[A-Za-z0-9-]+' | sort | uniq -d`.
+   Left alone deliberately: they belong to other lanes and fixing them would widen this PR. This is
+   the `actions.md` analogue of the `H26`/`D`-slug rule that retired the numeric counter precisely
+   because parallel branches cannot see each other's IDs. **`actions.md` has no machine check for
+   duplicate ACT ids the way `DEFERRED.md` has one for `D` rows** — that asymmetry is why three
+   collisions sat unnoticed on `main`.
+
+2. **Three other lanes had already recorded the same v19 arming** (`ACT-68`, `ACT-68c`,
+   `ACT-2026-08-29-a`, `ACT-2026-08-29-c`). Kept both sides per this repo's established convention
+   (`main` itself carries "merge origin/main: keep both trackers"). One of them, `ACT-2026-08-29-c`,
+   records a sync to **v27** — this lane armed at **v19**, so v19 is not the newest `setup.sh`.
+
+3. **The open-item count moved with the merge.** `.claude/DEFERRED.md` was 90 rows / 43 `OPEN` at
+   `2c693d1`; at the merged tree it is **95 rows / 45 `OPEN` / 50 `CLOSED`**, counted with the
+   ledger's own parser, not by eye.
 ---
 
 ## ACT-68d — SPEC 4.5-29 / 4.5-30 / 4.6: three "blocked" rows, none of them blocked (2026-09-03)

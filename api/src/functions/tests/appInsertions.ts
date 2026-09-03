@@ -1,12 +1,12 @@
 // P1.4 persistence + read API. All derivation lives in `insertions.ts`, which imports neither
 // @azure/functions nor pg and is exercised by `api/test/insertions.test.mjs`.
 import { app, HttpRequest, HttpResponseInit, InvocationContext } from '@azure/functions'
-import { TableClient } from '@azure/data-tables'
 import { resolveOwner } from './appSession'
 import { getPgClient } from './pgClient'
 import { buildInsertions } from './insertions'
 import { masterBaseline } from './evidence'
 import { RequirementRef } from './swaps'
+import { readMasterContextEntity } from './masterContext'
 
 const HEADERS = { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': '*', 'Access-Control-Allow-Methods': 'GET,OPTIONS' }
 
@@ -24,12 +24,8 @@ const HEADERS = { 'Content-Type': 'application/json', 'Access-Control-Allow-Orig
  */
 export async function loadMasterBaseline(): Promise<Record<string, string>> {
   try {
-    const conn = process.env.AZURE_STORAGE_CONNECTION_STRING
-    if (!conn) return {}
-    const ctx = TableClient.fromConnectionString(conn, 'MasterContext')
-    let mc: any = {}
-    for await (const e of ctx.listEntities({ queryOptions: { filter: "PartitionKey eq 'context'" } })) mc = e
-    return masterBaseline(mc)
+    const { entity } = await readMasterContextEntity()
+    return masterBaseline(entity)
   } catch { return {} }
 }
 
