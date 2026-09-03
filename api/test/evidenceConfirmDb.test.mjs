@@ -268,3 +268,176 @@ test('H:escalation-spends-its-cap-on-must-haves-first: the gate-deciding rows ar
       'every attempt the cap bought must be a must-have while any must-have is still unevidenced')
   } finally { await c.end() }
 })
+
+// ─── F-10: a vetted verdict survives a re-resolve, so the gate stops flapping ──────────────────
+//
+// From an independent verifier: the coverage judge builds a whole cache table on the principle that
+// a model asked twice may answer differently and a flapping gate is worse than a consistently wrong
+// one — while the lane that actually moves `must_have_coverage` had none of it, because the
+// re-resolve deleted every vetted row and the next pass re-asked from scratch.
+//
+// AGAINST A REAL DATABASE, because the fix is one SQL clause. A fake client would happily "pass" a
+// `not (e.method = 'vetted' and e.record_sha256 = any($2::text[]))` that Postgres rejects or that
+// matches nothing.
+
+const RECORD = { key: 'work:career', kind: 'work_history', label: 'Career',
+  text: 'Reduced outages from nine hours to one across the payments platform.' }
+
+test('H:a-vetted-verdict-is-not-thrown-away-by-the-next-resolve',
+  { skip: !HAVE_PG && 'no local postgres' }, async () => {
+  const c = new Client(CONN); await c.connect()
+  try {
+    await c.query(schemaSql()); await ensureEvidenceTable(c)
+    const { opp, req } = await seed(c)
+
+    // A vetted row, exactly as the vet lane writes one: the record's own bytes, its digest, and the
+    // citation in `extra`.
+    const { createHash } = await import('node:crypto')
+    const sha = createHash('sha256').update(RECORD.text, 'utf8').digest('hex')
+    const quote = 'Reduced outages from nine hours to one'
+    await c.query(
+      `insert into requirement_evidence
+         (requirement_id, quote, source_kind, source_label, source_key, char_start, char_end,
+          extra, ratio, method, record_sha256, resolver_version, proposal_version)
+       values ($1,$2,'work_history','Career','work:career',0,$3,'vetted: challenged ...',null,'vetted',$4,1,1)`,
+      [req, quote, quote.length, sha])
+
+    // A re-resolve WITH a transport — the path that used to delete everything. The transport throws,
+    // so nothing new can be written: whatever survives, survived the delete.
+    let asked = 0
+    await writeEvidence(c, opp, [RECORD], { escalate: true, vetProposals: true },
+      (rows) => rows.map(r => ({ seq: r.seq, requirement_text: r.item_text, evidence: null })),
+      async () => { asked++; throw new Error('no proposal') }).catch(() => {})
+
+    const after = (await c.query(
+      `select e.method, e.extra from requirement_evidence e
+         join requirement r on r.id = e.requirement_id where r.opp_id = $1`, [opp])).rows
+    assert.equal(after.length, 1, 'the vetted row survived the re-resolve')
+    assert.equal(after[0].method, 'vetted')
+    assert.match(after[0].extra, /vetted: challenged/, 'with its citation intact')
+    assert.equal(asked, 0,
+      'and the pass did not re-ask about a requirement it had already answered — re-asking is the ' +
+      'flapping this fixes, reintroduced one loop later')
+  } finally { await c.end() }
+})
+
+test('H:an-edited-profile-invalidates-a-vetted-verdict',
+  { skip: !HAVE_PG && 'no local postgres' }, async () => {
+  // The other half, and the reason the digest is the key rather than the method alone. A verdict is
+  // about words that were there; edit them and it must be re-derived, never silently inherited —
+  // the same staleness rule `evidence_confirmation` applies to the owner's own decisions.
+  const c = new Client(CONN); await c.connect()
+  try {
+    await c.query(schemaSql()); await ensureEvidenceTable(c)
+    const { opp, req } = await seed(c)
+    const quote = 'Reduced outages from nine hours to one'
+    await c.query(
+      `insert into requirement_evidence
+         (requirement_id, quote, source_kind, source_label, source_key, char_start, char_end,
+          extra, ratio, method, record_sha256, resolver_version, proposal_version)
+       values ($1,$2,'work_history','Career','work:career',0,$3,'vetted: challenged ...',null,'vetted',$4,1,1)`,
+      [req, quote, quote.length, 'f'.repeat(64)])   // a digest of some OTHER version of the record
+
+    await writeEvidence(c, opp, [RECORD], { escalate: true, vetProposals: true },
+      (rows) => rows.map(r => ({ seq: r.seq, requirement_text: r.item_text, evidence: null })),
+      async () => { throw new Error('no proposal') }).catch(() => {})
+
+    const after = (await c.query(
+      `select count(*)::int n from requirement_evidence e
+         join requirement r on r.id = e.requirement_id where r.opp_id = $1`, [opp])).rows[0].n
+    assert.equal(after, 0, 'a verdict read from a version of the record that no longer exists is dropped')
+  } finally { await c.end() }
+})
+
+/** A VETO written the way the reject route writes one: a decision row, not a withdrawal. */
+const veto = (c, opp, { reqText = REQ, sha = RECORD_SHA } = {}) => c.query(
+  `insert into evidence_confirmation
+     (opp_id, requirement_text, source_key, char_start, char_end, quote, record_sha256,
+      confirmed_by, decision)
+   values ($1,$2,'work:career',3,$3,$4,$5,$6,'vetoed')`,
+  [opp, reqText, 3 + QUOTE.length, QUOTE, sha, OWNER])
+
+test('H:a-veto-never-reads-as-a-confirmation: polarity is checked in the join, not assumed',
+  { skip: !HAVE_PG && 'no local postgres' }, async () => {
+  // WRITTEN BECAUSE A MUTATION CAME BACK INERT. Replacing the loader's
+  // `case when c.decision = 'confirmed' then c.confirmed_at end` with a bare `c.confirmed_at`
+  // changed no test, and that mutation is the single most damaging defect available in this
+  // change: the decision join matches EITHER polarity by design -- the veto has to reach
+  // ruleEvidenceOf through the same identity join -- so without the case, a VETOED row sets
+  // evidence_confirmed_at. isConfirmed then reads true for the exact claim the owner rejected, and
+  // a confirmation is the strongest warrant the gate recognises. Clicking "Not this one" would
+  // PROMOTE the row it was meant to remove, and nothing would have said so.
+  //
+  // Asserted against the real join on a real database, because the defect lives in SQL: a
+  // hand-built fixture would have to reproduce the case expression to be wrong about it, which is
+  // the "can the system PRODUCE your fixture" trap.
+  const c = new Client(CONN); await c.connect()
+  try {
+    await c.query(schemaSql()); await ensureEvidenceTable(c)
+    const { opp } = await seed(c)
+    await veto(c, opp)
+    const row = (await loadRequirementsWithEvidence(c, opp))[0]
+    assert.equal(row.evidence_decision, 'vetoed', 'the veto must reach the loader at all')
+    assert.equal(row.evidence_confirmed_at, null,
+      'A VETO READ AS A CONFIRMATION. The owner rejected this claim and the join reported it as ' +
+      'their approval — the strongest warrant the gate has. The click that removes a row would ' +
+      'promote it instead.')
+    assert.equal(row.evidence_confirmed_by, null,
+      'the actor column must not name the owner as having confirmed what they vetoed')
+  } finally { await c.end() }
+})
+
+test('H:a-veto-is-written-without-a-prior-confirmation: the reject path is not inert',
+  { skip: !HAVE_PG && 'no local postgres' }, async () => {
+  // THE SHIPPED DEFECT THIS LANE EXISTS TO FIX, pinned at the level it failed. The reject branch
+  // was an UPDATE ... where withdrawn_at is null with no INSERT, so a veto could only land on a
+  // claim the owner had ALREADY CONFIRMED. For a proposal they had never confirmed -- the normal
+  // case -- it matched zero rows and still returned ok:true.
+  //
+  // The assertion is deliberately about the NO-PRIOR-ROW path, because the reject branch was
+  // correct for the other one and that is exactly why the bug survived: every state a test would
+  // naturally set up first (confirm, then reject) worked.
+  const c = new Client(CONN); await c.connect()
+  try {
+    await c.query(schemaSql()); await ensureEvidenceTable(c)
+    const { opp } = await seed(c)
+    const before = (await c.query(`select count(*)::int n from evidence_confirmation where opp_id=$1`, [opp])).rows[0].n
+    assert.equal(before, 0, 'fixture must start with no decision of either polarity')
+    await veto(c, opp)
+    const rows = (await c.query(
+      `select decision, withdrawn_at from evidence_confirmation where opp_id=$1`, [opp])).rows
+    assert.equal(rows.length, 1, 'a veto with no prior confirmation must still be recorded')
+    assert.equal(rows[0].decision, 'vetoed')
+    assert.equal(rows[0].withdrawn_at, null,
+      'a veto is a decision, not a withdrawal — overloading withdrawn_at would make "never ' +
+      'confirmed" and "actively rejected" the same row, which are opposite facts')
+  } finally { await c.end() }
+})
+
+test('H:veto-and-confirm-flip-one-row: a claim has exactly one current decision',
+  { skip: !HAVE_PG && 'no local postgres' }, async () => {
+  // The unique key is the CLAIM, so a change of mind must FLIP the row rather than insert a second
+  // one -- and the un-veto direction is the half most easily missed. Without `decision =
+  // 'confirmed'` in the confirm path's ON CONFLICT, a yes arriving after a no would clear
+  // withdrawn_* on a row still reading 'vetoed', and the owner's reversal would be discarded.
+  const c = new Client(CONN); await c.connect()
+  try {
+    await c.query(schemaSql()); await ensureEvidenceTable(c)
+    const { opp } = await seed(c)
+    await veto(c, opp)
+    await c.query(
+      `insert into evidence_confirmation
+         (opp_id, requirement_text, source_key, char_start, char_end, quote, record_sha256,
+          confirmed_by, decision)
+       values ($1,$2,'work:career',3,$3,$4,$5,$6,'confirmed')
+       on conflict (opp_id, requirement_text, source_key, char_start, char_end, record_sha256)
+       do update set decision = 'confirmed', withdrawn_at = null, withdrawn_reason = null`,
+      [opp, REQ, 3 + QUOTE.length, QUOTE, RECORD_SHA, OWNER])
+    const rows = (await c.query(
+      `select decision from evidence_confirmation where opp_id=$1`, [opp])).rows
+    assert.equal(rows.length, 1, 'a reversal must flip the existing row, never add a second')
+    assert.equal(rows[0].decision, 'confirmed', 'the owner un-vetoed and the row must say so')
+    assert.equal((await loadRequirementsWithEvidence(c, opp))[0].evidence_confirmed_at !== null, true,
+      'once un-vetoed the confirmation must be visible to the gate again')
+  } finally { await c.end() }
+})

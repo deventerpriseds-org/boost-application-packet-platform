@@ -85,3 +85,55 @@ and overlap content in some shots.
 | 45-current-app-mode.png | "Current app" — the layer removed, today's behavior |
 | 46-current-app-mode-lower.png | Current app: the collapsed draft string and the empty-chip bug note |
 | 47-qc-layer-highlight-off.png | QC layer with "Highlight additions" off — production appearance |
+
+---
+
+## The APP side, same seven steps (added 2026-08-29)
+
+The 47 captures above are the PROTOTYPE — the denominator `PROTOTYPE-COVERAGE.md` measures against,
+and they do not need re-taking. What was missing was the other half of the comparison: what the app
+actually renders. These seven are that half, taken at the same ~924px width, against real Trinnex
+data (opp `9f9c370a`) through the local fixture harness at `main` = `025a54b`.
+
+| File | Step | app / proto body chars |
+|---|---|---|
+| app-jd.png | Posting analysis | 6,997 / 3,355 |
+| app-resume.png | Resume | 15,889 / 13,990 |
+| app-cover.png | Cover letter | 4,209 / 4,746 |
+| app-portfolio.png | Portfolio | 14,021 / 7,213 |
+| app-video.png | Intro video | 736 / 781 |
+| app-qc.png | QC & evidence | 128,803 / 6,575 |
+| app-send.png | Review & send | 7,720 / 915 |
+
+**READ THESE FOR STRUCTURE, NOT FOR VALUES.** Which panels, controls and states exist is what the
+coverage comparison needs and is what these prove. The specific numbers and findings inside them are
+NOT current: the harness serves a point-in-time fixture dump, so `app-qc.png` shows a
+`skill_char_limit` finding reading *"5 of 20 skills exceed 30 chars"* from an older check run, while
+the live row for that same check reads `pass — 20 skills, longest 22 — every skill <= 24` as of
+15:47 on 2026-08-29. Reading a finding off one of these as current is the exact trap that produced
+three false defect reports earlier the same day.
+
+**Character counts are not a completeness measure either** — the owner named that directly. `app-qc`
+at 19x the prototype is an outlier that still wants explaining, not a score.
+
+Regenerate with `/tmp/render-all.mjs <oppId> <route-keyed fixtures>`; see `LOCAL-RENDER-UAT.md` for
+the fixture requirements, and note `build-fixtures.mjs` must be run on a raw dump first.
+
+## Render pass 2026-09-02 — §4.8 / §4.10 parity (see PROTOTYPE-COVERAGE.md §16)
+
+| File | Instrument | Data | Shows |
+|---|---|---|---|
+| render-0902-live-qc.png | `ui-verify.yml` run 33642950751 | **LIVE production** | QC step: gate, four numbers, per-asset chips, Done for you, Needs a decision |
+| render-0902-live-send.png | `ui-verify.yml` run 33643149667 | **LIVE production** | Review & send: 5 asset rows, gate card `14 items to fix across 5 assets`, `Open field →` on 4 rows |
+| render-0902-tab-coverage.png | `render-app.mjs` | fixture (run 33642945263) | Coverage tab: must-have 7/7, nice-to-have `not measured`, Responsibilities 11/11 |
+| render-0902-tab-compare.png | `render-app.mjs` | fixture | Original vs final: `Undo this` + `Ask why` paired in the last column |
+| render-0902-tab-checks.png | `render-app.mjs` | fixture | Checks tab grouped by rule with named offenders |
+| render-0902-tab-review.png | `render-app.mjs` | fixture | Independent review: prompt source, grade, agreement, citations, critique |
+| render-0902-tab-loops.png | `render-app.mjs` | fixture | Remediation loops: honest "generated once and never revisited" |
+
+**COUNTS OFF THE FIXTURE SHOTS ARE UNUSABLE — structure only.** `fixture-refresh.yml` has no
+`run_id` predicate while the live route does, so the fixture carries every historical check run
+(246 rows / 26 distinct `check_key` on the resume). That is why the fixture `Checks` tab repeats a
+rule and why the older `app-send.png` reads `112 items` where live reads `14`. PROTOTYPE-COVERAGE.md
+§16d has the evidence and the fix. The two `render-0902-live-*.png` shots went through the real
+route and do not have this problem.

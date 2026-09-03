@@ -28,7 +28,9 @@
 // TOKEN STRINGS, never to a rewritten copy of the record that an index is then taken from. This is
 // the H32 class (U+0130 lowercases to two code units, so an index into a lower-cased copy is not an
 // index into the original) and it is invisible to a substring assertion, because the wrong span is
-// still a true substring. See `H:offsets-from-original`.
+// still a true substring. See `H32: an offset is measured on the string it indexes, never on a
+// folded copy` (hardening.test.mjs) -- it pads with case-expanding characters, asserts the offset
+// does not drift, and its own comment records that the substring property held while WRONG.
 import { sentenceBounds, type Span } from './requirements'
 
 /**
@@ -317,7 +319,8 @@ export type RefusalReason =
  * The rules an owner setting can never reach.
  *
  * An owner may tune how much evidence is enough. An owner may not turn on false provenance. Exported
- * so `H:safety-floor-not-configurable` can assert the list is exactly what the code enforces.
+ * so `M17/M37: the safety floor is not owner-configurable, and the list says exactly which rules`
+ * (matcher.test.mjs) can assert the list is exactly what the code enforces.
  */
 /**
  * The gates a candidate excerpt passes, in order. ONE list, so `supportIn` and

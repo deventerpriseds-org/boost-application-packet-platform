@@ -71,13 +71,157 @@ jobs:
             'gates',         (select coalesce(json_agg(row_to_json(g)), '[]'::json)
                               from artifact_gate g
                               where g.artifact_id in (select id from artifact where packet_id = '$PKT')),
-            'checks',        (select coalesce(json_agg(row_to_json(cr)), '[]'::json)
+            -- SCOPED TO THE GATE'S RUN, exactly as the live route is. artifactChecksGet
+            -- (api/src/functions/tests/appChecks.ts) reads
+            --   select * from check_result where artifact_id=<art> and run_id=<gate.run_id> order by check_key
+            -- and returns [] outright when the artifact has no artifact_gate row.
+            --
+            -- WITHOUT THE PREDICATE THIS PULLED THE ARTIFACT'S WHOLE HISTORY, one copy of every rule
+            -- per run. Measured against the live DB 2026-09-02 for the default packet
+            -- 4860ae3b: the resume artifact cb6a1c81 returns 92 rows across 20 distinct check_key
+            -- (gate run: 20), and the resume artifact cfdd82e7 of packet 85cee965 returns 271 across
+            -- 26 (gate run: 25). A locally-rendered Checks tab therefore repeats every rule, and the
+            -- committed screens/app-send.png reads '112 items to fix' where live reads '14'.
+            -- See docs/qc-evidence/PROTOTYPE-COVERAGE.md 17d.
+            --
+            -- THE INNER JOIN CARRIES BOTH HALVES of the route's behaviour: it scopes to the gate's
+            -- run, and an artifact with no gate row contributes nothing - which is the route's
+            -- 'const results = g ? (...) : []'. artifact_gate.artifact_id is the PRIMARY KEY
+            -- (schema.ts), so the join can never multiply a row.
+            --
+            -- NOT 'the latest run by created_at'. That is a DIFFERENT question and would silently
+            -- disagree with the gate whenever a run finished after the one the gate was written from.
+            -- The gate names its run; this follows it.
+            'checks',        (select coalesce(json_agg(row_to_json(cr) order by cr.artifact_id, cr.check_key), '[]'::json)
                               from check_result cr
+                              join artifact_gate g
+                                on g.artifact_id = cr.artifact_id and g.run_id = cr.run_id
                               where cr.artifact_id in (select id from artifact where packet_id = '$PKT')),
+            -- THE SCORE. The same route returns 'score' and 'history' beside 'results'; the dump
+            -- carried neither, so build-fixtures.mjs never set them and the drawer's Match tab read
+            -- 'No score has been computed for this asset yet - the checks have not been run' on an
+            -- asset the gate simultaneously called Blocked with 86 findings. Two statements that
+            -- cannot both be true, and the kind of contradiction a reader files as a product defect.
+            -- docs/qc-evidence/PROTOTYPE-COVERAGE.md 17f.
+            --
+            -- Same join, same reason as 'checks': the route reads
+            --   select * from artifact_score where artifact_id=<art> and run_id=<gate.run_id>
+            -- and yields null when there is no gate row. Verified live 2026-09-02: every gated
+            -- artifact of packet 4860ae3b has exactly ONE artifact_score row for its gate's run.
+            'scores',        (select coalesce(json_agg(row_to_json(s)), '[]'::json)
+                              from artifact_score s
+                              join artifact_gate g
+                                on g.artifact_id = s.artifact_id and g.run_id = s.run_id
+                              where s.artifact_id in (select id from artifact where packet_id = '$PKT')),
+            -- HISTORY IS A DIFFERENT QUESTION AND IS DELIBERATELY *NOT* RUN-SCOPED. The route reads
+            --   select composite, band, must_have_coverage, computed_at from artifact_score
+            --     where artifact_id=<art> order by computed_at desc limit 10
+            -- - every run, newest first, capped at ten, and unconditional (it runs even with no gate).
+            -- The LATERAL is what makes the cap PER ARTIFACT; a plain 'limit 10' over the packet
+            -- would starve four artifacts to feed one. Only the four columns the route projects are
+            -- taken - a superset here would be a parity defect in the other direction. artifact_id
+            -- rides along purely so build-fixtures.mjs can route the rows, and it strips it back off.
+            'scoreHistory',  (select coalesce(json_agg(h order by h.artifact_id, h.computed_at desc), '[]'::json)
+                              from artifact a
+                              cross join lateral (
+                                select a.id as artifact_id, s.composite, s.band,
+                                       s.must_have_coverage, s.computed_at
+                                from artifact_score s
+                                where s.artifact_id = a.id
+                                order by s.computed_at desc limit 10) h
+                              where a.packet_id = '$PKT'),
             'swaps',         (select coalesce(json_agg(row_to_json(s) order by s.seq), '[]'::json)
-                              from swap_decision s where s.packet_id = '$PKT')
+                              from swap_decision s where s.packet_id = '$PKT'),
+            -- THE OWNER'S CHECK THRESHOLDS. Without these the fixture renders every rule label
+            -- ("<= 24 chars each", the word bands, the gate contract) as unset, which reads exactly
+            -- like the product having lost its limits - and on 2026-08-29 was reported to the owner
+            -- as precisely that catastrophe. The values were live all along (24 / 20).
+            -- build-fixtures.mjs maps chk_snake_case -> camelCase and serves this as
+            -- '/search-prefs'.checks, the shape AssetBlocks.jsx:1158 reads. (Quotes, not
+            -- backticks: this heredoc is UNQUOTED, so a backtick pair is command substitution.)
+            'checkPrefs',    (select row_to_json(sp) from owner_search_prefs sp
+                              where sp.owner_email = (select owner_email from opportunity
+                                                      where id = '$OPP'))
           )::text
           SQL
+
+      # CAPTURE THE API'S OWN /requirements BODY -- do not rebuild it here.
+      #
+      # WHY THIS STEP EXISTS. `comparison` (the whole "posting against your profile" surface: the fit
+      # cards and the DIMENSION/asks-for/evidences/FIT table) is NOT a table read. `comparisonPayload`
+      # (appDimensions.ts:254) returns `dimensions` from `comparison_dimension` PLUS `summary`, `set`
+      # and `stale`, each DERIVED in TypeScript from the dimension catalogue and DIMENSION_VERSION.
+      # Re-deriving those in the builder would be a second dimension brain in JS, and a re-derived
+      # fixture MEASURES ITSELF: any drift renders as app gaps. Measured 2026-09-02 -- the absence of
+      # this one key made ~19 of 27 "missing panels" on the jd step phantom for weeks
+      # (docs/qc-evidence/PROTOTYPE-COVERAGE.md 16a).
+      #
+      # A GH runner can reach the Function App; the sandbox cannot. So the runner asks the real route
+      # and stores the answer VERBATIM. Zero derivation, immune to catalogue/version drift.
+      - name: Capture the API's /requirements body (comparison lives here)
+        env:
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+          OPP: ${{ github.event.inputs.opp }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PYEOF'
+          import os, json, time, hmac, hashlib, base64, urllib.request, urllib.error, urllib.parse
+          opp = os.environ['OPP']
+          secret = os.environ['AZURE_CLIENT_SECRET']
+          dump = json.load(open('raw-dump.json'))
+          owner = (dump.get('opp') or {}).get('owner_email')
+          if not owner:
+              raise SystemExit('no owner_email on the dumped opportunity - cannot mint a token')
+
+          # Same scheme as api-test.yml: the Function signs with SESSION_SIGNING_SECRET ||
+          # MICROSOFT_CLIENT_SECRET (== AZURE_CLIENT_SECRET), so this verifies server-side.
+          def b64url(b):
+              if isinstance(b, str): b = b.encode()
+              return base64.urlsafe_b64encode(b).decode().rstrip('=')
+          now = int(time.time())
+          head = b64url(json.dumps({'alg':'HS256','typ':'JWT'}, separators=(',',':')))
+          load = b64url(json.dumps({'email':owner,'provider':'fixture-refresh','iat':now,'exp':now+3600}, separators=(',',':')))
+          sig  = b64url(hmac.new(secret.encode(), f'{head}.{load}'.encode(), hashlib.sha256).digest())
+          token = f'{head}.{load}.{sig}'
+
+          url = ('https://job-platform-api.azurewebsites.net/api/app/opportunity/'
+                 f'{opp}/requirements?owner={urllib.parse.quote(owner)}')
+          req = urllib.request.Request(url, headers={'Authorization': f'Bearer {token}'})
+          try:
+              with urllib.request.urlopen(req) as r:
+                  status, body = r.status, json.loads(r.read())
+          except urllib.error.HTTPError as e:
+              raise SystemExit(f'AC-4: /requirements returned HTTP {e.code} - refusing to commit')
+
+          # AC-4: a non-200 or an error-shaped body never reaches the branch.
+          if status != 200 or not isinstance(body, dict) or 'error' in body:
+              raise SystemExit(f'AC-4: HTTP {status} / error body - refusing to commit')
+          cmp_ = body.get('comparison')
+          if not isinstance(cmp_, dict):
+              raise SystemExit('AC-4: the response carries no `comparison` key - refusing to commit')
+
+          # AC-2: an UNRESOLVED comparison is the defect wearing a new hat. With dimensions:[] the
+          # compare cards and the 4-column table do not render at all, and the fixture would pass a
+          # naive canary while leaving the same ~19 panels missing.
+          if cmp_.get('resolved') is not True or not (cmp_.get('dimensions') or []):
+              raise SystemExit(
+                  f'AC-2: opportunity {opp} has no comparison_dimension rows - resolve it, or pick '
+                  'an opportunity that has been resolved; a fixture built from it cannot see the '
+                  'compare surface.')
+
+          # AC-5: never freeze a transient profile-read failure into the instrument. Baking one in
+          # renders the evidence surface as broken PRODUCT - the same class as the 24/20 report.
+          if 'profile UNREADABLE' in (body.get('profileSources') or []):
+              raise SystemExit('AC-5: profileSources says UNREADABLE - the profile read failed; '
+                               'capturing this would bake an outage into the fixture')
+
+          dump['apiRequirements'] = body
+          json.dump(dump, open('raw-dump.json','w'))
+          d = cmp_.get('dimensions') or []
+          graded = len([r for r in d if r.get('fit') not in (None, 'not_applicable')])
+          print(f'captured /requirements: {len(body.get("requirements") or [])} requirements, '
+                f'{len(d)} dimensions ({graded} graded), total={body.get("total")}')
+          PYEOF
 
       - name: Report what came back
         run: |

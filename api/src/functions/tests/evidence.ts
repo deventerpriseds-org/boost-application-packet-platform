@@ -91,11 +91,21 @@ export interface EvidenceRow {
    */
   ratio: number | null
   /**
-   * How the excerpt was found. `proposed` means a MODEL named it and an exact substring check
-   * accepted it — the quote is every bit as verbatim, but a rule did not choose it, and a reader
-   * must be able to tell. The database CHECK enforces the same three values.
+   * How the excerpt was found, and the four values are four different warrants:
+   *
+   *   `exact` / `anchored`  a deterministic rule chose it.
+   *   `proposed`            a MODEL named it and an exact substring check accepted it — the quote is
+   *                         every bit as verbatim, but a rule did not choose it, so it is shown and
+   *                         never counted until the owner confirms it.
+   *   `vetted`              a proposal that was then CHALLENGED and held: the challenge had to
+   *                         list what the excerpt does NOT show before it could claim support, a
+   *                         non-empty list refuses the row in code, and the claim is cited to a
+   *                         byte-verified span of the excerpt. This one COUNTS toward coverage. See
+   *                         `supportJudge.ts` and `checks.ts`'s `isJudged`.
+   *
+   * The database CHECK enforces the same four values, in both DDL homes.
    */
-  method: 'exact' | 'anchored' | 'proposed'
+  method: 'exact' | 'anchored' | 'proposed' | 'vetted'
   /** The proposal ruleset that judged a `proposed` row. NULL means no model was involved. */
   proposal_version?: number | null
   /**
@@ -108,6 +118,24 @@ export interface EvidenceRow {
    */
   confirmed_at?: string | null
   confirmed_by?: string | null
+  /**
+   * THE OWNER'S DECISION ON THIS CLAIM, and the only thing that removes a counted row.
+   *
+   * `'confirmed'` | `'vetoed'` | null-or-undefined for a claim nobody has decided on. Since the
+   * owner's instruction that "proposals can count until vetoed", a model-warranted row counts on
+   * creation and this is the escape hatch — so `'vetoed'` is the value with teeth, and the absence
+   * of a value means undecided, NEVER rejected. Read `undefined` as "no one has looked", which is
+   * why nothing here defaults.
+   */
+  decision?: 'confirmed' | 'vetoed' | null
+  /**
+   * What a second, independent read said the excerpt fails to show.
+   *
+   * Persisted so the owner deciding whether to veto can see the REASON corroboration was declined,
+   * not just the excerpt. Null means no second read ran; an empty array means one ran and named
+   * nothing — different facts, so neither defaults to the other.
+   */
+  missing?: string[] | null
   /** Digest of the record body the offsets index. Offsets rot silently without it. */
   record_sha256: string
   resolver_version: number
@@ -343,6 +371,22 @@ export interface ResolveOptions {
   escalate?: boolean
   /** Maximum model calls one run may make. */
   escalateMax?: number
+  /**
+   * May a model APPEAL a withdrawal made by the exact overclaim rule (`verifyReasoning`)?
+   *
+   * Rides the owner's coverage-judge switch rather than adding a fourth one: it is the same
+   * decision -- "let a model read, where a word-match cannot" -- applied to the third layer that
+   * made it. Absent means off, and off is today's behaviour exactly.
+   */
+  appealOverclaims?: boolean
+  /**
+   * May an accepted proposal be CHALLENGED and, if it holds, COUNT
+   * toward coverage as `judged`?
+   *
+   * Rides the owner's coverage-judge switch, like `appealOverclaims`. Absent means off, and off is
+   * today's behaviour: every model row stays `proposed` until the owner confirms it.
+   */
+  vetProposals?: boolean
   /**
    * Token->record-count map for the WHOLE profile, computed once by `resolveAll`.
    *

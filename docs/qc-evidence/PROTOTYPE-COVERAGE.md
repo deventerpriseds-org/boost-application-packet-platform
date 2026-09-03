@@ -6,6 +6,15 @@
 **This is a measurement, not a design document.** Nothing under `app/src` or `api/src` was
 touched. No file other than this one was modified.
 
+> ### UPDATE 2026-09-02 — the `jd` step was RENDERED, and the standing number for it is WRONG
+>
+> Every measurement in this file below was **read from source**; its own closing line says *"no
+> live UI was verified, nothing was run."* On 2026-09-02 both sides of the `jd` step were rendered
+> and looked at. **§16 supersedes the `jd` row of §1a** (`266% · 27 panels missing · 3 controls`):
+> roughly **19 of those 27 panels are the measuring instrument, not the app**, and after tracing
+> every remaining row to source there are **zero confirmed prototype-side gaps on this step**. Read
+> §16 before citing any `jd` figure from this document.
+
 > **Written incrementally, section by section.** If this document ends mid-table, everything above
 > the cut is complete and citable; nothing below it was started.
 
@@ -122,14 +131,14 @@ Import list read (`PostingAnalysis.jsx:18-28`): `shell.jsx` (Pill, Overlay), `po
 | 4.1-2 | Explanatory sub-line | `packet.jsx:161` | BUILT | `PostingAnalysis.jsx:430-436` |
 | 4.1-3 | `See where each one is answered →` (deep-link to QC) | `packet.jsx:159` | BUILT | `PostingAnalysis.jsx:547-559` - `See where each one is answered ->`, hooked `POSTING_HOOKS.openQc`, `role="button"`/`tabIndex`/Enter-Space, hidden when the extraction has nothing to point at. Navigation is a PROP calling the one `setActiveStep` (`PacketBuilder.jsx:842`). QC's `pick` filter has no prop and no route segment, so it opens the Coverage list and the sub-line says so rather than implying per-line targeting. Commit `2de4ae5`; wiring guarded after the verifier found both halves unguarded (`1a886a8`). |
 | 4.1-4 | Three-tab strip, one list at a time | `packet.jsx:116-123` | BUILT | `PostingAnalysis.jsx:485-493`, `role="tablist"` / `role="tab"` — better than the prototype's bare divs. |
-| 4.1-5 | Per-tab count `n/m` | `packet.jsx:120` | PARTIAL | `PostingAnalysis.jsx:490` renders `({t.count})` — a **single** total, not `covered/total`. Deliberate: `:400-403` says attaching a coverage number to `model_keyword` "made a suggestion look like a measurement". |
+| 4.1-5 | Per-tab count `n/m` | `packet.jsx:120` | **DELIBERATE — CHANGED from PARTIAL** | `PostingAnalysis.jsx:490` renders `({t.count})` — a **single** total, not `covered/total`. Deliberate: `:400-403` says attaching a coverage number to `model_keyword` "made a suggestion look like a measurement". **Re-verdicted 2026-09-02 against the RENDER** (§16/§17 evidence, `/tmp/app-jd2.png`). The verdict contradicted its own evidence: the note already said *"Deliberate: `:400-403` says attaching a coverage number made a suggestion look like a measurement."* A recorded refusal cited to a code comment is DELIBERATE by §0, not a shortfall — the same rule as the match-header (§16c). |
 | 4.1-6 | Count coloured green when complete, red when not | `packet.jsx:120` | **DELIBERATE** | **Re-verdicted 2026-08-27 from ABSENT, by reading the prototype source rather than the render.** `packet.jsx:120` is `color: t.n === t.d ? green : red` on `{t.n}/{t.d}` — **the colour IS the `n/d` ratio's verdict, not a separate feature.** So 4.1-6 is not independently buildable: it inherits 4.1-5, which this app refuses on the record because attaching a coverage number to `model_keyword` *"made a suggestion look like a measurement"* (`PostingAnalysis.jsx:399-403`). Colouring the single total green/red would need a completeness threshold that does not exist, and would assert **as a colour** the very measurement that was removed **as a number** — strictly worse, because a reader can see a number's basis and cannot see a colour's. Shipping it would re-open a decision this repo already made, in a form that hides its own premise. **Closes as DELIBERATE with 4.1-5, not as work.** |
 | 4.1-7 | Responsibilities list | `packet.jsx:124` | BUILT | `PostingAnalysis.jsx:409-411`, `Group` at `:262-283` |
 | 4.1-8 | Requirements list | `packet.jsx:125-132` | BUILT | `PostingAnalysis.jsx:412-419` |
 | 4.1-9 | MUST HAVE / NICE TO HAVE sub-headers | `packet.jsx:127,129` | BUILT | `PostingAnalysis.jsx:414,417` — `Must-have` / `Nice-to-have` |
-| 4.1-10 | Sub-header `n/m evidenced` | `packet.jsx:63-72` | PARTIAL | `PostingAnalysis.jsx:270-275` renders `{split.total}` plus a **kind_source** split, not an *evidenced* ratio. A different and better-sourced number; the evidenced ratio itself does not render. |
+| 4.1-10 | Sub-header `n/m evidenced` | `packet.jsx:63-72` | PARTIAL | `PostingAnalysis.jsx:270-275` renders `{split.total}` plus a **kind_source** split, not an *evidenced* ratio. A different and better-sourced number; the evidenced ratio itself does not render. **Re-checked 2026-09-02 against the render — STAYS PARTIAL.** The substitution may well be better, but §0 requires a DELIBERATE verdict to cite a decision (`PULL-CANDIDATES`, `actions.md`, or a code comment) and this row cites none. "Better-sourced" asserted in this file is not a recorded decision. |
 | 4.1-11 | Row: the posting line **verbatim** | `packet.jsx:41` | BUILT | `PostingAnalysis.jsx:231-237` — a `<blockquote>` with char offsets, plus an explicit paraphrase branch at `:243-248` the prototype has no equivalent for. |
-| 4.1-12 | Row: requirement chip in a 150–210px right column | `packet.jsx:40,43` | PARTIAL | The chip is BUILT (`PostingAnalysis.jsx:220-222`, `reqChipLabel`) but sits **above** the line, not in a right column — the row is a single flow column (`:216-228`). |
+| 4.1-12 | Row: requirement chip in a 150–210px right column | `packet.jsx:40,43` | PARTIAL | The chip is BUILT (`PostingAnalysis.jsx:220-222`, `reqChipLabel`) but sits **above** the line, not in a right column — the row is a single flow column (`:216-228`). **Re-checked 2026-09-02 against the render — STAYS PARTIAL.** Confirmed in both source and screenshot: the chip sits in a flex row with `marginBottom: 5` ABOVE the line (`PostingAnalysis.jsx:322-329`), not in a right column. A real layout divergence with no recorded reason. |
 | 4.1-13 | Row: competency spelled out beside the id (R7) | `packet.jsx:43` via `ReqChip` | BUILT | `PostingAnalysis.jsx:225-227` — `{r.competency \|\| 'competency unassigned'}` |
 | 4.1-14 | Row: status dot, green covered / red open | `packet.jsx:39` | BUILT | `EvidenceLine` (`PostingAnalysis.jsx`) paints a dot through `toneColor(EVIDENCE_TONE[state])`. NOT a two-colour green/red: six states, and `stale`/`misresolved`/`source_missing`/`unverified` are `warn`, because a row whose excerpt merely MOVED is not a gap in the profile. |
 | 4.1-15 | Row: `evidenced — show the line` link | `packet.jsx:45` | BUILT | `show the line` / `hide the line` disclosure, rendered only when the endpoint verdict is `verified` - the one state whose quote may be shown. |
@@ -151,7 +160,7 @@ Import list read (`PostingAnalysis.jsx:18-28`): `shell.jsx` (Pill, Overlay), `po
 | 4.1-31 | Legend row, always present | `packet.jsx:163` | BUILT | `PostingAnalysis.jsx:502-511` |
 | 4.1-32 | Three-column layout behind `PARSED_LAYOUT` | `packet.jsx:25,136-152` | BUILT | `PostingAnalysis.jsx:389-392,439-442,575-582` — and it is a **persisted user preference** (`ee_posting_columns`), not a code constant, per the repo's "no hardcoded config" rule. Better than the prototype. |
 
-**§4.1 tally — 32 rows:** BUILT **19** · PARTIAL **3** · ABSENT **2** · DELIBERATE **8**.
+**§4.1 tally — 32 rows:** BUILT **20** · PARTIAL **2** · DELIBERATE **10**. *(Counts RECOUNTED from the rows 2026-09-02. The previous line was stale — rows had been re-verdicted and the tally never followed, so this section was UNDER-claiming. `H:coverage-tally-matches-rows` now fails the suite on any such drift.)*
 (Was BUILT 13 / ABSENT 8 before `df2c9db` shipped the evidence expansion, rows 4.1-14..19.)
 Against the 24 rows that are not owner-deferred: **13 BUILT (54%), 16 present in some form (67%).**
 
@@ -172,7 +181,7 @@ read it.
 | # | Prototype element | Proto ref | Verdict | App citation / note |
 |---|---|---|---|---|
 | 4.2-1 | Four fit **cards** (Responsibilities / Must-have / Nice-to-have / ATS keywords) | `packet.jsx:174-188` | **BUILT — CHANGED from ABSENT** | `PostingAnalysis.jsx:200` (`POSTING_HOOKS.compareCards`, declared `postingAnalysis.js:66`). **Built on the DIMENSION axis, not the prototype's four kinds** — a deliberate, owner-approved divergence: per-kind coverage is not a number this system produces (`requirements.ts:61`, `coverage` is `'escalated' \| null`), so the prototype's axis would have required inventing one. Owner picked option A after seeing both rendered side by side: *"I'm fine with the 8 and the notes."* Option B (the four kinds) is tracked as a pull candidate. **Independent verification OUTSTANDING** — the batched verifier covered Groups B and C, not this row. |
-| 4.2-2 | Card: `n of m` big number | `packet.jsx:179-180` | PARTIAL | Survives only as `{r.covered} of {r.total} line(s)` inside each comparison row, `PostingAnalysis.jsx:104-106`. |
+| 4.2-2 | Card: `n of m` big number | `packet.jsx:179-180` | **BUILT — CHANGED from PARTIAL** | Survives only as `{r.covered} of {r.total} line(s)` inside each comparison row, `PostingAnalysis.jsx:104-106`. **Re-verdicted 2026-09-02 against the RENDER** (§16/§17 evidence, `/tmp/app-jd2.png`). The claim that it "survives only inside each comparison row" predates any render and is refuted by one: the dimension CARDS carry the big `n of m` — a bold `1` of 1 on Leadership tenure, `0` of 2 on Organization size — above a `4 of 8 dimension(s) compared` header. This row was written while the fixture starved the comparison surface, so nobody had seen it. |
 | 4.2-3 | Card: graded verdict word | `packet.jsx:182` | BUILT | `fitLabel()` `postingAnalysis.js:78-81`, rendered `PostingAnalysis.jsx:100-103`. |
 | 4.2-4 | Card: `Missing: <named>` when incomplete | `packet.jsx:184` | BUILT | **Re-verdicted - the PARTIAL was wrong.** The app HAS enumerated the missing lines by name all along: `dimensions.ts:504` emits `...; no excerpt for: #12 <text>; #14 <text>` and `:483` names every judgeable line for the nothing-found case, rendered through `POSTING_HOOKS.compareNote`. Guarded rather than rebuilt (`eae3d37`) - a second `Missing:` list would be two enumerations of one fact. The `weak` split into `Nothing found` / `Falls short` is a deliberate improvement on the prototype's single `No evidence` and is pinned. |
 | 4.2-5 | Comparison table, 4 columns | `packet.jsx:191-194` | BUILT | `COMPARE_COLUMNS` `postingAnalysis.js:150`, rendered `PostingAnalysis.jsx:186-192`. Exported so a test asserts the headings **are** the spec's. |
@@ -187,7 +196,7 @@ read it.
 | 4.2-14 | Responsive: 4-col ≥ 900px, 1-col below | `packet.jsx:171` `useWide(900)` | BUILT | `COMPARE_WIDE_MIN = 900`, `compareColumns()` `postingAnalysis.js:127-141`, rendered as `data-qc-cols` at `:180`. |
 | 4.2-15 | The empty / unresolved state | *(prototype has none)* | NOT-IN-PROTOTYPE | `comparisonState()` `postingAnalysis.js:97-122` gives four distinct states; `compareEmpty` `:163-167`. App-only. Excluded from the denominator. |
 
-**§4.2 tally — 14 rows (row 15 excluded):** BUILT **11** · PARTIAL **3** · ABSENT **0** · DELIBERATE **0**.
+**§4.2 tally — 15 rows:** BUILT **14** · NOT-IN-PROTOTYPE **1**. *(Counts RECOUNTED from the rows 2026-09-02. The previous line was stale — rows had been re-verdicted and the tally never followed, so this section was UNDER-claiming. `H:coverage-tally-matches-rows` (`app/test/prototypeCoverage.test.mjs`).)*
 **11 BUILT (79%), 14 present in some form (100%).** *(Was 10 BUILT / 71%; **4.2-1** the fit cards moved ABSENT -> BUILT at `b73f8d6`. §4.2 now has no ABSENT row.)*
 
 The app also carries four surfaces the prototype has no counterpart for — dimension-set provenance
@@ -217,11 +226,11 @@ direction reads as though the app is strictly behind, and on this section it is 
 | 4.3-9 | QC Summary block header | `packet.jsx:341` | **BUILT — CHANGED from ABSENT** | `PostingAnalysis.jsx:793-794` (`<QcSummaryBlock>`, hook `POSTING_HOOKS.qcSummary`), mounted in the tally modal at `:881`. The block **derives nothing** — every sentence, row and score comes from `qcSummaryModel()` (`qcRail.js:921-984`), the same `useQcEntries()` payload the QC rail, the step circle, the asset badges and the ship gate read, so the modal cannot state a second opinion nobody can reconcile. Six modelled states, guarded by 11 `H:` cases. |
 | 4.3-10 | Composite match / requirements / keywords / seniority bars (`ScoreBlock compact`) | `packet.jsx:342` | **BUILT — CHANGED from ABSENT** | `PostingAnalysis.jsx:803-830` (`POSTING_HOOKS.qcSummaryScore` + `<ScoreParts>`). `<ScoreParts>` is an **extraction, not a copy** — `main` had three score-part bar renderers (one with a hand-inlined clamp); they are now one component with three consumers, one `pctWidth`, one `bandTone`, verified byte-identical against `main`'s markup by a golden-master probe. The keyword part **defers** rather than restating the library number, so keyword coverage appears exactly once on the screen (guarded: `run-keyword-tally.mjs`). |
 | 4.3-11 | Per-asset gate rows with `GateBadge` | `packet.jsx:344-349` | **BUILT — CHANGED from ABSENT in this surface** | `PostingAnalysis.jsx:838-846`, `GateBadge` **imported** from `AssetGateDrawer.jsx:45` (`PostingAnalysis.jsx:35`) — one definition, six mount sites, never copy-pasted. Rows are the packet's REAL artifact list, not the prototype's fixed four types (which would draw rows for assets a packet does not have). An asset whose checks could not be read is NAMED with `gate unavailable` rather than dropped — a missing row reads as "nothing wrong with it". |
-| 4.3-12 | `Open QC →` button | `packet.jsx:350` | PARTIAL | `PostingAnalysis.jsx:590` offers `Go to the resume step`; there is a QC step (`PacketBuilder.jsx:108`) but the modal does not link to it. |
-| 4.3-13 | **Any navigation out closes the modal first** | `packet.jsx:345,347,350` (`setPanelOpen(false)` on every exit) | PARTIAL | `Overlay` owns close; `onGoResume` / `onBuildAll` are supplied by `PacketBuilder.jsx:941-960` — needs a runtime check to confirm the dismiss ordering (see §14). |
+| 4.3-12 | `Open QC →` button | `packet.jsx:350` | **BUILT — CHANGED from PARTIAL** | `PostingAnalysis.jsx:590` offers `Go to the resume step`; there is a QC step (`PacketBuilder.jsx:108`) but the modal does not link to it. **Re-verdicted 2026-09-02 against the RENDER** (§16/§17 evidence, `/tmp/app-jd2.png`). The note *"the modal does not link to it"* is STALE. `PostingAnalysis.jsx:1077` renders `Open QC - every finding, per asset`, `title="Close this panel and open the QC step"`, wired to `onGoQc`. |
+| 4.3-13 | **Any navigation out closes the modal first** | `packet.jsx:345,347,350` (`setPanelOpen(false)` on every exit) | **BUILT — CHANGED from PARTIAL** | `Overlay` owns close; `onGoResume` / `onBuildAll` are supplied by `PacketBuilder.jsx:941-960` — needs a runtime check to confirm the dismiss ordering (see §14). **Re-verdicted 2026-09-02 against the RENDER** (§16/§17 evidence, `/tmp/app-jd2.png`). Close-first-then-navigate IS implemented: `PacketBuilder.jsx:1108-1115` calls `setAtsOpen(false)` BEFORE `setActiveStep(...)` on every exit handler, with a comment naming the prototype ordering it mirrors (`setPanelOpen(false)` before `setStep`). |
 | 4.3-14 | Model-keyword list inside the modal | *(prototype has none)* | NOT-IN-PROTOTYPE | `PostingAnalysis.jsx:586`. App-only; excluded. |
 
-**§4.3 tally — 13 rows (row 14 excluded):** BUILT **9** · PARTIAL **2** · ABSENT **0** · DELIBERATE **2**.
+**§4.3 tally — 14 rows:** BUILT **11** · DELIBERATE **2** · NOT-IN-PROTOTYPE **1**. *(Counts RECOUNTED from the rows 2026-09-02. The previous line was stale — rows had been re-verdicted and the tally never followed, so this section was UNDER-claiming. `H:coverage-tally-matches-rows` (`app/test/prototypeCoverage.test.mjs`).)*
 Against the 11 non-deferred rows: **9 BUILT (82%), 11 present in some form (100%).** *(Was 6 BUILT / 55% — the weakest section in the spec bar the assistant. **4.3-9/10/11**, the whole QC summary inside the ATS modal, moved ABSENT -> BUILT at `34eda36`, verifier-CONFIRMED. §4.3 now has no ABSENT row.)*
 
 ---
@@ -244,13 +253,13 @@ Against the 11 non-deferred rows: **9 BUILT (82%), 11 present in some form (100%
 | 4.4-5 | `Open Google Doc ↗` | `packet.jsx:239` | BUILT | `PacketBuilder.jsx:231-233` |
 | 4.4-6 | `Open Slides ↗` | `packet.jsx:239` | BUILT | `PacketBuilder.jsx:232` |
 | 4.4-7 | `Copy tracked link` | `packet.jsx:240` | BUILT | `PacketBuilder.jsx:237-247` |
-| 4.4-8 | Those three are real **buttons**, `nowrap` | `packet.jsx:239-240` | PARTIAL | They are `<a>` and `role="button"` spans (`:231,237`). The a11y hole the register flagged is closed (`role` + `tabIndex` + key handler, `:235-241`) but they are not `px-btn` buttons. Cosmetic; recorded as PARTIAL, not ABSENT. |
+| 4.4-8 | Those three are real **buttons**, `nowrap` | `packet.jsx:239-240` | **DELIBERATE** | **Re-verdicted 2026-09-02: the button half is DECLINED ON THE RECORD, the `nowrap` half is now complete.** `PacketBuilder.jsx:243-249` states the reason in the source: converting a real `<a href target="_blank">` into a `<button>` REMOVES middle-click, Cmd-click, open-in-new-tab and "Copy link address". The prototype uses a button because its link has no destination; ours does, so the conversion would be a regression dressed as parity. All three already carry `role`/`tabIndex`/key handlers, so the a11y and comparator concerns are closed. `nowrap` was on two of the three; the third (`Rebuild from current draft`) gained it in this pass. **Not a gap — a divergence with a recorded reason.** |
 | 4.4-9 | The asset's field blocks | `packet.jsx:245` | BUILT | `PacketBuilder.jsx:200-204` → `AssetBlocks` |
 | 4.4-10 | `Approve` | `packet.jsx:255` | BUILT | `PacketBuilder.jsx:301-303` |
 | 4.4-11 | **`Approve` disabled when the gate fails** | `packet.jsx:219,255` | **BUILT — CHANGED from ABSENT** | `PacketBuilder.jsx:163` (`gateBlocks`), `:301-303` `disabled={gateBlocks}` + a `title` saying why. Inventory (`COMPONENT-INVENTORY.md:655-658`) recorded this as ABSENT. |
 | 4.4-12 | `Regenerate` | `packet.jsx:256` | BUILT | `PacketBuilder.jsx:331-333` |
 | 4.4-13 | Asset-level `Ask for a change` | `packet.jsx:257` | **BUILT — CHANGED from ABSENT** | `PacketBuilder.jsx:290-292` (`List Tweaks`, `PACKET_HOOKS.assetAsk`), box at `:344+`. Inventory build-order row 6 called this "the last unbuilt item"; it is built, on the same `artifactAiEdit` route with no `section`, exactly as the triage instructed. |
-| 4.4-14 | Deep-linking `n to fix — <title> →` when the gate blocks | `packet.jsx:261-271` | PARTIAL | The counts render (`GateBadge` `AssetGateDrawer.jsx:70-71`, `N to fix` / `N to review`) but the card's badge is mounted **without** `onClick` (`PacketBuilder.jsx:184`), so the count does not open the first failing field. R5 ("every count deep-links") is unmet on this surface. |
+| 4.4-14 | Deep-linking `n to fix - <title> ->` when the gate blocks | `packet.jsx:261-271` | **BUILT - CHANGED from PARTIAL** | **Re-verdicted 2026-09-02 from the render plus the wiring.** The old cell said the card's badge is mounted *"without `onClick` (`PacketBuilder.jsx:184`), so the count does not deep-link"*. It now is: `PacketBuilder.jsx:192` mounts `<GateBadge ... onClick={onOpenFirstFix || undefined} firstFix={firstFix} />`, and `AssetGateDrawer.jsx:45-95` wraps **the count itself** in a `role="button"`/`tabIndex`/Enter-Space link (`GATE_HOOKS.toFixLink`) that names its destination rather than clicking the whole badge. Measured live on the cover step 2026-09-02: the badge renders as an interactive element reading `17 to fix / Section word counts ->` - i.e. the spec's `{n} to fix - {title} ->`, destination named. The producer defect RENDER-SWEEP.md measured (`role: null`, `cursor: "default"`, because the caller's handler resolved to null) is fixed in `packetFailList`; `app/test/packetFailList.test.mjs` covers it, 429/429 green. |
 | 4.4-15 | `Generate draft` / `Generate script` (todo) | `packet.jsx:252` | BUILT | `PacketBuilder.jsx:276-278` |
 | 4.4-16 | `Reopen` (approved) | `packet.jsx:260` | BUILT | `PacketBuilder.jsx:337` |
 | 4.4-17 | Asset header, **collapsed by default** | `assets.jsx:197,213-226` | BUILT | `AssetBlocks.jsx:265-330`; default from `ASSET_BODY_DEFAULT_OPEN` (`PacketBuilder.jsx:163`, named constant, not a bare `false`). |
@@ -260,18 +269,18 @@ Against the 11 non-deferred rows: **9 BUILT (82%), 11 present in some form (100%
 | 4.4-21 | Collapsed row: `n your call` | `assets.jsx:222` | BUILT | `AssetBlocks.jsx:320-322` (`meterYourCall`) |
 | 4.4-22 | Collapsed row: `Show ▾` disclosure | `assets.jsx:224` | BUILT | `AssetBlocks.jsx` meter toggle — a real `role="button"` disclosure, better than the prototype's whole-row div. |
 | 4.4-23 | Expanded: plain-language summary sentence | `assets.jsx:236-241` | BUILT | `AssetBlocks.jsx:279-282` (`meterSummary`), sourced from `meterModel` (`assetBlocks.js`) rather than fabricated. |
-| 4.4-24 | Expanded: `Must-haves` counter | `assets.jsx:243` | PARTIAL | One combined `Posting lines placed` stat renders (`AssetBlocks.jsx:226-234`, `BLOCK_HOOKS.stat`); the per-kind split does not. Needs per-kind denominators on `GET /app/opportunity/{id}/requirements` (returns `total` only) — an endpoint extension. |
-| 4.4-25 | Expanded: `Responsibilities` counter | `assets.jsx:244` | PARTIAL | Same. |
-| 4.4-26 | Expanded: `Nice-to-haves` counter | `assets.jsx:245` | PARTIAL | Same. |
+| 4.4-24 | Expanded: `Must-haves` counter | `assets.jsx:243` | **BUILT - CHANGED from PARTIAL** | **Re-verdicted 2026-09-02 by RENDERING the cover step, which is what the earlier reading could not do.** `assetBlocks.js:887-889` declares the three per-kind stats (`Must-haves answered` / `Responsibilities answered` / `Nice-to-haves answered`) and `:914-922` pushes one per kind **alongside** the combined `Posting lines placed` (`:909`) - the comment at `:914` is explicit that *"The total STAYS, and is not replaced by the sum of these parts."* Measured live on `#/packet/2cb56fb3.../cover` (`scripts/render-app.mjs`, fixture rebuilt from `fixture-refresh.yml` run 33642729577): all four render - `2 of 35 posting lines placed`, `0 of 13 must-haves answered`, `2 of 21 responsibilities answered`, `0 of 1 nice-to-haves answered`. Guarded by `app/test/assetBlocks.test.mjs:866-899` (`kind_mustHaves`), 429/429 green. **The old cell's stated blocker was also wrong** - it said this *"needs per-kind denominators on `GET /app/opportunity/{id}/requirements`"*; the split is derived client-side by `groupRequirements` (`postingAnalysis.js:512`) from rows that endpoint already returns, so no API change was ever required. |
+| 4.4-25 | Expanded: `Responsibilities` counter | `assets.jsx:244` | **BUILT - CHANGED from PARTIAL** | Same as 4.4-24: declared `assetBlocks.js:887-889`, pushed `:914-922`, measured rendering on the cover step 2026-09-02. |
+| 4.4-26 | Expanded: `Nice-to-haves` counter | `assets.jsx:245` | **BUILT - CHANGED from PARTIAL** | Same as 4.4-24: declared `assetBlocks.js:887-889`, pushed `:914-922`, measured rendering on the cover step 2026-09-02. |
 | 4.4-27 | Expanded: `ATS keywords` counter | `assets.jsx:246` | DELIBERATE | `D:term-library-off-by-owner-decision`. `UNKNOWN_TERMS_NOTE` (`assetBlocks.js:456`, pushed at `:570`) renders the honest unknown instead of a fabricated 0. |
 | 4.4-28 | Expanded: the open-items list (fail / open / warn / soft) | `assets.jsx:248-261` | **BUILT — CHANGED from PARTIAL** (per field) | `AssetBlocks.jsx:709-728` (`BLOCK_HOOKS.fieldFindings`) renders every severity with `SEV_LABEL` + offenders + expected. Inventory build-order row 3 said "the renderer is not [built]". **Relocated deliberately** — the findings render in each field's margin rather than in one list on the header, which is the same relocation §4.5's `Changes made` took. |
-| 4.4-29 | List row: `Go to field →` | `assets.jsx:257` | PARTIAL | Deep links exist and work (`focusField` `PacketBuilder.jsx`→`AssetBlocks.jsx:1020-1021`, `useScrollToFocus` `:913`), but they are driven from the QC rail, not from a `Go to field →` control on the asset header. |
+| 4.4-29 | List row: `Go to field ->` | `assets.jsx:257` | **BUILT - CHANGED from PARTIAL** | **Re-verdicted 2026-09-02 by RENDERING it.** The control is on the asset header's findings list, not only the QC rail: `UnplacedFindings` (`AssetBlocks.jsx:290-350`) renders `Go to field ->` per row, hooked `UNPLACED_LINK_HOOK` (= `QC_HOOKS.goToField`, `qc-go-to-field`). Measured live on the RESUME step: **2 links**, `role="button"`, `tabIndex=0`, `cursor: pointer`, `data-qc-target-field="RelevantBullets1"`; the QC step renders 34 (`go to the draft ->`). It **exceeds** the prototype - where the target lives on another asset the label becomes `Go to field in <asset> ->`. It renders 0 on the COVER step because no finding there resolves a target, and those rows print `unplacedReason` instead ("names no merge field", "spans two fields") - the no-dead-UI rule, not an absence. Screenshot: `screens/4.4-29-go-to-field.png`. |
 | 4.4-30 | `Already corrected in this asset` group | `assets.jsx:262-276` | BUILT (relocated) | `AssetBlocks.jsx:694-697` — `Corrected for you`, `CorrectionRow ... inField`. Relocation recorded in `UI-GAP-REGISTER.md:98-101` as a **deliberate deviation** (one correction rendered twice is what the corrections guard prevents). |
 | 4.4-31 | Corrected row: `Review →` | `assets.jsx:272` | BUILT | Carried by `CorrectionRow` (`QcRail.jsx`, imported `AssetBlocks.jsx:44`). |
 | 4.4-32 | `Nothing to review on this asset.` | `assets.jsx:279` | **BUILT — CHANGED from ABSENT** | `AssetBlocks.jsx:309-316` (`BLOCK_HOOKS.meterClear`), guarded on a **loaded** result so "clear" and "never checked" cannot look alike. Inventory build-order row 8. |
 | 4.4-33 | `open` / "Needs your answer" severity | `assets.jsx:248` | DELIBERATE | `assetGate.js:78-87` refuses to mint this bucket from state the app does not have. Inventory: *"ABSENT by design and correctly so"*. |
 
-**§4.4 tally — 33 rows:** BUILT **24** · PARTIAL **7** · ABSENT **0** · DELIBERATE **2**.
+**§4.4 tally — 33 rows:** BUILT **30** · DELIBERATE **3**. *(RECOUNTED from the rows 2026-09-02 — the stated line had gone stale as rows were re-verdicted, so this section was UNDER-claiming. `H:coverage-tally-matches-rows` (`app/test/prototypeCoverage.test.mjs`).)*
 Against the 31 non-deferred rows: **24 BUILT (77%), 31 present in some form (100%)** — every row
 has at least a partial counterpart.
 
@@ -291,7 +300,7 @@ Import list read (`AssetBlocks.jsx:30-45`) — `CorrectionRow` comes from `QcRai
 |---|---|---|---|---|
 | 4.5-1 | One card per merge field | `assets.jsx` `AssetDocView` | BUILT | `AssetBlocks.jsx:1014-1022`, `BLOCK_HOOKS.field` at `:880` |
 | 4.5-2 | Two columns, 250px provenance margin | SPEC §3, §4.5 | BUILT | `AssetBlocks.jsx:883` — `gridTemplateColumns: wide ? 'minmax(0,1fr) 250px' : '1fr'`. **Exactly 250px.** |
-| 4.5-3 | Stacks below the breakpoint | SPEC §3 (`≥ 1080px`) | PARTIAL | Stacking works (`:883`, `useWideRef` `:909`) but the threshold is **700px**, not the spec's 1080. A deliberate-looking choice with no recorded decision — flagged, not counted as absent. |
+| 4.5-3 | Stacks below the breakpoint | SPEC §3 (`>= 1080px`) | **BUILT - CHANGED from PARTIAL** | **Re-verdicted 2026-09-02 by MEASURING it; the old cell compared two different quantities.** `useWideRef` (`AssetBlocks.jsx:173`) is a CONTAINER query - it observes the card's own width, not the viewport (its comment says so). The spec's `1080` is a VIEWPORT number. Measured across viewports on the live render: viewport 1440 -> card 1075; **viewport 1080 -> card 715 (>= 700, stays wide)**; viewport 1000 -> card 635 (stacks). **So the 700px container threshold fires the stack at essentially the spec's 1080px viewport** - it is the correct container-relative translation, not a deviation. Container-relative is also the more robust choice: at viewport 768 the nav collapses and the card is 724px, so the margin correctly sits beside the text again, which a viewport media query would get wrong. |
 | 4.5-4 | Slot / field name | `assets.jsx` | BUILT | `AssetBlocks.jsx:533` `fieldLabel(row.merge_field)` |
 | 4.5-5 | Live rule computed from the string (`56 words · 55–60 words`) | `assets.jsx:24-30` | BUILT | `observedFor()` / `targetFor()` (`assetBlocks.js`), rendered `AssetBlocks.jsx:546-558`. Both halves unit-matched. |
 | 4.5-6 | **Rule STATE COLOUR** (pass/warn/fail) | `assets.jsx:24-30` | **BUILT — CHANGED from PARTIAL** | `AssetBlocks.jsx:546-551` — `data-qc-sev={fieldSev}`, `SEV_COLOR[fieldSev]`. Colour comes from the field's check rows through the same `severityFor` split the rail uses, and **no finding = no colour** so an unmeasured field cannot read as passing. Inventory build-order row 4. |
@@ -300,7 +309,7 @@ Import list read (`AssetBlocks.jsx:30-45`) — `CorrectionRow` comes from `QcRai
 | 4.5-9 | Body: list shape, `original → final` rows | `assets.jsx:283-303` (`FieldList`) | BUILT | `ListBody` in `AssetBlocks.jsx`; `shapeOf()` → `list`. Inventory §13: *"BUILT, with a different and better-sourced status column."* |
 | 4.5-10 | Body: `unchanged` on a kept row | `assets.jsx:299` | BUILT | Same component; the app's status column is sourced from `swap_decision.action`. |
 | 4.5-11 | Body: pipe block, monospace | `assets.jsx` | BUILT | `shapeOf()` `assetBlocks.js:147` → `pipe` |
-| 4.5-12 | Body: **pick-list** (`type: 'select'`, checkboxes + per-item requirement) | `assets.jsx:305-...` (`PickList`) | ABSENT | `shapeOf()` (`assetBlocks.js:144-151`) returns only `static` / `pipe` / `list` / `prose` — **no `select` shape exists.** Verified by reading the function, not by grep. Portfolio-only in the prototype, so no resume impact; needs per-item candidacy on the insertions payload. `check: absent app/src/assetBlocks.js 'select'` |
+| 4.5-12 | Body: **pick-list** (`type: 'select'`, checkboxes + per-item requirement) | `assets.jsx:305-...` (`PickList`) | **BUILT — CHANGED from ABSENT 2026-09-02** | SHIPPED as `PickList` (`AssetBlocks.jsx`), model `pickListModel`/`pickListAsk` (`assetBlocks.js`), mounted on `shape === 'list'` fields beside the other field seeders. **The blocker was the second half of this row, not the first.** `shapeOf()` still returns only `static` / `pipe` / `list` / `prose` and no `select` shape was invented -- inventing one would mean inventing a field type the pipeline never produces. What unblocked it was that the row's stated dependency, *"needs per-item candidacy on the insertions payload"*, had already been satisfied: `swapsForList` is threaded to every block and a swap row per candidate IS per-item candidacy, so nothing new is fetched. It SEEDS the assistant and commits nothing, exactly as the prototype's own control does (`onAsk`), because no route reorders a list. Guarded by `H:pick-list-shows-what-was-considered-not-only-what-shipped` and `H:pick-list-seeds-a-request-and-sets-nothing`, both mutation-proved. ORIGINAL NOTE: `shapeOf()` (`assetBlocks.js:144-151`) returns only `static` / `pipe` / `list` / `prose` — **no `select` shape exists.** Verified by reading the function, not by grep. Portfolio-only in the prototype, so no resume impact; needs per-item candidacy on the insertions payload. `check: absent app/src/assetBlocks.js 'select'` |
 | 4.5-13 | **Keyword hits highlighted in the draft text** | `assets.jsx:8-22` (`Marked`) | **BUILT — CHANGED from ABSENT** | `markRuns` imported `AssetBlocks.jsx:41`, called `:446`, `Marked` at `:446-460`, phrases assembled `:486`. Inventory build-order **row 1**, the top-ranked gap and "the unlock for four other rows" — it is built. |
 | 4.5-14 | Posting echoes highlighted (pale tan + underline) | `assets.jsx:8-22` | BUILT | Same pass — `:484` *"Both treatments go through markRuns in ONE pass"*; classes `HIGHLIGHT_CLASS.postingEcho` (`highlight.js`), tokens `theme.css`. |
 | 4.5-15 | Hovering a margin row lights its phrase in the text | `assets.jsx:159` | **BUILT — CHANGED from ABSENT** | `onMouseEnter={() => setActiveWording(phrase)}` `AssetBlocks.jsx:750`, and for a keyword chip `:794`; `active` compared by identity at `:451-456` with `HIGHLIGHT_ACTIVE_CLASS`. |
@@ -333,7 +342,7 @@ Import list read (`AssetBlocks.jsx:30-45`) — `CorrectionRow` comes from `QcRai
 | 4.5-42 | The ring clears after ~2.2s | `screens/` notes | DELIBERATE | `PULL-CANDIDATES.md` **PC-4** — the persistent ring is a deliberate choice; SPEC says nothing about ring timing and the repo has twice removed vanishing affordances for the same reason. |
 | 4.5-43 | Chips deduped / near-duplicates collapsed | *(prototype: exact ids)* | DELIBERATE | `PULL-CANDIDATES.md` **PC-5** — ordered by requirement `seq`, deduped by EXACT string only; collapsing is a similarity judgement this repo reserves for ranking. |
 
-**§4.5 tally — 42 rows (4.5-16 excluded as NOT-IN-PROTOTYPE):** BUILT **32** · PARTIAL **1** ·
+**§4.5 tally — 43 rows:** BUILT **36** · DELIBERATE **6** · NOT-IN-PROTOTYPE **1**. *(RECOUNTED from the rows 2026-09-02 — the stated line had gone stale as rows were re-verdicted, so this section was UNDER-claiming. `H:coverage-tally-matches-rows` (`app/test/prototypeCoverage.test.mjs`).)*
 ABSENT **2** · DELIBERATE **7**.
 Against the 35 non-deferred rows: **32 BUILT (91%), 33 present in some form (94%).**
 
@@ -352,13 +361,13 @@ Against the 35 non-deferred rows: **32 BUILT (91%), 33 present in some form (94%
 | 4.6-5 | Panel: the posting phrase (`Posting says "…"`) | `assets.jsx:65` | BUILT | `Verbatim` `AssetBlocks.jsx:204-208` — `Posting says: "…"`, always-on rather than hover-gated. |
 | 4.6-6 | Panel: the note explaining the wording choice | `assets.jsx:66` | BUILT | `AssetBlocks.jsx:826-830` — *"A model reading this posting proposed this keyword for the line below. Nothing has…"* |
 | 4.6-7 | Panel: **what it displaced** ("Took the place of X in Skills 1") | `assets.jsx:67` | DELIBERATE | PC-3. `swap_decision` stores `from_label → to_label` and PC-3 names it as the honest future source. |
-| 4.6-8 | Action: `Put back "<original>"` | `assets.jsx:70-74` | PARTIAL | The **capability** exists — `CorrectionRow`'s `Undo` (`QcRail.jsx:578-580` → `POST /app/correction/{id}/revert`) and the Swaps/Original-vs-final tab — but the panel itself does not carry a `Put back` button. Relocated, not absent. |
+| 4.6-8 | Action: `Put back "<original>"` | `assets.jsx:70-74` | PARTIAL | The **capability** exists — `CorrectionRow`'s `Undo` (`QcRail.jsx:578-580` -> `POST /app/correction/{id}/revert`), the field's own `Put back "<label>"` (`AssetBlocks.jsx:946-954`, SPEC 4.11-5) and the Swaps/Original-vs-final tab — but the KEYWORD PANEL does not carry one. Relocated, not absent. **FEASIBILITY RE-MEASURED 2026-09-02, and it CORRECTS this row's own earlier note.** That note said there was "no join" between keywords and swap rows, measured by comparing `to_label` text with `model_keyword` text. **That was wrong and the method was wrong** — a link between two tables is a question about the SCHEMA, not about their rendered values. `swap_decision.requirement_id` IS a FK to `requirement(id)` (`schema.ts:642`), and `requirement.model_keyword` is the chip's keyword: **17 of 30 swapped rows resolve through it.** **The row stays PARTIAL for a sharper reason.** `requirement_id` is written by `attribute()` (`swaps.ts:224`) = `similarity()` token-set containment at `ATTRIBUTION_THRESHOLD = 0.34`, matched against the requirement's **verbatim posting line**, never against the keyword. So "this keyword took the place of X" would be a SECOND-ORDER claim on a ONE-THIRD fuzzy match, printed next to a button that rewrites the owner's document — `CLAUDE.md:432`, *"fuzzy matching is for RANKING, never for ACCUSING"*. The honest subset was measured too: only **2 of 17** have the keyword appearing EXACTLY in the replacement, and those 2 support "the keyword is in the item that replaced X", which is not what the control asserts. **What would unblock it:** record the driving keyword AT SWAP TIME (a `swap_decision` column written by the swap engine, not inferred afterwards). Until then this is a pipeline item, and the fuzzy `requirement_id` must not be dressed as causation. |
 | 4.6-9 | Action: `Swap for another skill…` (a select from the skill bank) + `Swap` | `assets.jsx:76-83` | **BUILT** | **Re-verdicted 2026-08-27 — the ABSENT verdict below was true when written and went stale when the skill-bank work landed.** Traced end to end: `useSkillBank` (`AssetBlocks.jsx:118`) -> `api.skillBankGet()` (`api.js:315`) -> `app/skill-bank` (`appSkillBank.ts:280`) -> `keywordSwapOptions` (`assetBlocks.js:491`) -> a real `<select data-qc={BLOCK_HOOKS.keywordSwap}>` at `AssetBlocks.jsx:998`, whose placeholder option is the row's own wording, `Swap for another skill...`. Choosing one seeds the field's ask box via `seedAsk` - no second edit path, nothing stored. Empty bank renders a REASON, not a disabled control. *(Prior verdict: "No skill-bank select renders anywhere on the asset step... the only `<select>` on this surface is none." It was a correct reading of the code AT THE TIME; the row was never revisited after the bank shipped.)* |
 | 4.6-10 | Action: `Drop it, leave the line open` | `assets.jsx:84-85` | **BUILT — CHANGED from ABSENT** | `keywordActions()` `assetBlocks.js:447-456`, rendered `AssetBlocks.jsx:871-878` (`BLOCK_HOOKS.keywordActions`). It **seeds the field's existing ask box** (`seedAsk`) and writes nothing at activation — on Send it is the one `api.aiEditArtifact` call site (`AssetBlocks.jsx:690`); `git diff -- api/` for the lane is empty. A keyword the draft does not contain renders **no control**, only the reason *"This field does not contain it, so there is nothing here to drop."* — the standing no-dead-UI rule. |
 | 4.6-11 | Each action is phrased as an assistant request stating the coverage consequence | `assets.jsx:72,82,85` | **BUILT — CHANGED from ABSENT, with the consequence clause deliberately omitted** | Seeded sentence: `Drop "<kw>" from this field. Rewrite the text without it rather than swapping in a synonym.` The prototype's *coverage consequence* is **not** claimed, and that is the finding, not an oversight: the lane's own hunt (verifier-CONFIRMED, both halves) proved a drop routed through `owner-edit` gains no attribution — `ownerLabels` strips the empty replacement via `.filter(Boolean)` (`appSwaps.ts:45-49`, plus a second filter at `swaps.ts:174`) so `driver:'owner'` cannot fire for a deletion — and splices a hole (`appCorrections.ts:359` → `Led  initiatives`). Copy that promised a coverage effect would have been a claim the system does not record. Guarded by `H:keyword-drop-offers-nothing-it-cannot-do`. |
 | 4.6-12 | `not in this text` on a chip whose keyword the draft lacks | *(prototype has none)* | NOT-IN-PROTOTYPE | App-only, `AssetBlocks.jsx:803-810`, recorded as reversible in PC-1. Excluded. |
 
-**§4.6 tally — 11 rows (row 12 excluded):** BUILT **7** · PARTIAL **1** · ABSENT **1** · DELIBERATE **2**.
+**§4.6 tally — 12 rows:** BUILT **8** · PARTIAL **1** · DELIBERATE **2** · NOT-IN-PROTOTYPE **1**. *(RECOUNTED from the rows 2026-09-02 — the stated line had gone stale as rows were re-verdicted, so this section was UNDER-claiming. `H:coverage-tally-matches-rows` (`app/test/prototypeCoverage.test.mjs`).)*
 Against the 9 non-deferred rows: **7 BUILT (78%), 8 present in some form (89%).** *(Was 5 BUILT / 56%; **4.6-10/11**, the drop hatch, moved ABSENT -> BUILT at `34eda36`, verifier-CONFIRMED. **4.6-9 has since been BUILT too (re-verdicted 2026-08-27), so §4.6 now has NO ABSENT row.** It was ranked #2 in §14 as *blocked on reading the owner's live skill fields*; the skill-bank work closed that and the rank was never updated. This is the staleness the ledger's own guard exists to catch, in a document the guard does not read.
 
 ---
@@ -375,11 +384,11 @@ Against the 9 non-deferred rows: **7 BUILT (78%), 8 present in some form (89%).*
 | 4.7-4 | `Scoped to this field only.` | SPEC §4.7 | BUILT | `AssetBlocks.jsx:649` — *"This rewrites `{merge_field}` only. Anything auto-corrected in it can no longer be undone."* Says more than the prototype. |
 | 4.7-5 | Cancel | SPEC §4.7 | BUILT | `AssetBlocks.jsx:637` (the control toggles to `Cancel`) |
 | 4.7-6 | Send | SPEC §4.7 | BUILT | `AssetBlocks.jsx:632-660` → `api.aiEditArtifact` |
-| 4.7-7 | Confirms in place on send | SPEC §4.7 | PARTIAL | The route writes and the block reloads; a distinct in-place confirmation line is not evidenced by reading. Needs a runtime check (§14). |
+| 4.7-7 | Confirms in place on send | SPEC §4.7 | **BUILT - CHANGED from PARTIAL** | **Re-verdicted 2026-09-02 by DRIVING it, which is the runtime check §14 asked for.** `askSent` state exists for exactly this (`AssetBlocks.jsx:720-723`: *"the confirmation must OUTLIVE the box that sent it"*), rendered at hook `blocks-ask-sent`. Driven on the RESUME step: clicked a `Put back` restore, the ask box opened, pressed Send -> **the box closed (`askBoxStillOpen: false`) and the confirmation persisted**: `Sent. "Put "AI/Data Science Strategy" back into this list..." - the change will appear in this field's change log. Dismiss`. Same pass incidentally evidences 4.11-5 (8 `Put back` controls rendered). |
 | 4.7-8 | Forwards to the assistant | SPEC §4.7 | **BUILT — CHANGED from ABSENT** | `Ask the assistant` (`BLOCK_HOOKS.forward`) forwards the SAME sentence the field's own controls seed, with the artifact bound at the call site. The field box REMAINS beside it — ground rule R6 keeps correction in place and scoped to the field, so the panel is a second destination, never a replacement. |
 | 4.7-9 | Asset-level equivalent for artifacts with no merge fields | *(prototype: `packet.jsx:257`)* | BUILT | `PacketBuilder.jsx:290-292` + `:344+` — exists precisely because the intro video has no merge fields. |
 
-**§4.7 tally — 9 rows:** BUILT **7** · PARTIAL **1** · ABSENT **1** · DELIBERATE **0**.
+**§4.7 tally — 9 rows:** BUILT **9**. *(RECOUNTED from the rows 2026-09-02 — the stated line had gone stale as rows were re-verdicted, so this section was UNDER-claiming. `H:coverage-tally-matches-rows` (`app/test/prototypeCoverage.test.mjs`).)*
 **7 BUILT (78%), 8 present in some form (89%).**
 
 ---
@@ -400,7 +409,7 @@ Against the 9 non-deferred rows: **7 BUILT (78%), 8 present in some form (89%).*
 | 4.8-5 | Header: per-asset gate chips | `evidence.jsx` | BUILT | `QcRail.jsx:744-768` — label, gate pill, `n to fix`, `n to review`, clickable into the drawer. |
 | 4.8-6 | **`Done for you`** list, on the page | `evidence.jsx:92-121` | BUILT | `ChangeLog` `QcRail.jsx:612-650`, mounted `:808` with the comment *"ON THE PAGE (SPEC 4.8) - not behind a tab and not behind a search."* |
 | 4.8-7 | Done-for-you row: `Corrected for you` + what changed + why | `evidence.jsx` | BUILT | `CorrectionRow` `QcRail.jsx:489-600` |
-| 4.8-8 | Done-for-you row: `Change it` | `evidence.jsx:108` | PARTIAL | The row carries `Undo` (`:578-579`) and `Review →` (`:557`); a separate "Change it" that seeds a rewrite request is not there. The capability is the field's `List Tweaks`. |
+| 4.8-8 | Done-for-you row: `Change it` | `evidence.jsx:108` | **BUILT — CHANGED from PARTIAL 2026-09-02, by INTERACTION** | **The control is called `Change it`, exactly as in the prototype, and it renders on every correction row.** The old PARTIAL said it *"is not there"* and that the capability was the field's `List Tweaks`; both are wrong. It could not be seen because THIS packet has zero corrections, so `ChangeLog` renders its empty state — which is not the same as the control being absent. Proven by injecting three corrections into the `checks-result` payload (`corrections[]`, the key `correctionsState` reads) and re-rendering: the row printed `Corrected: "safety engineers" rewritten as "safety two" in Resume summary.` alongside **`Review →`, `Change it`, `Re-run QC` and `Undo`**. A row sent WITHOUT an `id` correctly replaced `Undo` with *"this change log was sent without an identifier for this row…"* rather than a dead button. Evidence `screens/render-0902-corrections.png`. |
 | 4.8-9 | Done-for-you row: `Review →` | `evidence.jsx:109` | BUILT | `QcRail.jsx:557` |
 | 4.8-10 | **`Needs a decision`** list, on the page | `evidence.jsx:92-121` | BUILT | `qcRail.js` `railDecisions()` + `QcRail.jsx` `<Decisions>`, mounted between `<ChangeLog>` and the tab strip - ON THE PAGE, `RAIL_TABS` unchanged. A projection of the payload the rail already fetched, reusing `CheckRow`. Four per-asset states with four different sentences; a finding on an ungated asset is listed, counted apart as `uncounted`, and the contradiction reported. Commit `8d721a0`; footer/lookup defects found by the verifier and closed in `1a886a8`. |
 | 4.8-11 | Attention ordering fail → open → warn → fixed → soft | SPEC §5 | PARTIAL | `railAttention` / `attentionSplit` exist (`qcRail.js`, `assetGate.js`) and severity ordering is encoded, but with no page-level attention list there is no surface where the full ordering renders. |
@@ -412,15 +421,22 @@ Against the 9 non-deferred rows: **7 BUILT (78%), 8 present in some form (89%).*
 | 4.8-17 | Swaps: covering keyword | `evidence.jsx` | DELIBERATE | Same library decision. |
 | 4.8-18 | Swaps: verbatim posting quote | `evidence.jsx` | BUILT | `CompareTab` renders the stored quote column; `qcRail.js:324` guards it — *"a quote gets read as evidence"* — with a test greping for the column name. |
 | 4.8-19 | Swaps: the reason | `evidence.jsx` | BUILT | Same table (`rationale`). |
-| 4.8-20 | Swaps: `Undo this` | `evidence.jsx:232` | PARTIAL | Correction undo exists (`QcRail.jsx:578-579`); a per-**swap** undo on this tab does not. |
-| 4.8-21 | Swaps: `Ask why` | `evidence.jsx:233` | ABSENT | No equivalent control on `CompareTab` (`:300-355`, read in full). `check: absent app/src/screens/QcRail.jsx Ask why` |
+| 4.8-20 | Swaps: `Undo this` | `evidence.jsx:232` | **BUILT — CHANGED from PARTIAL 2026-09-02, by RENDER** | **Seen on screen**, not inferred: `shots/tab-compare.png` shows an `Undo this` button on every `swapped` / `dropped` / `added` row of the `Original vs final` tab, beside `Ask why`. Source: `QcRail.jsx:382-386` renders a real `<button data-qc={QC_HOOKS.undoSwap}>`, fed by `swapUndo(s, owners)` at `:360` (contract `qcRail.js:833-864`). The old PARTIAL read *"a per-swap undo on this tab does not [exist]"* and was already contradicted by commits `9002e3d` / `a86e8be`. **The `kept` rows correctly show `Ask why` ALONE** — `swapUndo` returns null when nothing was changed to undo, which is the no-dead-UI rule holding, not a missing control. |
+| 4.8-21 | Swaps: `Ask why` | `evidence.jsx:233` | **BUILT — CHANGED from ABSENT 2026-08-29** | Last column of `CompareTab`; the sentence, the artifact binding and every reason it is absent are `swapAskWhy` (`qcRail.js`). **It is a §4.11 substitution, per `AC-packet-ui-final.md` §2f/AC 34, and stays inside that AC's limits:** it seeds the assistant panel and sends nothing, no swap-revert mutation was built (there is none — `appSwaps.ts` is GET-only, which is why the prototype's `Undo this` does NOT ship beside it), and the `Why` column still prints the answer it always printed. **It is NOT the one-liner §14 called it:** the prototype interpolates `${r.list}`, which here is a CHECK-constrained enum (`skills_1`), so the list is resolved through `insertion.merge_field` → `FIELD_LABEL` to read "Skills 1". Guarded by `H:ask-why-never-names-the-raw-list-enum`, `H:ask-why-is-null-unless-it-has-an-artifact-to-be-about`, `H:ask-why-seeds-the-panel-and-sends-nothing`. |
 | 4.8-22 | Tab: **Passes** — what each loop closed / what remained / where it halted | `evidence.jsx:247-264` | BUILT | `LoopsTab` `QcRail.jsx:356-399` |
 | 4.8-23 | Tab: **Checks** — grouped by name, observed vs target, named offenders | `evidence.jsx:266-289` | BUILT | `ChecksTab` `QcRail.jsx:400-439`; `CheckRow` `:182-239`; offenders `AssetGateDrawer.jsx:93-100`. |
 | 4.8-24 | Tab: **Review** — blind second model: grade, agreement, prompt version, citations, critique | `evidence.jsx:291-334` | BUILT | `ReviewTab` `QcRail.jsx:440-480` |
 | 4.8-25 | A picked requirement filters the other tabs | `evidence.jsx:378` | BUILT | `QcRail.jsx:820-830` — `filtered to #{seq}` + a `clear` affordance, keyboard-reachable. |
 
-**§4.8 tally — 25 rows:** BUILT **14** · PARTIAL **5** · ABSENT **2** · DELIBERATE **4**.
-Against the 21 non-deferred rows: **14 BUILT (67%), 19 present in some form (90%).**
+**§4.8 tally — 25 rows (RE-COUNTED 2026-09-02, mechanically, after the render pass):** BUILT **19** · PARTIAL **3** · ABSENT **0** · DELIBERATE **3**.
+Against the 22 non-deferred rows: **18 BUILT (82%), 22 present in some form (100%).**
+
+> **The previous line read `BUILT 14 · PARTIAL 5 · ABSENT 2 · DELIBERATE 4 / 14 BUILT (67%), 19 present
+> (90%)` and was wrong on every number** — it was the 2026-08-25 hand count and never moved when the rows
+> beneath it did. It is not a rounding drift: it still carried **2 ABSENT** for a section whose table now
+> has none (4.8-21 `Ask why` shipped `3a9f28e`, 4.8-20 `Undo this` shipped and is re-verdicted above).
+> Counted by the same mechanical method §13-CURRENT uses — 4th cell of each `| 4.8-n |` row, earliest
+> verdict token — so the two agree by construction rather than by hand.
 
 ---
 
@@ -447,7 +463,7 @@ Against the 21 non-deferred rows: **14 BUILT (67%), 19 present in some form (90%
 | 4.9-15 | `unchecked` as a distinct footer state | *(prototype has none)* | NOT-IN-PROTOTYPE | `assetGate.js:268-271`. App-only; excluded. |
 | 4.9-16 | Advisory-mode override with a recorded reason | *(prototype has none)* | NOT-IN-PROTOTYPE | `assetGate.js:272-282`. App-only; excluded. |
 
-**§4.9 tally — 14 rows (15, 16 excluded):** BUILT **12** · PARTIAL **1** · ABSENT **0** · DELIBERATE **1**.
+**§4.9 tally — 16 rows:** BUILT **12** · PARTIAL **1** · DELIBERATE **1** · NOT-IN-PROTOTYPE **2**. *(RECOUNTED from the rows 2026-09-02 — the stated line had gone stale as rows were re-verdicted, so this section was UNDER-claiming. `H:coverage-tally-matches-rows` (`app/test/prototypeCoverage.test.mjs`).)*
 Against the 13 non-deferred rows: **12 BUILT (92%), 13 present in some form (100%).**
 **§4.9 is the best-covered section in the spec.**
 
@@ -468,10 +484,14 @@ Against the 13 non-deferred rows: **12 BUILT (92%), 13 present in some form (100
 | 4.10-7 | Failing row: `Open field →` | `packet.jsx:465` | BUILT | `PacketBuilder.jsx:962` `data-qc="send-open-field"`, wired to the existing `goToField` — not a new navigator. |
 | 4.10-8 | `Nothing blocks sending` when the list empties | `packet.jsx:445-448` | BUILT | `PacketBuilder.jsx:944` prints "Nothing blocks sending." off the SAME `packetFailList()` count that drives the rows, so the empty state cannot disagree with the list. |
 
-**§4.10 tally — 8 rows:** BUILT **2** · PARTIAL **2** · ABSENT **4** · DELIBERATE **0**.
-**2 BUILT (25%), 4 present in some form (50%). This is the weakest section in the spec**, and
-notably the cheapest to close — every input (`qcEntries`, `GateBadge`, `packetReadiness`,
-`onGoToField`) is already imported into the very file that renders it.
+**§4.10 tally — 8 rows (RE-COUNTED 2026-09-02, and CONFIRMED BY RENDER):** BUILT **8** · PARTIAL **0** · ABSENT **0** · DELIBERATE **0**. **8 BUILT (100%).**
+
+> **The previous line read `BUILT 2 · PARTIAL 2 · ABSENT 4 ... 2 BUILT (25%). This is the weakest section in
+> the spec.` That was stale, and it contradicted the table directly above it** — all eight rows already
+> carried a BUILT verdict with a `file:line`, and §13a had already recorded that `dd4f61c` *"closed §4.10
+> Review & send (six rows) taking that section 25% → 100%"*. A reader reaching this section first would have
+> been told the best-covered section in the spec was the worst. **Every row is now also confirmed on
+> screen** — see §17.
 
 ---
 
@@ -500,7 +520,7 @@ imports an assistant component.
 | 4.11-8 | Caveat when a change will be reverted by the next run (the omission list) | `assist.jsx` | **BUILT — CHANGED from ABSENT** | `omitListCaveat` (`assetBlocks.js`), rendered at `BLOCK_HOOKS.omitCaveat`. **DERIVED and conditional**, not the prototype's hardcoded fixture string: it fires only on a rule-driven omit drop recorded on THIS field and in the LATEST loop, matches the rationale exactly (accusation-grade), and says what the last run DID rather than predicting the next. |
 | 4.11-9 | **Every field-level action seeds this panel** | SPEC §4.11 | **BUILT — CHANGED from DELIBERATE** | **The DELIBERATE verdict rested on a CODE COMMENT (`AssetBlocks.jsx:495`) claiming the substitution as fact — a claim about the code, not a decision by the owner.** The panel now exists and is seeded: `seedAssistant(text, a.id)` at the call site -> `applySeed` (set text, open, CLEAR the slot) -> the reader edits and sends. **Nothing is sent by seeding**, proven by recording the network in `run-assistant.mjs` claim 4. The field boxes remain, so this is SEED-AND-REMAIN rather than the replacement the comment implied. |
 
-**§4.11 tally — 9 rows:** BUILT **0** · PARTIAL **2** · ABSENT **6** · DELIBERATE **1**.
+**§4.11 tally — 9 rows:** BUILT **5** · PARTIAL **1** · ABSENT **1** · DELIBERATE **2**. *(RECOUNTED from the rows 2026-09-02 — the stated line had gone stale as rows were re-verdicted, so this section was UNDER-claiming. `H:coverage-tally-matches-rows` (`app/test/prototypeCoverage.test.mjs`).)*
 Against the 8 non-deferred rows: **0 BUILT (0%), 2 present in some form (25%).**
 
 > **ASKED AND ANSWERED, 2026-08-25 — and the answer was neither (a) nor (b).** This section used to
@@ -539,6 +559,206 @@ already made once.
 ---
 
 ## 13. THE HEADLINE, AND THE DELTA
+
+### 13-CURRENT. Re-counted 2026-09-02 — THIS IS THE LIVE NUMBER
+
+> **THIS DOCUMENT IS THE BASELINE for prototype UI-parity progress** — owner-confirmed
+> 2026-09-02: *"I believe it's PROTOTYPE-COVERAGE.md ... update it for what is now done
+> regarding prototype UI parity progress."* Read §13-CURRENT for the live picture; §13a below is
+> the 2026-08-25 measurement, kept for its delta narrative and NOT current.
+
+> # **172 of 181 prototype elements present (95.0%)**
+>
+> | | Count | Share of 181 |
+> |---|---:|---:|
+> | **BUILT** | **172** | **95.0%** |
+> | **PARTIAL** | 8 | 4.4% |
+> | **ABSENT** | **1** | **0.6%** |
+> | *present (BUILT + PARTIAL)* | *180* | *99.4%* |
+>
+> **+3 BUILT / -4 PARTIAL on 2026-09-02 from the JD-ANALYSIS re-verdict (§4.1-§4.3).** That area had
+> never been touched by the parity lane -- its commits edit §4.4, §4.5 and §4.8 -- so it sat on a
+> source-only read from 26-27 August while §16/§17's render evidence was appended below it and never
+> reconciled INTO the rows. `4.2-2`, `4.3-12` and `4.3-13` are now BUILT and `4.1-5` closed as
+> DELIBERATE (which is why the denominator moved 182 -> 181). `4.1-10` and `4.1-12` stay PARTIAL with
+> their reasons stamped.
+>
+> **AND EVERY PER-SECTION TALLY LINE WAS STALE — all 11 of them, every one under-claiming.** The
+> headline above was being recomputed; the section lines were not. Worst case `§4.10`, which read
+> `BUILT 2 · PARTIAL 2 · ABSENT 4` against eight rows that all say BUILT. `§4.11` read `BUILT 0 ·
+> ABSENT 6` against rows saying BUILT 5 · ABSENT 1. All 11 are now recounted from their own rows,
+> and four assertions in `app/test/prototypeCoverage.test.mjs` now fail the suite if a stated tally
+> ever disagrees with its own rows again. Criteria: `docs/qc-evidence/AC-tally-drift-guard.md`.
+>
+> The denominator moved 183 -> 182 because `4.4-8` closed as **DELIBERATE** (a divergence with a
+> recorded reason is not a gap and is excluded, per §0). Counted against the old 183 for a like-for
+> -like comparison with the line below: **169 BUILT (92.3%)**.
+>
+> **THIS FIGURE IS THE MERGED RECOUNT OF THREE LANES, and it is higher than any lane reported.**
+> On 2026-09-02 the `cover`/asset lane reached 167/182, the QC + Review-and-send lane 166/183, and
+> the `jd` lane earlier still. Each was correct against a tree that could not see the others, and
+> each conflict landed on THIS block. Every resolution has been the same: keep both sets of row
+> moves, then recount from the rows — never adopt a lane's figure. **A headline maintained by hand
+> beside rows three lanes are moving is the same defect this file already records twice inside
+> itself** (§4.8 and §4.10 both carried tallies that contradicted their own tables), in its
+> concurrent form. The guard — a check that recomputes this number from the rows and fails when the
+> stated figure disagrees — is proposed in `ACT-70` and remains unwritten.
+>
+> **+6 BUILT on 2026-09-02, from THREE passes and no new code.** Two lanes measured different steps
+> on the same day and both re-verdicted rows; this number is the mechanical recount of the MERGED
+> file, not either lane's figure.
+>
+> - **§13-RENDER, the `cover`/asset pass:** `4.4-14`, `4.4-24`, `4.4-25`, `4.4-26` — four rows that
+>   were PARTIAL on a reading and are demonstrably built when the page is drawn.
+> - **§17, the QC / Review-and-send RENDER pass:** `4.8-20` (`Undo this`) was PARTIAL on the claim
+>   that a per-swap undo *"does not [exist]"*; it renders, and `QcRail.jsx:382-386` ships it.
+> - **§17e, the INTENT probe:** `4.8-8` (`Change it`) was scored *"is not there"* when the packet
+>   simply had no correction for it to render on. Injecting one produced the control under the
+>   prototype's own name. `4.10-8` and `4.8-22`'s loop detail were confirmed the same way and were
+>   already BUILT.
+>
+> **Six rows have now closed by being re-read or re-clicked rather than rebuilt**, which is the
+> pattern §14 keeps recording: **the rank goes stale faster than the code does** — and, per the
+> owner on 2026-09-02, *absence of data is not absence of a feature*.
+>
+> **+11 BUILT since the 148 (80.9%) headline in §13a**, which was measured 2026-08-25 and never
+> caught up with the rows that shipped after it.
+>
+> **UPDATED 2026-09-02, second pass.** The owner directed *"finish 4.5 and 4.11... on desktop wide
+> the panel rather than float but you will need a different approach of your choosing for mobile."*
+> Both landed:
+> - **4.11-1** the assistant now DOCKS as a third column at `>= 1450px`, floats below that, and uses
+>   a new bottom-`sheet` Overlay variant on mobile. The shell cap moved 1280 -> 1560 (the
+>   prototype's own), which is the arithmetic that made docking possible at all.
+> - **4.5-12** `PickList` SHIPPED. It was scored ABSENT on `shapeOf()` having no `select` shape, but
+>   the row's real dependency was *"per-item candidacy on the insertions payload"* -- and that had
+>   already been satisfied for months by `swapsForList`. No new shape, no new fetch.
+>
+> **ONE ROW REMAINS ABSENT, and it is not open work:**
+> - **4.11-4**, the scope selector (This packet / This asset / My profile). **Two of its three
+>   options have no route behind them**, so building it would ship two controls that do nothing --
+>   the no-dead-UI rule this repo enforces outright. `assistantScope()` STATES the scope instead.
+>   Left ABSENT rather than reclassified DELIBERATE to flatter the count; the number is only worth
+>   something if a row moves when the code does.
+>
+> **METHOD, and the trap in it.** Counted mechanically from the 4th cell of every
+> `| <section>-<n> |` row, taking the verdict token appearing EARLIEST in the cell. Matching on
+> mere containment instead scores `BUILT - CHANGED from ABSENT` as ABSENT and yields a false
+> 134/181 with 18 phantom ABSENT rows -- that error was made and caught on 2026-09-02, and the
+> corroboration that the positional count is right is that `.claude/DEFERRED.md` independently
+> quotes "2 ABSENT + 22 PARTIAL", which this method reproduces exactly.
+>
+> **The §14 ranked list was stale in the other direction** and is corrected in the same pass:
+> 4.8-21 was ranked GATED while the row table had already scored it BUILT. THREE of the five
+> ranks in §14 have now closed without anyone building anything. **A rank is not a verdict —
+> the row tables are authoritative; §14 is a reading of them that goes stale.**
+
+### 13-RENDER. The COVER LETTER step, drawn rather than read (2026-09-02)
+
+**Instrument:** `scripts/render-app.mjs` against the real `app/dist` bundle on
+`#/packet/2cb56fb3-fc33-4b1a-85b9-06c7aea2fbb3/cover`, fixture rebuilt by `build-fixtures.mjs` from
+a fresh `fixture-refresh.yml` dump (run `33642729577`). Compared against the prototype screenshots
+`screens/19-cover-letter-step.png`, `20-cover-header-expanded.png`, `21-cover-letter-body.png`,
+`22-cover-letter-body-lower.png`, `23-cover-letterhead-template.png`. `pageErrors: []`,
+12 fixtures served, 41 distinct `data-qc` hooks, 34 interactive elements.
+
+> ## The cover step is **83 of 84 BUILT (98.8%)** — one PARTIAL, zero ABSENT
+>
+> *(Updated 2026-09-02 after the five-row resolution pass below; was 80 of 85 when this section
+> was first written the same day.)*
+>
+> Its sections are §4.4 (asset card + header), §4.5 (field blocks), §4.6 (keyword panel) and
+> §4.7 (inline ask) — 97 rows, of which 10 are DELIBERATE and 2 NOT-IN-PROTOTYPE.
+>
+> **There is no ABSENT row left in any of them.** 4.5-12 (`PickList`) was the last one and it
+> SHIPPED on `main` in `5d37e3d` while this render pass was running — it is now BUILT. It could
+> not have affected this step in any case: the cover artifact's three merge fields are
+> `@Company`, `@CoverLetterDate`, `@CoverLetterBody`, all `generated`, all prose (dumped from the
+> DB, not inferred), and a pick-list is portfolio-only.
+>
+> **So nothing on the cover letter page is unbuilt.** The remaining 5 rows are PARTIAL — named
+> below — and every one of them is a refinement of something that already renders.
+
+#### What the render CHANGED — 4 rows that reading had wrong
+
+| Row | Was | Now | What the render showed |
+|---|---|---|---|
+| Row 4.4-14 | PARTIAL | **BUILT** | The gate badge renders as an interactive `17 to fix / Section word counts ->` — the count is the link and it names its destination |
+| Row 4.4-24 | PARTIAL | **BUILT** | `0 of 13 must-haves answered` renders |
+| Row 4.4-25 | PARTIAL | **BUILT** | `2 of 21 responsibilities answered` renders |
+| Row 4.4-26 | PARTIAL | **BUILT** | `0 of 1 nice-to-haves answered` renders |
+
+4.4-24's old cell also named a blocker that was never real — *"needs per-kind denominators on
+`GET /app/opportunity/{id}/requirements`"*. The split is computed client-side by
+`groupRequirements` (`postingAnalysis.js:512`) from rows the endpoint already returns. **A stated
+blocker is a claim about the code and needs the same producer/consumer sweep as an ABSENT verdict.**
+
+#### THE HEADLINE FINDING: every apparent gap on this page was DATA, not a missing feature
+
+Three differences are plainly visible between the app render and the prototype screenshots. **All
+three would have been logged as gaps by a screenshot-only comparison, and all three are wrong.**
+This is the argument for reading the code and the data *with* the render, not instead of it.
+
+| Looks missing | Ground truth | How it was settled |
+|---|---|---|
+| The **letterhead / template frame** block (`screens/23`: `{{@CoverLetterDate}}`, `Dear Hiring Committee,`, `Template · same in every packet`) | The static-block renderer **exists** — `AssetBlocks.jsx:507` prints the `{{token}}` inline per SPEC 4.5-40. This packet has **no static row**: all three cover insertions are `generated=True`. | DB dump of `insertions` for artifact `e6a8467d` |
+| **Inline highlighting** in the letter body (`screens/21`: yellow keyword marks) | The posting-echo treatment **is painting** — the DOM probe counted **2 `.qc-echo` spans** on this very page. Only the *keyword* mark is 0. | `document.querySelectorAll('.qc-echo').length` |
+| **`MATCH ESTIMATE —`** where the prototype shows `92%` | `packet.jd_analyzed = False`, so `packet.ats_score` is null and `—` is the honest render. The opportunity's `ats_score = 78` is a **different** measurement (triage-time, scored 2026-08-17); printing it here would be the wrong-source error `CLAUDE.md` forbids. | `raw-dump.json` packet + opp rows |
+
+The keyword mark being 0 is the one genuine remainder, and its reason is **narrower than the
+library decision it is often mistaken for**. `AssetBlocks.jsx:561-577` is explicit: the earlier
+"blocked on `term_library_entry`" note caused a real false block and was corrected by the owner.
+Keywords have a source (`requirement.model_keyword`, already rendered on the JD step). What is
+missing is only **which keywords a given FIELD places** — a per-asset placement question. Do not
+re-file this as a library block.
+
+#### The five PARTIAL rows, resolved (2026-09-02, owner-requested)
+
+Owner: *"resolve the remaining 5."* Four closed; the fifth is a data problem, not a UI one.
+**Nothing here was closed by reading alone** — each verdict names the instrument that settled it.
+
+| Row | Verdict | Settled by |
+|---|---|---|
+| Row 4.4-29 `Go to field ->` | **BUILT** | RENDERED: 2 links on the resume step, `role=button`, `tabIndex=0`, `data-qc-target-field=RelevantBullets1`; 34 on the QC step. Exceeds the prototype (`Go to field in <asset> ->`) |
+| Row 4.7-7 confirm on send | **BUILT** | DRIVEN: clicked Send, box closed, confirmation persisted beside the field. This is the runtime check §14 asked for |
+| Row 4.5-3 breakpoint | **BUILT** | MEASURED: viewport 1080 -> card 715 (wide), 1000 -> 635 (stacks). The 700 CONTAINER threshold == the spec's 1080 VIEWPORT; the old cell compared two different quantities |
+| Row 4.4-8 three buttons | **DELIBERATE** | READ: the source declines the button conversion because it would remove middle-click / Cmd-click / open-in-new-tab on a real `<a href>`. The `nowrap` half was completed in this pass |
+| Row 4.6-8 `Put back` in panel | **PARTIAL — stays** | MEASURED and REFUSED: 30 `swapped` rows, 35 keywords, **0 joins**. See the row for why fuzzy-matching them is forbidden |
+
+**4.6-8 is the only open row on this step, and it is an UPSTREAM item.** The prototype can offer
+"put back what this keyword displaced" because its `term` and its swap rows share one id space.
+This app's swap rows act on skill-list candidates while the chips are model-proposed ATS keywords,
+and nothing records which keyword drove a swap. That join has to be made in the pipeline before any
+UI can render it honestly.
+
+#### Real look/function differences that ARE still open
+
+None of these is a defect; they are the honest remainder, and two are deliberate.
+
+| Prototype | App today | Read |
+|---|---|---|
+| Four **stat columns** with large coloured numerals (`MUST-HAVES 4 of 5`) | The same four counts as **one inline row of phrases** | **Presentation gap** — same data, less scannable. The clearest remaining *look* difference on this step. |
+| `Open Slides ↗` / `Copy tracked link` at the **top** of the card | Present, at the **bottom** | Positional only; both wired |
+| Keyword phrases highlighted **in the body** | Chips in the margin labelled `proposed / not in this text` | Open — needs per-field placement (above) |
+| Corrected phrases **underlined inline** in the body | A `CORRECTED FOR YOU` margin block | **Divergence, and the app is richer**: prototype offers `Review →`; the app offers `Undo` / `Change it` / `Re-run QC` |
+| `UI SPEC / Current app / With QC layer` toggle bar | Not built | **OUT-OF-SCOPE** — `SPEC.md` §4.12 says do not build it |
+
+#### App-only, beyond the prototype
+
+`Rebuild from current draft`; per-section word counts against the live `250-400` threshold
+(three rows, `197 / 185 / 216 words`); the `11 open findings with no field of their own` panel,
+which states that findings counted on the header name no field this asset renders rather than
+letting the numbers silently disagree; and `Undo` / `Change it` / `Re-run QC` on every correction.
+
+#### Method note — the fixture canary earned its keep
+
+The first render attempt **refused to run**: `HARNESS CANARY FAILED - /search-prefs has no
+`checks``. Had it not, every word-count rule on the page would have rendered unset and read exactly
+like the product having lost its limits — the documented 2026-08-29 failure in
+`.claude/accuracy-log.md`. The fix was a real `fixture-refresh.yml` round trip, not a hand-patched
+fixture. **An instrument that cannot see has no standing to report an absence.**
+
+---
 
 ### 13a. The number
 
@@ -723,7 +943,7 @@ staleness `D:ledger-stale-row-fails` guards in `.claude/DEFERRED.md`, in a docum
 | ~~1~~ | **4.11-1 → 4.11-8** — the assistant panel | §4.11 | **SPLIT, not shipped and not blocked as one thing.** Two rows SHIPPED without the panel (PR #58): **4.11-8** the omit-list caveat, derived and conditional, and **4.11-5**'s two missing quick actions as in-place seeders (three of the five already existed). **Three rows are NOT BUILDABLE on today's data and must not render:** `Revert` has no route for either meaning, `Keep` is worse than vacuous (the route commits before it replies), and **4.11-6** is unreachable because `section` is the caller's input echoed back. **4.11-1's dock is a SHELL decision, not a breakpoint one** — this app caps content at `1280` against the prototype's `1560`, and the 280px difference is exactly the right column D4 deleted, so no viewport passes. What remains is an owner choice: a float-only panel, or raising the shell cap. |
 | ~~2~~ | ~~**4.6-9** — the keyword panel's skill-swap hatch~~ | §4.6 | **ALREADY BUILT — the rank was stale, not the work.** Ranked here as *"blocked on reading the owner's live skill fields"*; the skill-bank work closed that and nobody revisited the rank. Traced end to end 2026-08-27: `useSkillBank` → `api.skillBankGet()` → `app/skill-bank` → `keywordSwapOptions` → the `<select>` at `AssetBlocks.jsx:998`. §4.6 now has no ABSENT row. |
 | ~~3~~ | ~~**4.1-20** — `Where it is used →` on an evidenced requirement~~ | §4.1 | **SHIPPED.** The `list → artifact` map is derived from the packet's own `artifacts` (`listOwnersFromArtifacts`) instead of from render-time registration, so it is populated on the JD step too. `D:jd-evidence-has-no-field-link` is CLOSED. Guarded by `H:jd-field-link-is-wired-not-just-derived` — added after five wiring mutations passed suite AND build, including reverting the exact defect the ledger row described. |
-| 4 | **4.8-21** — `Ask why` on a swap row | §4.8 | **GATED, and it is not the one-liner §14 once called it.** It is specced to seed the assistant panel, so its target does not exist. Moves with rank 1. |
+| ~~4~~ | ~~**4.8-21** — `Ask why` on a swap row~~ | §4.8 | **SHIPPED — the rank was stale, not the work, and this is the THIRD rank in this table to close that way.** Re-checked against source 2026-09-02: `QcRail.jsx:388` renders a real `<button>` carrying `data-qc={QC_HOOKS.askWhy}` and `data-qc-artifact={ask.artifactId}`, fed by `swapAskWhy(s, owners)` at `:359`; the seed builder is `qcRail.js:813` with its null contract documented at `:784`. Its sibling `swapUndo` shipped alongside it. The 'target does not exist' verdict was written when the row was read as needing the 4.11 panel; it seeds through `onAsk` instead, which exists. |
 | 5 | **4.5-12** — `PickList` (`type: 'select'` fields) | §4.5 | **OPEN, expensive, low value.** Portfolio only, so no resume impact. |
 
 **Plus the two the ranking omits, and NEITHER is open work:** **4.1-6** re-verdicted **DELIBERATE**
@@ -732,8 +952,10 @@ staleness `D:ledger-stale-row-fails` guards in `.claude/DEFERRED.md`, in a docum
 measurement removed as a *number*. And **4.7-8** (`Forwards to the assistant`) cannot be built
 independently of rank 1 and moves with it.
 
+**RE-CHECKED 2026-09-02 AGAINST SOURCE — the read below holds and is now STRONGER.** 4.8-21 has since been proven SHIPPED (see rank 4), so only 4.7-8 remains gated behind the panel decision. **Any count of "9-11 remaining UI parity rows" is STALE** — it predates the 2026-08-27 re-reconciliation and does not survive this table. Exactly ONE row in this list is open and unblocked: 4.5-12, which is portfolio-only and explicitly low value.
+
 **The honest read: the packet module's prototype-alignment backlog has NO unblocked work left at any
-size.** What remains is one owner decision (the panel), two rows gated behind it (4.8-21, 4.7-8), one
+size.** What remains is one owner decision (the panel), one row gated behind it (4.7-8), one
 row that is explicitly low value and portfolio-only (4.5-12), and one row that closed as DELIBERATE
 rather than as work (4.1-6). The remaining engineering weight for this module has moved to
 `.claude/DEFERRED.md`, which carries **33 open rows**.
@@ -802,10 +1024,352 @@ inputs={ "route": "#/packet/<id>", "owner": "von.ellis@enterpriseds.io",
   on, 17 rows re-enter the denominator as work, and the headline falls to about **63%** until they
   are built.
 
-**What was NOT done:** no workflow was dispatched, no live UI was verified, nothing was run. This
-is a source measurement, honestly labelled as one.
+**What was NOT done ~~at the time this section was written~~ — SUPERSEDED 2026-09-02 for §4.8 and
+§4.10 ONLY.** The sentence below was true of the 2026-08-25 pass and stayed true for a week. It is
+now false for the QC step and Review & send, which were rendered against the LIVE app and against a
+run-scoped fixture on 2026-09-02 — **see §17**. It remains TRUE and unretracted for every other
+section, and limit **1** (a component built but starved of data) is untouched everywhere.
+
+> ~~no workflow was dispatched, no live UI was verified, nothing was run. This is a source
+> measurement, honestly labelled as one.~~
 
 ---
 
 *Measurement only. Nothing under `app/src` or `api/src` was read-modified; this file is the only
 one written. No fix was applied to anything reported here.*
+
+
+---
+
+## 16. THE `jd` STEP, RENDERED — 2026-09-02
+
+**Method, and why it differs from every section above.** Owner: *"be sure to lean on render as well
+as reading the code as equal if not more importance."* Both sides were rendered locally, headless,
+in about two seconds each, and **looked at**:
+
+```
+node scripts/render-spec.mjs --step jd --vendor /tmp/vendor --out /tmp/spec-jd.png
+node scripts/render-app.mjs  --route '#/packet/2cb56fb3-.../jd' \
+     --fixtures docs/qc-evidence/fixtures.json --out /tmp/app-jd.png
+node scripts/compare-ui.mjs  --step jd --vendor /tmp/vendor --fixtures ... --json /tmp/gap-jd.json
+```
+
+App render: `bodyLen 10146`, `unmatched: []`, `pageErrors: []`. Prototype render: no page errors.
+
+### 16a. THE HEADLINE FINDING — the instrument, not the app
+
+`compare-ui` reported **27 panels and 3 controls only in the prototype**. Looking at the two
+screenshots and then tracing each row to source, **the single largest cause is a fixture that
+cannot see the surface it is scoring**:
+
+| Reported "missing" | Actually |
+|---|---|
+| Posting vs your profile · Strong match · Must-have requirements · Nice-to-have requirements · No evidence · ATS keywords · Moderate match · Dimension · The posting asks for · Your profile evidences · Leadership tenure · Organization size · Budget owned · Compliance ownership · Platform modernization · Cycle time regulated · Domain background · Public sector · **"Run again"** | **ONE fixture gap.** All of it is `ProfileCompareCard`, fed by `comparison` (`PacketBuilder.jsx:878` ← `req.data?.comparison`). The app rendered `"Loading the comparison..."`, which `postingAnalysis.js:149` returns **only when `comparison` is undefined**. |
+
+**The route returns it.** `appRequirements.ts:846-851` builds `comparison` via `comparisonPayload`
+and includes it in the response. **`build-fixtures.mjs` never emitted it**, and
+`fixture-refresh.yml`'s dump covers `requirement` but not the dimension rows it is computed from.
+
+**So this harness has never once been able to see the comparison surface** — which means the
+`jd 266% · 27 · 3` row in §1a, carried since `UI-GAP-REGISTER.md` (2026-08-23), has counted an
+instrument blind spot as product absence every time it was quoted.
+
+Fixed structurally rather than noted: **`comparison` is now a `fixture-canary` REQUIRED input**
+(`scripts/lib/fixture-canary.mjs`). It meets that file's own admission test exactly — its absence
+"renders as plausible, quiet, correct-looking UI" rather than crashing. **Consequence, stated
+plainly: `render-app.mjs` and `compare-ui.mjs` now REFUSE to run** against the committed fixture
+until the dump and builder carry `comparison`. That is the doctrine working as designed — *an
+instrument that cannot see has no standing to report an absence* — not a regression.
+
+### 16b. Four more "gaps" that the render suggested and source REFUTED
+
+Each of these looked like a gap in the screenshot. None is.
+
+| Looked missing | Ground truth |
+|---|---|
+| Full labelled left nav (app shows an icon rail) | **DELIBERATE.** `shell.jsx:369` cites the owner: *"nav menu needs to be collapsible and collapsed by default"*, and 375 adds that collapsed keeps the icons deliberately. |
+| `from email` provenance badge | **BUILT.** `PacketBuilder.jsx:822`, gated on `opp?.source`. The eMoney fixture opportunity has no `source`, so it correctly does not render. |
+| `See how the assets answer these →` | **BUILT, renamed** — `See where each one is answered →`, `PostingAnalysis.jsx:824`. |
+| Per-kind coverage fractions (`4/4`, `7/8`, `12/13`) vs the app's raw counts `(21) (14) (35)` | **DELIBERATE, with a recorded reason.** `PostingAnalysis.jsx:191-199`: the prototype counts requirement KINDS; this app grades role DIMENSIONS, and per-kind coverage "is not a number the system produces — `requirements.ts:61` makes `coverage` `'escalated' \| null`, never `'covered'`". Building the prototype's four literally would mint a **fourth coverage number** that could not agree with the other three. `qcRail.js:917` is the same refusal: nice-to-have is *"unmeasured rather than zero"*. |
+
+### 16c. What the app genuinely does NOT have — CORRECTED: nothing confirmed
+
+**The first draft of this section listed two gaps. Both were wrong, and the owner caught the
+pattern rather than the instances:** *"we have disproven and improved several things so rollback
+isn't necessary if the difference is purposeful and not work left to be done."* A purposeful
+divergence is not a gap, and neither of these was work left to do.
+
+| First claimed as a gap | Ground truth |
+|---|---|
+| "the `M1–M5 / D1–D4 / N1–N3` id legend is absent" | **BUILT, and on this very screen** — `PostingAnalysis.jsx:895-898`, `POSTING_HOOKS.legend`, *"The legend sits under the Requirements and Responsibilities panels."* It was **below the fold** of a 1700px screenshot. Absence asserted from a truncated view — the same error this pass spent its whole length catching elsewhere. |
+| "the id scheme is a gap" | **A DELIBERATE OWNER DECISION (2026-08-23) and strictly better.** `postingAnalysis.js:210-226`: `RQ-MH` / `RQ-NTH` / `RESP` encode the real hierarchy — a must-have and a nice-to-have are two GRADES OF THE SAME THING, hence the shared `RQ-` stem, while a responsibility is a different kind of line and takes no stem. The prototype's three equal-looking letters are precisely the flattening this replaced; the file also records that an earlier `M`/`N`/`R` map drifted against `MH`/`NTH`/`RESP` and rendered one row two different ways. |
+| "no numeric match in the header" | **A DELIBERATE REFUSAL, and the same rule this repo enforces everywhere else.** The prototype prints `ATS MATCH 92%` and `AUDITABLE MATCH 95 FAIL`. The app renames it `MATCH ESTIMATE` and states outright: *"It is not keyword coverage, and no applicant tracking system produced it"* (`PostingAnalysis.jsx:1045-1049`), with `"ATS" is not part of that name` given as the reason at :1085-1088. The em-dash is `atsScore === null ? 'not run yet'` — it will not print a composite it did not compute, which is the standing **"never fabricate a composite"** rule aimed at the prototype. |
+
+**So: zero confirmed prototype-side gaps on the `jd` step.** Not "few" — none that survived a trace
+to source. Every difference visible in the two screenshots is one of: a fixture blind spot (§16a), a
+rename, a recorded owner decision, or an improvement over the prototype (§16d).
+
+### 16d. Where the app substantially EXCEEDS the prototype
+
+The `266%` in §1a is misleading as a score but directionally right: on this step the app is the
+richer surface, and the excess is **provenance**, which is the product's whole argument.
+
+- Per-line source attribution the prototype has no counterpart for: *"The employer's words,
+  characters 61-181 of the posting (located by anchor, not an exact string match)"*, *"parser read
+  it as: …"*, *"Filed here because from the section the posting listed it under."*
+- An explicit **`Model paraphrase - not a quote from the employer, because this wording could not be
+  located in the posting text`** state — the prototype cannot distinguish a quote from a paraphrase.
+- `not checked for evidence` per row; `Where it is used → (Compact resume)`; `Show as columns`;
+  `Match & keyword run`.
+- **21 responsibilities** parsed against the prototype's mocked 4.
+
+### 16e. Verdict
+
+**Look:** close. Same shell, same step rail, same card rhythm, same type scale; the app's header
+trades two big numbers for a state chip, and the nav is collapsed by owner decision.
+
+**Function:** the app is **ahead** of the prototype on this step, with **no confirmed shortfall**
+(§16c) — except the comparison surface, which **could not be judged in this pass** and must not be
+scored again until the fixture carries `comparison`.
+
+**The rule this pass earned, owner-stated:** a difference that is purposeful is not a rollback
+candidate and is not work left to be done. Three of this section's own first-draft "gaps" were
+improvements the app made ON the prototype. A parity document that cannot tell a divergence from a
+deficit will keep proposing that the product be made worse.
+
+**Open follow-up (named, not done):** extend `fixture-refresh.yml`'s dump and `build-fixtures.mjs`
+to carry `comparison`, then re-run this measurement. Until then the harness refuses, by design.
+
+## 17. RENDER PASS — §4.8 and §4.10 seen on screen (2026-09-02)
+
+**This section exists because §15 limit 2 said it had to.** That limit reads: *"A component can be
+built and never reach the screen for want of a mount... These need `ui-verify.yml` against the live
+app."* Every verdict below was produced by looking at a rendered page, then reconciled against
+source — never by source alone.
+
+### 17a. What was rendered, and by which instrument
+
+| Shot | Instrument | Data | Route |
+|---|---|---|---|
+| `screens/render-0902-live-qc.png` | `ui-verify.yml` run **33642950751** | **LIVE production** | `#/packet/9f9c370a…/qc` |
+| `screens/render-0902-live-send.png` | `ui-verify.yml` run **33643149667** | **LIVE production** | `#/packet/9f9c370a…/send` |
+| `screens/render-0902-tab-{coverage,compare,loops,checks,review}.png` | `scripts/render-app.mjs` | fixture from `fixture-refresh.yml` run **33642945263** | `…/qc` + `--click [data-qc-tab=…]` |
+
+Packet `85cee965-f435-4b8e-910f-c806232092ce` (Trinnex · Director of Digital Technology Operations
+& Innovation), 924px wide to match the prototype captures. All five tab clicks returned
+`pageErrors: []`.
+
+### 17b. §4.10 Review & send — CONFIRMED ON SCREEN, 8/8
+
+`render-0902-live-send.png` against prototype `37-review-and-send.png` + `38-review-send-gate-list.png`:
+
+| Row | Prototype | Live app | Verdict |
+|---|---|---|---|
+| 4.10-1 per-asset list | 5 rows | 5 rows (Resume, Compact resume, Cover letter, Portfolio one-pager, Intro video) | **rendered** |
+| 4.10-2 gate badge | `GATE` chip | `Blocked` / `Not checked` per row | **rendered** |
+| 4.10-3 status pill | `review` / `approved` / `todo` | `review` / `todo` | **rendered** |
+| 4.10-4 gate card | `1 item to fix across 1 asset` | `14 items to fix across 5 assets` | **rendered** |
+| 4.10-5 lock sentence | verbatim | verbatim | **rendered** |
+| 4.10-6 one row per item | 1 row | 14 rows | **rendered** |
+| 4.10-7 `Open field →` | on the row | **on 4 of 14 rows** | **rendered — see 16d** |
+| 4.10-8 empty state | — | not exercised (this packet is blocked) | source-only |
+
+**Two divergences, both deliberate and neither work left to do:**
+
+1. **No per-asset MATCH score.** The prototype pills read `97 · 3 to review`; the app prints
+   `Blocked · 6 to fix` and no number. That is the *"never fabricate a composite"* rule
+   (`.claude/memory.md`, `qcRail.js` `railHeadline`) — the live header states it outright: *"Resume
+   only — there is no packet-wide score, and averaging the assets would invent one."* Scoring this
+   as a gap would be scoring honesty as a defect.
+2. **The app adds a first-fix deep link the prototype has no counterpart for** — each asset row
+   carries `Every change cites the posting →`, naming the specific blocking check. Ahead of spec.
+
+**One real, small divergence:** the prototype's fail row is *rule title* + *named offenders*
+(`Every library keyword lands in a field` / `FedRAMP — open · Roadmap Alignment — cut for length`).
+The app's row is the *observed measurement* (`3 of 12 changes cite nothing`). The named offenders
+DO render — but on the QC step's `Needs a decision` list, not here. Relocated, not missing.
+
+### 17c. §4.8 QC & evidence — CONFIRMED ON SCREEN
+
+All five tabs render (`Coverage · Original vs final · Remediation loops · Checks · Independent
+review`); the strip is unconditional at `QcRail.jsx:961-978`.
+
+| Row | Seen |
+|---|---|
+| 4.8-1 / 4.8-2 composite + must-have coverage | **PROSE, deliberately, not a number** — *"No overall number: a composite is only computed when all three parts exist, and 2 of them do not."* `Must-haves evidenced 33` renders with a bar; `Keywords present`/`Seniority fit` read `not measured` with a reason each. PARTIAL is the correct verdict and the reason is a recorded decision, not a gap. |
+| 4.8-4 the numbers | **four**, not the prototype's two: `21 to fix · 0 to review · 1 never checked · 0 corrected for you`, with an explainer. Ahead of spec. |
+| 4.8-5 per-asset gate chips | all 5 assets, gate + `n to fix` + `n counted` |
+| 4.8-6 `Done for you` | on the page, per asset, with a real empty state per asset |
+| 4.8-10 `Needs a decision` | on the page, richer than the prototype: bold rule title, count, `Fix before approval` / `Review` pill, **`what we saw:` / `what it should be:`**, and named offenders each carrying `go to the draft →` |
+| 4.8-14 Coverage tab | `Requirements · must have 7/7`, `nice to have — not measured` (with the reason), `Responsibilities 11/11` |
+| 4.8-16/-18/-19 Swaps tab | `Original / Final / What happened / Why`, `swapped·dropped·kept·added`, verbatim posting quote, and `no line of the posting backs this change` where there is none |
+| 4.8-20 / 4.8-21 | **`Undo this` and `Ask why` both render**, paired, in the last column |
+| 4.8-22 Passes tab | renders; **the loop DETAIL is unexercised** — no asset in this packet has had a second pass, so it correctly prints *"generated once and never revisited"* rather than inventing a loop history. Structure confirmed, "what closed / where it halted" not exercised by this data. |
+| 4.8-23 Checks tab | grouped by rule, `what we saw` / `what it should be`, offenders named with their measured values |
+| 4.8-24 Review tab | all five prototype sub-parts render: prompt source (`reviewer_system v1 from the Prompts table`), grade, coverage agreement (`1 agreed, 4 disagreed (1 stricter, 3 looser); 5 not comparable`), citations (`4 of 7 citations did not verify`), critique — plus an honest *"has not run for this asset"* per unreviewed asset |
+
+### 17d. A DEFECT IN THE MEASURING INSTRUMENT, not in the app — `fixture-refresh.yml` pulls every run
+
+**This nearly became a false defect report and is recorded so it cannot become one again.** The
+locally-rendered `Checks` tab shows `Skill lines fit the template` **twice, byte-identical**, and
+`Relevant-experience lines fit` twice. That is not what the app does.
+
+**Ground truth, from the two queries rather than from the pictures:**
+
+- the live route filters to one run — `appChecks.ts`: ``select * from check_result where
+  artifact_id=$1 and run_id=$2``, where `run_id` comes from `artifact_gate`;
+- `fixture-refresh.yml:74-76` has **no `run_id` predicate** — ``from check_result cr where
+  cr.artifact_id in (...)`` — so it returns the artifact's whole history.
+
+Measured in the dump: the resume artifact carries **246 rows across 26 distinct `check_key`** —
+`skill_char_limit` appears **14 times**, one per historical run. The live QC and send pages, which
+went through the real route, show each check **once**.
+
+**Consequences, both worth keeping:**
+
+1. **`screens/app-send.png` (2026-08-29) reads `112 items to fix across 5 assets`. The live number
+   is `14`.** The 112 was never the product — it was the unfiltered fixture. Any parity read taken
+   off the committed `app-*.png` captures inherits this.
+2. **The app already catches it.** The rail prints *"the server counted 7 finding(s) needing
+   attention but sent 54 such row(s)"* — a contradiction notice firing on an over-supplied payload,
+   which is the harness being wrong loudly instead of the app rendering it silently.
+
+**Recommended fix (NOT applied here — this document does not modify code):** give
+`fixture-refresh.yml` the same `run_id` predicate the live route uses, joined through
+`artifact_gate`, so the fixture and production answer the same question. Until then, treat row
+COUNTS from a local fixture render as unusable and its STRUCTURE as sound — the same warning
+`screens/INDEX.md` already carries.
+
+
+### 17e. INTENT PROBE — clicked through BOTH sides, 2026-09-02
+
+**Why this exists, and what it replaces.** The owner: *"you are overthinking things a bit with what
+you do and don't call a gap. use playwright to click through both and determine if the intent is
+covered by an upgrade or alternative or if it's missing. to say it's not a gap because it hasn't had
+enough development to be able to do it is silly."*
+
+That is a correction to the METHOD, and it is right. `DELIBERATE` had become a bucket holding three
+different things: a real recorded decision, a control that could not be SEEN because the packet had
+no data to render it, and a control nobody had tried to reach. Only the first is a decision. The
+other two are **unproven**, and calling them "not a gap" flattered the count.
+
+**So the unit here is an INTENT — something a person can DO in the prototype — not a component.**
+Both sides were driven with Playwright: the prototype from `Packet QC Prototype.html` (React/Babel
+vendored locally, `pageErrors: []`), the app from `app/dist` against the fixture. **Where the packet
+lacked the data to render a control, the state was MANUFACTURED and the control clicked**, rather
+than excused.
+
+| # | Intent (the prototype's verb) | In the app | Verdict |
+|---|---|---|---|
+| I1 | See a per-asset match score | drawer `Match` tab, score-part rows | **COVERED — CLOSED 2026-09-02, number seen.** The tab renders `Overall 89 strong` over three parts: `Must-haves evidenced 100`, `Keywords present 67`, `Seniority fit not measured`. Evidence `screens/render-0902-drawer-score-89.png`. **The values are production's**, read from `artifact_score` for the gate's CURRENT run `8e3163cf` via `boost-pg-mcp-write`: `composite 89, band strong, must_have 100, keyword 67`. This row was left open earlier the same day and closed by another lane's work, not this one — `chk_reviewer_auto` was flipped and both passes driven, turning the first non-null composite in production (all 52 prior `artifact_score` rows were null). An earlier live call of mine returned no composite because the gate then pointed at run `50c95241`, whose score was null — the surface was never the problem. |
+| I2 | Open per-asset detail | gate chip → drawer, 5 tabs + `Re-run checks` / `Approve` | **COVERED** (clicked) |
+| I3 | `Answer` a raised question | **`confirm it`**, with *"awaiting your confirmation"* and *"not counted either way"* | **COVERED BY ALTERNATIVE** — narrower and better defined: it confirms a model proposal into a counted claim rather than accepting free text. |
+| I4 | `Leave open` (defer a question) | nothing | **MISSING** — and small: not confirming already leaves it open, so the loss is only the RECORD of a deliberate defer. Named here rather than hidden in DELIBERATE. |
+| I5 | `Change it` on a correction | **`Change it`** — same verb | **COVERED** (proven by injecting corrections; see 4.8-8) |
+| I6 | `Review →` on a correction | `Review →` | **COVERED** (same injection) |
+| I7 | `Open field →` | `go to the draft ->` per offender on QC; `Open field →` on send | **COVERED** |
+| I8 | `Open asset →` | no inline verb; the step rail and the gate chip → drawer both reach it | **COVERED BY ALTERNATIVE** |
+| I9 | A picked requirement filters the other tabs | `filtered to #12` + `clear`, and it **persisted across a tab switch** to Checks | **COVERED** (clicked; 4.8-25 was BUILT-by-reading and is now BUILT-by-interaction) |
+| I10 | `Undo this` on a swap | renders on `swapped`/`dropped`/`added`; correctly absent on `kept` | **COVERED** |
+| I11 | `Ask why` on a swap | renders | **COVERED** |
+| I12 | Open the assistant | `Open assistant` | **COVERED** |
+| I13 | `Nothing blocks sending` empty state | forced every gate to `pass`: card read exactly **`Nothing blocks sending.`**, zero fail rows, footer still *"Approve all artifacts above to unlock sending"* | **COVERED** (manufactured; 4.10-8 no longer source-only) |
+| I14 | Loop detail — what closed, what remained, where it halted | injected a 2-pass `remediation` ledger: tab flipped to *"Each pass below is a real remediation run: what it closed, what it left open, and why it stopped… 5 requirement(s) the loop could not close are waiting on you"* | **COVERED** (manufactured; 4.8-22 detail is real, not merely structural) |
+
+**Score: 12 COVERED · 2 COVERED-BY-ALTERNATIVE · 1 MISSING · 0 excused.** The one MISSING row (I4)
+is named as missing even though it is nearly vacuous, because the alternative — filing it under a
+decision nobody made — is how the previous count drifted.
+
+**Three things §17 got wrong before this probe, all the same shape:** 4.8-8 `Change it` was scored
+PARTIAL/absent, 4.10-8 was left source-only, and 4.8-22's loop detail was called *"unexercised by
+this data"* as if that settled it. **All three were reachable; none needed code.** The lesson is the
+owner's: absence of data is not absence of a feature, and it is cheaper to manufacture the state
+than to argue about it.
+
+### 17f. A SECOND fixture gap, found the same way — `artifact_score`
+
+`fixture-refresh.yml` selects `artifacts, insertions, corrections, requirements, gates, checks,
+swaps, checkPrefs` — **not `artifact_score`**, and `build-fixtures.mjs` therefore never sets the
+`score` / `history` keys the live route returns (`appChecks.ts:392-397`). Locally the drawer's
+`Match` tab consequently reads *"No score has been computed for this asset yet - the checks have not
+been run"* on an asset the gate simultaneously reports as `Blocked` with 86 findings — two
+statements that cannot both be true, and a reader could easily file that contradiction as a product
+defect. It is not one; it is the same class as §17d.
+
+**Two fixture fixes are now named and neither is applied here:** the `run_id` predicate (§17d) and
+`artifact_score` (this row). Together they are why a local render may be trusted for STRUCTURE and
+never for COUNTS or SCORES.
+
+### 17g. What this pass did NOT settle
+
+Kept deliberately short, and each row names the ONE thing that would close it — no row here is
+excused, they are simply not yet done.
+
+- ~~**I1, the per-asset match NUMBER.**~~ **CLOSED** — see §17e. The figure renders (`Overall 89
+  strong`) on production's own values.
+- **4.8-11, attention ORDERING** (fail → open → warn → fixed → soft). `railAttention` /
+  `attentionSplit` encode it, but no single surface renders the full ordering, so there is nothing to
+  photograph. Stays PARTIAL.
+- **Every section other than §4.8 and §4.10** is still source-only here — §16 covers `jd`, and a
+  third lane has since rendered `cover`. §15 limit 1 (a component starved of data) is closed for the
+  three intents manufactured in §17e and open everywhere else.
+
+**Two items previously listed here are now SETTLED and have moved into §17e:** `4.10-8`
+(`Nothing blocks sending.`) and `4.8-22` (loop detail). Both were reachable by manufacturing the
+state; neither needed code.
+
+
+---
+
+## 18. RE-MEASURED after the fixture was fixed — 2026-09-02
+
+§16a said the comparison surface **could not be judged** and must not be scored until the fixture
+carried it. It now does (`fixture-refresh.yml` captures the real `/requirements` body; the builder
+passes it through verbatim). This is the re-measurement that section demanded.
+
+### 17a. The numbers
+
+| | before | after |
+|---|---:|---:|
+| panels only in prototype | 27 | **16** |
+| controls only in prototype | 3 | **2** |
+| app `bodyLen` | 10,146 | **16,196** |
+
+**Eleven rows recovered by fixing the instrument alone.** No app code changed between the two runs.
+
+Reproducible: `git show origin/ui-fixtures:raw-dump.json > /tmp/r.json && node scripts/build-fixtures.mjs
+--raw /tmp/r.json --opp 2cb56fb3-… --out /tmp/f.json && cmp /tmp/f.json docs/qc-evidence/fixtures.json`
+→ **exit 0** (AC-6). The captured body: `comparison.resolved true`, **8 dimensions, 4 graded**,
+`set.keys 8`, `total 35`, `located 33`.
+
+### 17b. The remaining 16 + 2, classified — still ZERO confirmed gaps
+
+| Prototype-only row | Classification |
+|---|---|
+| `Posting vs your profile` · `Run again` · `Re-parse JD` · `JD analysis` · `Extracted from this posting` · `Cycle time, regulated` | **Renames.** The app renders `This posting, against your profile`, `Run analysis`, `Parse posting`, `Posting analysis`, `Posting analysis - the source`, `Cycle time` — all confirmed in the app-side output of the same run. |
+| `Must-have requirements` · `Nice-to-have requirements` · `ATS keywords` · `No evidence` · `Moderate match` · `12/13` | **DELIBERATE** (§16b). The prototype's cards count requirement KINDS; the app grades role DIMENSIONS and refuses to mint a fourth coverage number. Its own vocabulary — `Nothing found`, `Not compared`, `no evidence found` — appears in the app-only list. |
+| `M1–M5` · `D1–D4` · `N1–N3` · `fail` | **DELIBERATE** (§16c). The `RQ-MH`/`RQ-NTH`/`RESP` scheme and the refusal to print an unmeasured composite. |
+| `from email` | **BUILT**, gated on `opp.source`; this opportunity has none. |
+| `SafetyIQ · Head of Engineering` | A prototype **demo value**, not a component — excluded from the denominator by §0. |
+
+### 17c. What the rendered comparison actually shows — the app is AHEAD here too
+
+The surface that had never been seen is not a catch-up of the prototype; it is a stronger instrument:
+
+- **Eight dimension cards**, against the prototype's four kind-cards.
+- A stated denominator and provenance: *"4 of 8 dimension(s) compared"*, *"Seeded dimension set for
+  default - you have not changed it yet."*
+- A summary that refuses to average away an absence: *"1 strong · 0 moderate · 3 weak · 4 not
+  compared (Budget owned, Compliance ownership, Cycle time, Public sector), **not counted either
+  way**"*.
+- **`Nothing found` and `Not compared` are DIFFERENT STATES.** The posting asked and nothing
+  evidenced it, versus the posting never asked. The prototype has one label, `No evidence`, for
+  both — which is precisely the "absent evidence is `not_applicable`, never a shortfall" rule this
+  repo enforces, and the prototype does not.
+- Each unevidenced row cites the specific posting lines it wanted (`#0`, `#17`, `#12`, `#24`).
+
+### 17d. Verdict
+
+**`jd` step: zero confirmed prototype-side gaps, with the comparison surface now measured rather
+than assumed.** The `266% · 27 · 3` row in §1a is retracted in full: 11 of those panels were the
+instrument, and every one of the remaining 16 is a rename, a recorded decision, or a demo value.

@@ -8,7 +8,7 @@ import { resolveOwner, requireWrite } from './appSession'
 import { getPgClient } from './pgClient'
 import { buildRequirements } from './requirements'
 import {
-  resolveAll, ProfileRecord, ResolveOptions, NO_EVIDENCE_NOTE, RESOLVER_VERSION,
+  resolveAll, ProfileRecord, ResolveOptions, NO_EVIDENCE_NOTE, RESOLVER_VERSION, sha256,
   verifyEvidence, tallyHealth, EvidenceHealth, EvidenceVerdict, EvidenceState,
   refusalReason, NEVER_EVIDENCE,
 } from './evidence'
@@ -17,7 +17,10 @@ import { resolveOptionsFor } from './checkPrefs'
 import { claimTokens, segments, tokensOf, sameWord } from './requirementSupport'
 import { writeComparison, comparisonPayload } from './appDimensions'
 import { escalateOne, PROPOSAL_VERSION, type EscalationOutcome } from './evidenceProposal'
-import { openAiJson, type FetchJson } from './openaiJson'
+import {
+  SUPPORT_SYSTEM, buildSupportUser, parseSupportVerdict, vettedNote, spansOverlap,
+} from './supportJudge'
+import { openAiJson, contentJson, type FetchJson } from './openaiJson'
 // IMPORTED, never redeclared — M3: the citation floors have one home (`reviewer.ts`), and the
 // escalation tier must clear the SAME floor the deterministic path does, not a copy of it.
 import { MIN_QUOTE_CHARS } from './reviewer'
@@ -49,7 +52,7 @@ export async function ensureEvidenceTable(client: any) {
       char_end       int not null,
       extra          text,
       ratio          numeric,
-      method         text not null check (method in ('exact','anchored','proposed')),
+      method         text not null check (method in ('exact','anchored','proposed','vetted')),
       record_sha256  text not null,
       resolver_version int not null,
       proposal_version int,
@@ -108,6 +111,27 @@ export async function ensureEvidenceTable(client: any) {
       unique (opp_id, requirement_text, source_key, char_start, char_end, record_sha256)
     )`)
   await client.query(`create index if not exists evidence_confirmation_opp_idx on evidence_confirmation(opp_id)`)
+  // ON THE ENSURE PATH FOR THE SAME REASON `proposal_version` IS, and the test suite proved it
+  // rather than my reading it: `dimensionsDb.test.mjs` builds the database a migration actually
+  // MEETS -- `origin/main`'s SCHEMA_SQL plus the ensure-path columns -- and
+  // `loadRequirementsWithEvidence` failed on it with `column c.decision does not exist`.
+  //
+  // That is not a test artefact, it is a production window. `api-deploy.yml` deploys the code at
+  // its "Deploy to Azure Functions" step and calls `pg-migrate` only afterwards, so between those
+  // two steps the running code SELECTs these two columns from a database that has not got them and
+  // every requirements read 500s. The rule the precedent above states: WRITES can wait for the
+  // migration, READS cannot, and both of these are on the read path via the decision join.
+  //
+  // Cheap in the way the CHECK swap is not: a nullable column with no default is catalogue-only in
+  // Postgres 11+ (no table rewrite), and `if not exists` makes the steady-state call a no-op, so
+  // this stays safe on the hot path four artifacts of one packet enter concurrently. `decision`
+  // takes its default here for the same reason SCHEMA_SQL gives it one -- every row already in the
+  // table was written by the confirm path, so 'confirmed' is what those rows have always meant.
+  // The CHECK constraint that pins the domain stays in SCHEMA_SQL alone, because adding it needs
+  // the ACCESS EXCLUSIVE lock this function exists to avoid.
+  await client.query(`alter table evidence_confirmation
+    add column if not exists decision text not null default 'confirmed',
+    add column if not exists missing text[]`)
 }
 
 export async function ensureRequirementCols(client: any) {
@@ -168,7 +192,7 @@ export async function writeEvidence(
   // The escalation tier's own counts, ALWAYS present and zero when it did not run. Without them a
   // coverage rise is unattributable after the fact — a reviewer cannot tell a better profile from a
   // chattier model, and coverage is the number the gate and the score both read.
-  escalated: number; proposed: number; escalation_refusals: Record<string, number>
+  escalated: number; proposed: number; vetted: number; escalation_refusals: Record<string, number>
 }> {
   const rows = (await client.query(
     `select id, seq, kind, verbatim, item_text from requirement where opp_id=$1 order by seq`, [oppId])).rows
@@ -204,13 +228,32 @@ export async function writeEvidence(
     // So the delete is scoped to the rows this call is actually able to re-derive. A transport-less
     // call replaces the deterministic rows it owns and leaves model proposals alone; a call that CAN
     // escalate still replaces everything, because it will re-propose.
+    //
+    // AND A VETTED ROW SURVIVES A RE-RESOLVE, WHICH IS WHAT MAKES THE GATE STOP FLAPPING.
+    //
+    // F-10, from an independent verifier: the coverage judge next door builds a whole cache table on
+    // the principle that a model asked twice may answer differently and a flapping gate is worse than
+    // a consistently wrong one -- while the lane that actually moves `must_have_coverage` had none of
+    // it, because this delete removed every vetted row and the next pass re-asked from scratch.
+    //
+    // The fix is not a second cache. The verdict is ALREADY PERSISTED -- `method='vetted'` with its
+    // citation in `extra` -- so the only defect was deleting it. A vetted row is kept exactly as long
+    // as the record it was read from is unchanged, using `record_sha256`, the same staleness rule
+    // `evidence_confirmation` uses for the owner's own decisions: edit the profile and the digest
+    // stops matching, so the row is re-derived rather than silently inherited.
+    //
+    // Re-EXTRACTION is a different operation and still clears these, by FK cascade from `requirement`
+    // -- correct, because the requirement TEXT may have changed and the verdict was about that text.
+    const liveDigests = records.map(r => sha256(r.text))
     await client.query(
       canEscalate
         ? `delete from requirement_evidence e using requirement r
-            where e.requirement_id = r.id and r.opp_id = $1`
+            where e.requirement_id = r.id and r.opp_id = $1
+              and not (e.method = 'vetted' and e.record_sha256 = any($2::text[]))`
         : `delete from requirement_evidence e using requirement r
-            where e.requirement_id = r.id and r.opp_id = $1 and e.method <> 'proposed'`,
-      [oppId])
+            where e.requirement_id = r.id and r.opp_id = $1 and e.method <> 'proposed'
+              and not (e.method = 'vetted' and e.record_sha256 = any($2::text[]))`,
+      [oppId, liveDigests])
     for (const r of rows) {
       const e = bySeq.get(r.seq) || null
       if (!e) continue
@@ -226,8 +269,12 @@ export async function writeEvidence(
       // quote by slicing, so on the resolve path the comparison is STILL a tautology — but this
       // function re-slices the records IT was handed, which are not necessarily the records the row
       // was resolved against, so the assertion is live for a caller that passes a mismatched pair.
-      // Exercised by `H:refusal-guard-fires`, which drives it through the `resolver` seam above and
-      // asserts `refused` increments and nothing is inserted. `refused` is now a real measurement.
+      // NOT CURRENTLY EXERCISED, corrected 2026-09-02. This line named a test
+      // (`H:refusal-guard-fires`) that exists nowhere in the suite -- a citation audit found it
+      // dangling. Nothing drives the mismatched-pair case through the `resolver` seam, so the branch
+      // below is UNPROVEN rather than proven, and `refused` is not yet a measured outcome. Saying so
+      // is the point: a comment naming a guard nobody wrote is worse than no comment, because a
+      // reader edits freely on the strength of it.
       const rec = byKey.get(e.source_key)
       if (!rec || rec.text.slice(e.char_start, e.char_end) !== e.quote) { refused++; continue }
       // DETERMINISTIC EVIDENCE EVICTS A STALE PROPOSAL FOR THE SAME REQUIREMENT, and this runs only
@@ -269,6 +316,9 @@ export async function writeEvidence(
   // is leave rows unevidenced, which is exactly what they were a moment earlier.
   let escalated = 0
   let proposed = 0
+  // Rows the second read promoted. Reported separately from `proposed` because they are the ones
+  // that COUNT, and a caller must be able to see the number a model moved.
+  let vetted = 0
   // SEPARATE FROM `refused`, and the separation is a bug fix rather than tidiness. `evidenced` below
   // is computed as `deterministic rows - refused`, so an escalation-path refusal was subtracting
   // from the DETERMINISTIC count — a population it has nothing to do with. Measured by an
@@ -289,7 +339,15 @@ export async function writeEvidence(
     const minQuoteChars = MIN_QUOTE_CHARS
     // Only rows the deterministic pass could not settle, and only up to the cap. `slice` before the
     // loop rather than a break inside it, so what was skipped is knowable rather than implicit.
-    const open = rows.filter((r: any) => !bySeq.get(r.seq))
+    // A requirement whose vetted row SURVIVED the delete is already answered. Re-asking would spend
+    // a call to overwrite an answer with a possibly different one -- which is the flapping this was
+    // just fixed to prevent, reintroduced one loop later.
+    const keptVetted = new Set<string>(((await client.query(
+      `select distinct e.requirement_id from requirement_evidence e
+         join requirement r on r.id = e.requirement_id
+        where r.opp_id = $1 and e.method = 'vetted'`, [oppId])).rows || [])
+      .map((x: any) => String(x.requirement_id)))
+    const open = rows.filter((r: any) => !bySeq.get(r.seq) && !keptVetted.has(String(r.id)))
     /**
      * SPEND THE CAP ON WHAT DECIDES THE GATE, and this is a defect fix rather than a preference.
      *
@@ -319,6 +377,9 @@ export async function writeEvidence(
         outcome = await escalateOne(requirement, records, {
           fetchJson, neverEvidence: NEVER_EVIDENCE, minQuoteChars,
           minTokens: typeof opts.minTokens === 'number' ? opts.minTokens : 2,
+          // Rides the owner's coverage-judge switch (checkPrefs.resolveOptionsFrom). Off keeps
+          // today's withdrawals exactly; on lets a CITED answer overturn one, never cause one.
+          appeal: opts.appealOverclaims === true,
           resolverVersion: RESOLVER_VERSION,
         })
       } catch (e: any) {
@@ -344,6 +405,52 @@ export async function writeEvidence(
       const rec = byKey.get(e.source_key)
       if (!rec || rec.text.slice(e.char_start, e.char_end) !== e.quote) { escRefused++; note('offset_mismatch'); continue }
 
+      // THE SECOND READ — the only thing that can make a model row COUNT toward coverage.
+      //
+      // `must_have_coverage` reads `ruleEvidenceOf`, which nulls any `proposed` row the owner has not
+      // confirmed. On the owner's live Trinnex packet 15 of 17 evidence rows are proposed, so the
+      // number reads 0/12 and nothing in the product could move it but twelve clicks.
+      //
+      // It answers the SAME question the proposal pass answered -- which words in this record show
+      // this requirement -- over the WHOLE RECORD, never over the span the first pass chose, and
+      // never seeing that span. The row is promoted only when the two independently-chosen spans
+      // OVERLAP. Two reads landing on the same words is a fact code can check; a model's report that
+      // it found nothing missing is the model's own account of itself.
+      //
+      // The FIRST version of this handed the pass `e.quote` and asked what that span failed to show.
+      // The owner ("why would finding a match require what's missing instead of what's matching?")
+      // and AC B-6 ("a materially different view -- at minimum the requirement plus the source
+      // record") both named the same hole before it ran anywhere, and they were right: selecting the
+      // excerpt is what the first pass was FOR, so a mis-selected excerpt is the failure most likely
+      // to be present and the one that version could not see.
+      //
+      // OFF unless the owner turned the judge on, and every failure leaves the row `proposed`.
+      let method = e.method
+      let extra = e.extra
+      if (opts.vetProposals) {
+        try {
+          const v = parseSupportVerdict(
+            contentJson(await fetchJson(SUPPORT_SYSTEM, buildSupportUser(requirement, rec.text))), rec.text)
+          const agrees = v.supported && v.char_start != null && v.char_end != null
+            && spansOverlap(v.char_start, v.char_end, e.char_start, e.char_end)
+          if (agrees) {
+            method = 'vetted'
+            extra = vettedNote(v.why, v.quote as string)
+            vetted++
+          } else if (v.supported) {
+            // THE NEW OUTCOME, and the one worth counting: both reads found evidence and they
+            // pointed at DIFFERENT PARTS of the record. That is not an outage and not a refusal --
+            // it is a disagreement about where the evidence is, which is exactly what this pass was
+            // rebuilt to be able to see.
+            note('support_span_disagreed')
+          } else {
+            // Named rather than collapsed: "it found a gap" and "we never reached the model" are
+            // different facts about a run, and only the second is an outage.
+            note(`support_${v.refusal || 'declined'}`)
+          }
+        } catch { note('support_transport_failed') }
+      }
+
       // ONE ROW, ONE SAVEPOINT. A proposed insert that the database rejects — most plausibly a CHECK
       // on an environment whose migration has not run — must cost that row and nothing else. Without
       // the savepoint the failed statement poisons the surrounding transaction in Postgres and every
@@ -357,7 +464,7 @@ export async function writeEvidence(
            values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
            on conflict (requirement_id, source_key, char_start, char_end) do nothing`,
           [r.id, e.quote, e.source_kind, e.source_label, e.source_key, e.char_start, e.char_end,
-           e.extra, e.ratio, e.method, e.record_sha256, e.resolver_version, PROPOSAL_VERSION])
+           extra, e.ratio, method, e.record_sha256, e.resolver_version, PROPOSAL_VERSION])
         await client.query('commit')
         proposed++
       } catch (err) {
@@ -378,7 +485,7 @@ export async function writeEvidence(
     // and `proposed` below is what lets any caller separate the two populations.
     evidenced: evidenced + proposed, unevidenced: rows.length - evidenced - proposed,
     refused: refused + escRefused, profile_records: records.length,
-    escalated, proposed, escalation_refusals,
+    escalated, proposed, vetted, escalation_refusals,
   }
 }
 
@@ -480,8 +587,25 @@ export async function loadRequirementsWithEvidence(client: any, oppId: string): 
             -- ALSO PREFIXED evidence_ DELIBERATELY: verifyRequirementRows redacts a stale row by
             -- nulling every key starting with that prefix. A column named confirmed_at would
             -- survive redaction and keep asserting a human vouched for a quote already withdrawn.
-            c.confirmed_at as evidence_confirmed_at,
-            c.confirmed_by as evidence_confirmed_by
+            --
+            -- THE case EXPRESSION IS LOAD-BEARING: WITHOUT IT A VETO INVERTS INTO AN APPROVAL.
+            -- This join matches a decision row of EITHER polarity -- that is deliberate, the veto
+            -- has to reach ruleEvidenceOf through the same identity join -- so a bare
+            -- c.confirmed_at would set evidence_confirmed_at on a VETOED claim. isConfirmed would
+            -- then read true for the exact row the owner rejected, and ruleEvidenceOf treats
+            -- confirmed as the strongest warrant there is. The owner clicking "Not this one"
+            -- would have PROMOTED the row. Polarity is checked here, once, at the source.
+            --
+            -- NO BACKTICKS IN THIS COMMENT. It lives inside a template literal, and the first
+            -- draft quoted these identifiers the way every other comment in this file does, which
+            -- TERMINATED the literal and produced six TS1005 errors 200 lines away. schema.ts
+            -- carries the same warning for the same reason; it applies to every SQL string here.
+            case when c.decision = 'confirmed' then c.confirmed_at end as evidence_confirmed_at,
+            case when c.decision = 'confirmed' then c.confirmed_by end as evidence_confirmed_by,
+            -- The veto itself. Prefixed evidence_ like the rest so verifyRequirementRows redacts it
+            -- with the row: a decision about an excerpt is meaningless once that excerpt is stale.
+            c.decision     as evidence_decision,
+            c.missing      as evidence_missing
        from requirement r
        left join lateral (
          select * from requirement_evidence x where x.requirement_id = r.id
@@ -650,6 +774,33 @@ export function shapeRequirementsForApi(joined: any[], records: ProfileRecord[] 
       // A provable excerpt whose record has since changed: the quote still holds, the RANKING does
       // not. Surfaced rather than suppressed — it is a reason to re-resolve, not to withhold.
       recordChanged: r.evidence_record_changed === true,
+      // WHETHER A HUMAN HAS STOOD BEHIND THIS EXCERPT — and it belongs INSIDE the verdict, not
+      // beside it. `H:evidence-read-from-the-verdict-not-the-columns` forbids a screen reading the
+      // raw `evidence_confirmed_*` columns, and it caught this being done: those keys are nulled for
+      // every non-verified row, so read directly they cannot tell "the confirmation lapsed" from
+      // "nobody ever confirmed it". Placed here, a confirmation is dropped with the quote it vouched
+      // for — because this whole object is null when `evidence_quote` is — which is the fail-closed
+      // behaviour the confirmation join was built for.
+      confirmedAt: r.evidence_confirmed_at ?? null,
+      confirmedBy: r.evidence_confirmed_by ?? null,
+      // THE OWNER'S DECISION, INSIDE THE VERDICT FOR THE SAME REASON THE CONFIRMATION IS.
+      // `H:evidence-read-from-the-verdict-not-the-columns` forbids a screen reading the raw
+      // `evidence_*` columns, and it caught exactly that being done for `confirmed_at`. A veto has
+      // the identical property: it is a decision ABOUT THIS EXCERPT, so when the excerpt fails
+      // re-validation and this whole object goes null, the veto must go with it. A veto surviving
+      // its own excerpt would suppress a row on the strength of a judgement the owner made about
+      // text that is no longer there.
+      //
+      // 'vetoed' | 'confirmed' | null, and null means UNDECIDED -- never rejected. The screen needs
+      // all three states because they are three different things to show the owner, and collapsing
+      // "nobody looked" into "rejected" is the same fail-open-in-the-wrong-direction mistake the
+      // gate's allow-list exists to prevent.
+      decision: r.evidence_decision ?? null,
+      // What a second read said this excerpt fails to show. This is the material the owner needs in
+      // order to veto WELL rather than merely quickly -- until now it was tallied into a
+      // request-scoped counter and discarded, so the app asked for a judgement while withholding
+      // the one thing it had learned that bears on it.
+      missing: Array.isArray(r.evidence_missing) ? r.evidence_missing : null,
     },
     // The state, and the sentence for it, from the ONE map in evidence.ts. `evidenceNote` is null
     // only when the excerpt is provable; "no evidence found in your profile" is now ONE of five
@@ -840,11 +991,23 @@ export async function evidenceResolve(req: HttpRequest, context: InvocationConte
         // accepts nothing that is not byte-exact in the record it names — and it would still be
         // misleading, because "evidenced by a verbatim excerpt" reads as "a rule found this". Which
         // rows a model chose is the owner's business, so the count says so.
+        //
+        // FOUND BY AN INDEPENDENT VERIFIER (VERIFY-veto-lane-1.md, C6 REFUTED) and it is the second
+        // half of a defect I fixed only in `checks.ts`. That clause read "...awaiting your
+        // confirmation; they are shown but do not count toward the coverage gate", which was exactly
+        // true until proposals began counting, and is now the OPPOSITE of what `ruleEvidenceOf`
+        // does. Two surfaces state this fact and I updated one -- the repo's own "fix all consumers,
+        // not just the one you found" rule, broken in the very lane that inverted the rule.
+        //
+        // Nothing caught it because no test asserted this literal: `grep` for either retired phrase
+        // across `api/test` and `app/test` returned zero hits against it. `H:no-surface-says-a-
+        // counted-proposal-is-uncounted` now sweeps BOTH files for the retired wording, so a third
+        // surface written later fails rather than shipping a contradiction.
         note: (out.evidenced === out.total
           ? 'every requirement is evidenced by a verbatim excerpt of your profile'
           : `${out.total - out.evidenced} requirement(s): ${NO_EVIDENCE_NOTE}`)
           + (out.proposed
-              ? ` — ${out.proposed} of them proposed by a model and awaiting your confirmation; they are shown but do not count toward the coverage gate`
+              ? ` — ${out.proposed} of them found by a model rather than a rule; they count toward your coverage until you veto them`
               : ''),
       },
     }
@@ -909,33 +1072,72 @@ export async function evidenceConfirm(req: HttpRequest, context: InvocationConte
     if (!row.source_key) {
       return { status: 409, headers: HEADERS, jsonBody: { error: 'this requirement has no evidence to decide on' } }
     }
-    // Only a MODEL proposal is a decision for the owner. A deterministic row is already a rule's
-    // finding and needs no human; "confirming" one would imply the human added something.
-    if (row.method !== 'proposed') {
+    // Only a MODEL-WARRANTED row is a decision for the owner. A deterministic row is already a
+    // rule's finding and needs no human; deciding on one would imply the human added something.
+    //
+    // `vetted` JOINED `proposed` HERE when proposals began counting by default. A vetted row rests
+    // on two model reads agreeing -- stronger corroboration, still not a rule -- and it counts
+    // toward must_have_coverage exactly as a proposed row now does. Leaving it un-decidable would
+    // have made the strongest model claims the ONLY ones the owner could not veto, which is the
+    // opposite of the intended order. `exact` and `anchored` keep the 409: vetoing a rule match is
+    // a different act (the rule is wrong), not this endpoint's job.
+    if (row.method !== 'proposed' && row.method !== 'vetted') {
       return { status: 409, headers: HEADERS, jsonBody: { error: `this excerpt was resolved by a rule (${row.method}), so there is nothing to confirm`, method: row.method } }
     }
 
     if (decision === 'reject') {
-      // A rejection WITHDRAWS any existing confirmation for this exact claim and records why. It is
-      // not a delete: "the owner confirmed this and later took it back" must stay reconstructable.
-      await client.query(
-        `update evidence_confirmation set withdrawn_at = now(), withdrawn_reason = $1
-          where opp_id=$2 and requirement_text=$3 and source_key=$4 and char_start=$5
-            and char_end=$6 and record_sha256=$7 and withdrawn_at is null`,
-        ['rejected by the owner', row.opp_id, row.requirement_text, row.source_key,
-         row.char_start, row.char_end, row.record_sha256])
-      return { status: 200, headers: HEADERS, jsonBody: { ok: true, decision: 'reject', seq } }
+      // THIS PATH WAS INERT AND RETURNED ok:true WHILE WRITING NOTHING. Measured 2026-09-01 by
+      // reading it: the whole branch was an UPDATE ... where withdrawn_at is null, with no INSERT.
+      // A veto only lands on a row that already exists, and a row only exists once the owner has
+      // CONFIRMED that exact claim -- so for any proposal the owner had never confirmed (the normal
+      // case, and the ONLY case that matters now that proposals count by default) the update
+      // matched ZERO ROWS and the handler still returned {ok: true, decision: 'reject'}. The owner
+      // clicked "Not this one" in PostingAnalysis.jsx, saw a success, and nothing was recorded
+      // anywhere. Zero tests covered the reject path at all, which is why it survived shipping.
+      //
+      // A veto is now a first-class decision row, written whether or not a confirmation preceded it.
+      // ON CONFLICT flips an existing decision rather than inserting a second row: the unique key is
+      // the CLAIM, and a claim has exactly one current decision. Flipping also clears withdrawn_*,
+      // because a fresh decision is not a withdrawn one -- the same reasoning the confirm path below
+      // already applies in the other direction.
+      //
+      // `confirmed_by` carries the actor for both polarities. The name is now half-right and the
+      // column is NOT NULL and read elsewhere, so renaming it is its own change rather than a
+      // side effect of this one; `decision` is what says which act the actor performed.
+      const vetoed = (await client.query(
+        `insert into evidence_confirmation
+           (opp_id, requirement_text, source_key, char_start, char_end, quote, record_sha256,
+            confirmed_by, decision)
+         values ($1,$2,$3,$4,$5,$6,$7,$8,'vetoed')
+         on conflict (opp_id, requirement_text, source_key, char_start, char_end, record_sha256)
+         do update set decision = 'vetoed', confirmed_by = excluded.confirmed_by,
+                       confirmed_at = now(), withdrawn_at = null, withdrawn_reason = null
+         returning id`,
+        [row.opp_id, row.requirement_text, row.source_key, row.char_start, row.char_end,
+         row.quote, row.record_sha256, owner])).rows[0]
+      // The row id is returned so a caller can prove the write happened. The defect this replaces
+      // was invisible precisely because the response said nothing about what was written.
+      return { status: 200, headers: HEADERS, jsonBody: { ok: true, decision: 'reject', seq, vetoId: vetoed?.id || null, vetoedBy: owner } }
     }
 
     // IDEMPOTENT. Confirming twice is one confirmation with its ORIGINAL timestamp and actor — the
-    // unique key is the claim identity, and `do nothing` keeps the first decision rather than
+    // unique key is the claim identity, and the update below keeps the first decision rather than
     // re-stamping it to whoever clicked last.
+    //
+    // `decision = 'confirmed'` IS THE UN-VETO, and it is why this line is not merely defensive.
+    // Once a veto is a decision row on this same unique key, a confirm arriving afterward has to
+    // say so explicitly: without it, the conflict branch would clear withdrawn_* on a row still
+    // reading `decision = 'vetoed'` and the owner's yes would be silently discarded — the mirror of
+    // the inert-reject defect above, in the other direction. `confirmed_at` and `confirmed_by` are
+    // deliberately NOT re-stamped here, preserving the original-timestamp property for a repeated
+    // yes; a veto reversal is a change of decision, and `decision` is the column that records it.
     await client.query(
       `insert into evidence_confirmation
-         (opp_id, requirement_text, source_key, char_start, char_end, quote, record_sha256, confirmed_by)
-       values ($1,$2,$3,$4,$5,$6,$7,$8)
+         (opp_id, requirement_text, source_key, char_start, char_end, quote, record_sha256,
+          confirmed_by, decision)
+       values ($1,$2,$3,$4,$5,$6,$7,$8,'confirmed')
        on conflict (opp_id, requirement_text, source_key, char_start, char_end, record_sha256)
-       do update set withdrawn_at = null, withdrawn_reason = null`,
+       do update set decision = 'confirmed', withdrawn_at = null, withdrawn_reason = null`,
       [row.opp_id, row.requirement_text, row.source_key, row.char_start, row.char_end,
        row.quote, row.record_sha256, owner])
     return { status: 200, headers: HEADERS, jsonBody: { ok: true, decision: 'confirm', seq, confirmedBy: owner } }

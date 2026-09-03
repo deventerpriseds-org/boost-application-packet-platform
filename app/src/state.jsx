@@ -44,6 +44,23 @@ export function useIsMobile(breakpoint = 768) {
   return mobile
 }
 
+// True on viewports wide enough to DOCK the assistant beside the packet rather than float it.
+// Deliberately the mirror of useIsMobile rather than a second mechanism -- same hook shape, same
+// matchMedia lifecycle, same SSR-safe initialiser. The threshold is DERIVED in assistantPanel.js
+// from the column arithmetic; it is passed in rather than read here so this file keeps knowing
+// nothing about layout.
+export function useIsWide(breakpoint) {
+  const [wide, setWide] = useState(() => (typeof window !== 'undefined' ? window.innerWidth >= breakpoint : false))
+  useEffect(() => {
+    const mq = window.matchMedia(`(min-width: ${breakpoint}px)`)
+    const onChange = () => setWide(mq.matches)
+    onChange()
+    mq.addEventListener('change', onChange)
+    return () => mq.removeEventListener('change', onChange)
+  }, [breakpoint])
+  return wide
+}
+
 const DEMO_OWNER = 'demo@executive-engine.local'
 
 export function AppProvider({ children }) {

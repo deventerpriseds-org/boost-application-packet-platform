@@ -28,6 +28,33 @@ export const OVERLAY_VARIANTS = {
     frame: { borderLeft: '1px solid var(--proto-rule-soft)', borderRadius: 0 },
     shadow: '-24px 0 60px rgba(15,23,42,.30)',
   },
+  // SPEC 4.11 on a PHONE. Added 2026-09-02 with the docked desktop panel: the owner asked for a
+  // docked panel on wide desktop and "a different approach of your choosing for mobile", and a
+  // right-hand drawer is the wrong one there. `drawer` already clamps to `min(680px, 100vw)` so it
+  // would not overflow -- it would simply be a full-screen panel that arrives from the side, with
+  // its close control and its Send button at the top of a tall column, i.e. furthest from the
+  // thumb. The sheet rises from the bottom edge, caps at 85vh so the packet stays visible behind
+  // it, and puts its controls in the reachable zone.
+  //
+  // It is a VARIANT rather than a component: the stack, the scrim, the scroll lock, Escape, focus
+  // return and close-on-navigation are all owned by Overlay and none of them differ on a phone.
+  // Standing up a second overlay for one edge change is the parallel system this repo forbids.
+  sheet: {
+    zIndex: 'var(--zindex-overlay)',
+    align: 'flex-end',
+    justify: 'center',
+    padding: 0,
+    width: '100vw',
+    height: 'auto',
+    maxHeight: '85vh',
+    // Only the edge that faces the page is drawn, same principle as `drawer`; the corners are
+    // rounded on that edge alone so it reads as having risen from off-screen.
+    frame: {
+      borderTop: '1px solid var(--proto-rule-soft)',
+      borderRadius: 'var(--proto-radius) var(--proto-radius) 0 0',
+    },
+    shadow: '0 -24px 60px rgba(15,23,42,.30)',
+  },
   modal: {
     zIndex: 'var(--zindex-modal)',
     align: 'flex-start',

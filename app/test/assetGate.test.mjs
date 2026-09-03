@@ -295,7 +295,17 @@ test('the badge labels fixes and reviews separately — never the total under on
   // guard cannot fire on the explanation of the bug it forbids.
   const src = readFileSync(new URL('../src/screens/AssetGateDrawer.jsx', import.meta.url), 'utf8')
     .replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/[^\n]*$/gm, '')
-  const badge = src.slice(src.indexOf('function GateBadge'), src.indexOf('function GateBadge') + 1600)
+  // THE WINDOW IS THE FUNCTION, not a character count. This read `+ 1600` and went green for as
+  // long as the function happened to be shorter than that; SPEC 4.4-14's deep link grew it past
+  // 1600 and the `split.review` assertion failed against code that renders `split.review` perfectly
+  // well, three lines below the cut. A guard that fires on correct code is the cry-wolf failure the
+  // hardening rule forbids - and the same cut would have SILENTLY stopped covering the review half
+  // had the growth been anywhere else. Slicing to the next top-level declaration covers the whole
+  // function however long it gets.
+  const from = src.indexOf('function GateBadge')
+  const end = src.indexOf('\nconst Section', from)
+  assert.ok(end > from, 'the GateBadge function could not be delimited - the guard would cover nothing')
+  const badge = src.slice(from, end)
   assert.ok(!/\{\s*n\s*\}\s*to fix/.test(badge), 'the badge must not render a single total as "to fix"')
   assert.match(badge, /split\.fix[\s\S]{0,80}to fix/, 'it must render the deterministic count as the fix count')
   assert.match(badge, /split\.review[\s\S]{0,80}to review/, 'and the reviewer count under its own label')
@@ -306,7 +316,7 @@ test('the badge labels fixes and reviews separately — never the total under on
 // was only assertable on the live site by matching body TEXT — which breaks on a copy edit and can
 // never tell two surfaces apart that say the same words. ui-verify.mjs hands COUNT_SEL / CLICK_SEL
 // / MEASURE_SEL straight to querySelector; there is no text-matching escape hatch that is stable.
-import { GATE_HOOKS } from '../src/assetGate.js'
+import { GATE_HOOKS, firstFixFinding, attentionRank, ATTENTION_ORDER, keepAvailability, bySeverity, severityWeight } from '../src/assetGate.js'
 import { fileURLToPath as gateUrl } from 'node:url'
 
 const GATE_SRC = readFileSync(gateUrl(new URL('../src/screens/AssetGateDrawer.jsx', import.meta.url)), 'utf8')
@@ -531,4 +541,79 @@ test('H:severity-counts-share-the-rail-split: the header cannot disagree with th
   ] }
   assert.deepEqual(severityCounts(clean), { fix: 0, review: 0, soft: 0 })
   assert.deepEqual(severityCounts({}), { fix: 0, review: 0, soft: 0 })
+})
+
+// ── SPEC 4.4-14 — the gate count deep-links `n to fix -> <title>` ────────────────────────────────
+//
+// `docs/qc-evidence/qc/packet.jsx:266` renders `{list.length} to fix — {it.title} →` as a real
+// control. RENDER-SWEEP.md measured this app's badge as `role: null`, `tabindex: null`,
+// `getComputedStyle().cursor === "default"`, with a click that moved neither `location.hash` nor
+// `body.innerText.length`. Two separate defects produced that: the COUNT was never the control
+// (only the whole badge was), and the callers' handler resolved to null anyway because
+// `packetFailList` could not produce a target (see H:fail-list-field-is-resolved-from-the-offenders).
+
+test('H:gate-count-is-the-deep-link-and-names-the-finding', () => {
+  const badge = gateStrip(GATE_SRC).slice(
+    gateStrip(GATE_SRC).indexOf('function GateBadge'),
+    gateStrip(GATE_SRC).indexOf('\nconst Section'))
+
+  // The COUNT carries the affordance, not just the badge around it. Without role/tabIndex it is
+  // unreachable by keyboard and announced as text, which is how the sweep read it.
+  assert.match(badge, /GATE_HOOKS\.toFixLink[\s\S]{0,220}role="button"/,
+    'the count must be the control, with a keyboard path')
+  assert.match(badge, /GATE_HOOKS\.toFixLink[\s\S]{0,400}onKeyDown/, 'Enter and Space must work on it')
+  assert.match(badge, /firstFixFinding\(result\)/, 'the title must come from the module, not be composed here')
+
+  // NO DEAD UI, both directions. No handler -> no link; and the COUNT must survive without one,
+  // because the number is a fact about the asset whether or not it can be clicked.
+  // RESTATED 2026-08-30. The invariant is UNCHANGED - no handler, no link - but the expression is no
+  // longer a single call: the badge now prefers the finding the CALLER's handler will actually open
+  // (`firstFix`) and falls back to computing its own. Pinning the old literal would have forced the
+  // fix to be reverted to keep a guard green, which is the tail wagging the dog.
+  assert.match(badge, /const fix = onClick \? [^\n]*: null/,
+    'a link must not be offered when the caller gave no handler')
+  assert.match(badge, /firstFix \|\| firstFixFinding\(result\)/,
+    'the caller-supplied finding must WIN - computing our own selects independently of the '
+    + 'destination and can name a different row than the one the click opens')
+  assert.match(badge, /GATE_HOOKS\.toFix\}/, 'the plain count must still render on its own hook')
+
+  // The nested click must not fire the outer one as well.
+  assert.match(badge, /stopPropagation/, 'the inner control double-fires into the badge handler')
+})
+
+test('H:first-fix-finding-orders-by-the-shared-rank', () => {
+  // The finding the badge NAMES must be the one the lists it links into sort FIRST, or the reader
+  // is told to fix one thing and handed another. Proven by agreement with attentionRank rather than
+  // by re-reading the sort.
+  const result = { gate: 'fail', engines: { deterministic: { results: [
+    { check_key: 'whitespace', state: 'warn', engine: 'deterministic' },
+    { check_key: 'word_counts', state: 'fail', engine: 'deterministic' },
+  ] } } }
+  const f = firstFixFinding(result)
+  assert.equal(f.check_key, 'word_counts', 'a warn (review) was named as the thing to FIX')
+  assert.ok(attentionRank(severityFor({ check_key: 'word_counts', state: 'fail', engine: 'deterministic' }))
+    < attentionRank(severityFor({ check_key: 'whitespace', state: 'warn', engine: 'deterministic' })),
+  'precondition: fix must rank before review')
+})
+
+test('H:one-severity-ordering: the drawer sorts by the shared rule, not a local table', () => {
+  // FOUR ORDERINGS OF ONE CLAIM existed: severityWeight, railDecisions' engine nest, ATTENTION_ORDER
+  // itself, and ChecksTab's own `{ fail: 0, warn: 1, not_applicable: 2, pass: 3 }`. The last one was
+  // kept only because this file may not import qcRail.js, which is why `bySeverity` moved beside the
+  // order it reads. It happened to AGREE while it only saw deterministic rows; it would have stopped
+  // agreeing on the first reviewer row, silently.
+  const src = gateStrip(GATE_SRC)
+  assert.ok(!/\{\s*fail:\s*0,\s*warn:\s*1/.test(src),
+    'the drawer has its own severity table again - it will drift from ATTENTION_ORDER unwatched')
+  assert.match(src, /const sorted = bySeverity\(rows\)/, 'the Checks tab must sort through the shared rule')
+
+  // And the shared rule really does order the settled rows too, which is the half a severity-only
+  // sort would drop: not_applicable is an open question, pass is settled.
+  const rows = [
+    { check_key: 'p', state: 'pass', engine: 'deterministic' },
+    { check_key: 'na', state: 'not_applicable', engine: 'deterministic' },
+    { check_key: 'w', state: 'warn', engine: 'deterministic' },
+    { check_key: 'f', state: 'fail', engine: 'deterministic' },
+  ]
+  assert.deepEqual(bySeverity(rows).map((r) => r.check_key), ['f', 'w', 'na', 'p'])
 })

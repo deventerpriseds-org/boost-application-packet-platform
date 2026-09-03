@@ -20,9 +20,14 @@ import { checkPrefColumns } from '../dist/functions/tests/checkPrefs.js'
 
 import { normalizePostingText, decodeEntities, groundingText } from '../dist/functions/tests/jdText.js'
 import { buildRequirements, locate, mapKind, sentenceBounds } from '../dist/functions/tests/requirements.js'
-import { onOmitList, omitEntries, similarity, itemTokens } from '../dist/functions/tests/swaps.js'
+import { onOmitList, omitEntries, similarity, itemTokens, attribute, ATTRIBUTION_THRESHOLD } from '../dist/functions/tests/swaps.js'
 import { runChecks, gateFor, attentionCount, COVERAGE_THRESHOLD, MIN_JUDGEABLE_TOKENS } from '../dist/functions/tests/checks.js'
-import { computeArtifactScore, judgedMustHaveIds, mustHaveSource, parseMustHaveSource } from '../dist/functions/tests/artifactScore.js'
+// DEFAULT_WEIGHTS joins this existing import so H:one-composite-formula can compare the
+// reviewer's inline weighted sum against the ONE implementation that is supposed to own it.
+import { computeArtifactScore, judgedMustHaveIds, mustHaveSource, parseMustHaveSource, DEFAULT_WEIGHTS, weightedComposite } from '../dist/functions/tests/artifactScore.js'
+// DEFAULT_THRESHOLDS for H:reviewer-auto-is-off-by-default -- the seeded value IS the guard, so it
+// is read from the module rather than restated as a literal that could drift from it.
+import { DEFAULT_THRESHOLDS } from '../dist/functions/tests/checks.js'
 import { deriveFacts } from '../dist/functions/tests/ownerFacts.js'
 import { parseResumePackage, headingKeysFor } from '../dist/functions/tests/resumeParser.js'
 import { validateCitations, reviewerChecks, agreementFor } from '../dist/functions/tests/reviewer.js'
@@ -289,7 +294,10 @@ test('H11: every table this layer added is registered for migration', () => {
                    // of the defect: dropping the name from EXPECTED_TABLES fails this case on
                    // "not in EXPECTED_TABLES", and renaming the CREATE in SCHEMA_SQL fails it on
                    // "not in SCHEMA_SQL".
-                   'comparison_dimension']) {
+                   'comparison_dimension',
+                   // The coverage judge's verdicts. A model-decided check state that pg-migrate
+                   // never created would fail at runtime as "no such relation" on the gate path.
+                   'requirement_coverage']) {
     assert.ok(schema.includes(`create table if not exists ${t} `) || schema.includes(`create table if not exists ${t}(`),
       `${t} is not in SCHEMA_SQL`)
     assert.ok(new RegExp(`'${t}'`).test(schema.slice(schema.indexOf('EXPECTED_TABLES'))),
@@ -793,34 +801,119 @@ test('H27: the check reports the scanner\'s not_applicable, it does not re-deriv
 //
 // The invariant: one ID one case, across every form, and no new number can be minted.
 const FROZEN_MAX = 44
+
+// ── THE SCAN, WIDENED — and the regex was the bigger hole, not the file list ─────────────────────
+//
+// H26 read ONE file with `/test\('(H(?:\d+b?|:[a-z0-9-]+)):/`. Two defects, and the second is worse:
+//
+//   1. SCOPE. 549 H-cases live outside this file; it saw 52 of them, i.e. none.
+//   2. RECOGNITION. That regex could not see 258 of the 689 cases that already exist, INCLUDING SIX
+//      IN THIS VERY FILE. `H5c`, `H39c` and `H39d` are here and were invisible to the guard that
+//      claims "one ID one case, across every form".
+//
+// The consequence of (2) is not cosmetic — it is the counter-retirement mechanism failing open.
+// Proven 2026-09-02: `test('H45: x')` and `test('H45b: x')` are caught by the mint ban;
+// **`test('H45c: x')` is INVISIBLE and mints a new number past the frozen range with the suite
+// green.** One keystroke wide. Widening the file glob while keeping the regex would have reproduced,
+// for the third time, the "STRUCTURALLY BLIND to the actual failure" verdict recorded above.
+//
+// So the recogniser captures the TITLE first and derives the id from it, which matches every
+// registration form the repo actually uses rather than the one shape the original author had in
+// mind: numeric, `b`-suffixed, ANY-letter-suffixed, slug-with-clause, slug-as-whole-title (no
+// trailing colon — the dominant form outside this file), UPPERCASE in a slug, and the aliased
+// registrar `t(` used in `dimensionsDb.test.mjs`.
+//
+// Criteria, written cold before this code and rejecting the framing it was given:
+// docs/qc-evidence/AC-h26-cross-file.md
+const H_TEST_DIRS = [new URL('../../api/test/', import.meta.url), new URL('../../app/test/', import.meta.url)]
+const TITLE_RE = /(?:^|[^.\w])(?:test|t)\(\s*(['"`])((?:\\.|(?!\1)[^\\])*)\1/g
+
+/** Every H-case the repo registers, from every form. `interpolated` marks a template-literal id. */
+function scanHCases() {
+  const files = []
+  const cases = []
+  for (const dir of H_TEST_DIRS) {
+    for (const name of readdirSync(dir).filter((f) => f.endsWith('.test.mjs')).sort()) {
+      const path = new URL(name, dir)
+      const text = readFileSync(path, 'utf8')
+      // AC-5: what the file LOOKS like it registers, independent of the recogniser, so a
+      // recogniser that stops matching a style is caught rather than reporting a quiet zero.
+      files.push({ name, claims: /(?:^|[^.\w])(?:test|t)\(\s*['"`]H(?:\d|:)/.test(stripComments(text)) })
+      // Comments stripped: this block and several others DISCUSS ids at length, and a scan that
+      // counted the prose would fire on the description of the bug rather than the bug.
+      stripComments(text).split('\n').forEach((line, i) => {
+        TITLE_RE.lastIndex = 0
+        let m
+        while ((m = TITLE_RE.exec(line)) !== null) {
+          const title = m[2]
+          if (!/^H(\d|:)/.test(title)) continue
+          const id = title.includes(': ') ? title.slice(0, title.indexOf(': ')) : title
+          cases.push({ id, title, file: name, line: i + 1, interpolated: title.includes('${') })
+        }
+      })
+    }
+  }
+  return { files: files.map((f) => f.name), claiming: files.filter((f) => f.claims).map((f) => f.name), cases }
+}
+
+// AC-7b: an id built at runtime (`test(`H:coverage-${name}`)`) is ONE registration with many real
+// ids. Judging its literal prefix would accuse correct code of a one-word slug and of duplication.
+// Excluded by construction, listed here so growth of this list is visible in review.
+const INTERPOLATED_OK = ['prototypeCoverage.test.mjs']
+
+const H = {
+  // AC-1/AC-5: a recogniser that stops matching a file's style reports ZERO and reads as success.
+  'sees-every-file-that-registers-one': ({ claiming, cases }) => {
+    const found = new Set(cases.map((c) => c.file))
+    return claiming.filter((f) => !found.has(f))
+      .map((f) => `${f} contains an H-case registration the recogniser did not capture - it would report a quiet zero`)
+  },
+  // AC-6: the adjudicated rule. Two lanes on branches that cannot see each other are the root cause
+  // H26 names; an id defined in two FILES is that collision made concrete. Intra-file repeats are
+  // legal (one guard, several assertions) and are handled by the next rule.
+  'one-id-one-file': ({ cases }) => {
+    const by = {}
+    for (const c of cases) { if (!c.interpolated) (by[c.id] ||= new Set()).add(c.file) }
+    return Object.entries(by).filter(([, f]) => f.size > 1)
+      .map(([id, f]) => `${id} is defined in ${[...f].join(' and ')} - a citation resolves to neither`)
+  },
+  // AC-7: a repeat inside one file must DISCRIMINATE, or the two are indistinguishable in a report.
+  'a-repeat-discriminates-itself': ({ cases }) => {
+    const by = {}
+    for (const c of cases) { if (!c.interpolated) (by[`${c.file}\u0000${c.title}`] ||= []).push(c) }
+    return Object.values(by).filter((g) => g.length > 1)
+      .map((g) => `${g[0].file}: two cases share the FULL title "${g[0].title.slice(0, 60)}" (lines ${g.map((c) => c.line).join(', ')})`)
+  },
+  // AC-8: the frozen numerics belong to this file. One appearing elsewhere re-opens the counter.
+  'frozen-numerics-stay-here': ({ cases }) =>
+    cases.filter((c) => /^H\d+[a-z]?$/.test(c.id) && c.file !== 'hardening.test.mjs')
+      .map((c) => `${c.id} is defined in ${c.file}; H1-H${FROZEN_MAX} are frozen to hardening.test.mjs`),
+  // AC-9: the mint ban, now suffix-proof. This is the assertion `H45c` walked past.
+  'no-new-number-is-minted': ({ cases }) =>
+    cases.filter((c) => /^H\d+[a-z]?$/.test(c.id) && Number(c.id.match(/\d+/)[0]) > FROZEN_MAX)
+      .map((c) => `${c.id} (${c.file}:${c.line}) mints a number past the frozen range - take a SLUG naming what it guards`),
+  // The frozen range must stay whole: a merge that drops a case leaves its pointer resolving to nothing.
+  'no-frozen-case-was-lost': ({ cases }) => {
+    const nums = cases.filter((c) => /^H\d+$/.test(c.id)).map((c) => Number(c.id.slice(1)))
+    const missing = []
+    for (let i = 1; i <= FROZEN_MAX; i++) if (!nums.includes(i)) missing.push(`H${i}`)
+    return missing.length ? [`frozen case(s) lost in a merge: ${missing.join(', ')}`] : []
+  },
+  // AC-10: two segments minimum, and deliberately NO upper bound - a cap would fire on 37 correct
+  // slugs and no harm can be named for a long one.
+  'a-slug-says-what-it-guards': ({ cases }) =>
+    cases.filter((c) => !c.interpolated && c.id.startsWith('H:') && c.id.slice(2).split('-').filter(Boolean).length < 2)
+      .map((c) => `${c.id} (${c.file}:${c.line}) is a single word - a counter with extra steps`),
+}
+
 test('H26: every hardening case has its own ID, and the counter stays retired', () => {
-  const self = readFileSync(new URL('./hardening.test.mjs', import.meta.url), 'utf8')
-  // Comments stripped first: this block lists six duplicate IDs, and a scan counting those would
-  // fire on the description of the bug rather than the bug.
-  const ids = [...stripComments(self).matchAll(/test\('(H(?:\d+b?|:[a-z0-9-]+)):/g)].map(m => m[1])
-  assert.ok(ids.length >= 52, `only ${ids.length} cases found — the scan has gone stale`)
-
-  const seen = new Set(); const dupes = []
-  for (const id of ids) { if (seen.has(id)) dupes.push(id); else seen.add(id) }
-  assert.deepEqual(dupes, [], 'two cases share an ID — actions.md now points at both and resolves to neither')
-
-  // THE MECHANISM. A new numeric ID cannot be minted, so two lanes cannot pick the same next number.
-  const minted = ids.filter(id => /^H\d+b?$/.test(id) && Number(id.match(/\d+/)[0]) > FROZEN_MAX)
-  assert.deepEqual(minted, [],
-    `H1-H${FROZEN_MAX} are frozen. A new case takes a SLUG naming what it guards — test('H:what-it-guards: ...') ` +
-    `— because a shared counter assigned on branches that cannot see each other collides by design, ` +
-    `and did so three times in one session.`)
-
-  // Gaps in the FROZEN range only: a merge that dropped a case leaves its number unused, and the
-  // pointer in actions.md then resolves to nothing.
-  const nums = ids.filter(id => /^H\d+$/.test(id)).map(id => Number(id.slice(1)))
-  const missing = []
-  for (let i = 1; i <= FROZEN_MAX; i++) if (!nums.includes(i)) missing.push(`H${i}`)
-  assert.deepEqual(missing, [], 'a frozen hardening case was lost in a merge — its ID is unused')
-
-  // Slugs must say what they guard, so the ID stays a pointer rather than becoming a new counter.
-  const badSlugs = ids.filter(id => id.startsWith('H:') && id.slice(2).split('-').length < 2)
-  assert.deepEqual(badSlugs, [], 'a slug that is a single word is a counter with extra steps')
+  const scan = scanHCases()
+  // AC-4: no hardcoded floor. The live `>= 52` had rotted to 2.5x stale against a real 131, and a
+  // literal that rots is how a widened scan silently narrows again. The file SET is the assertion.
+  const expected = H_TEST_DIRS.flatMap((d) => readdirSync(d).filter((f) => f.endsWith('.test.mjs'))).sort()
+  assert.deepEqual(scan.files.sort(), expected, 'the scan and the test directories disagree')
+  assert.ok(scan.cases.length > 600, `only ${scan.cases.length} cases found - the recogniser has gone stale`)
+  for (const [name, fn] of Object.entries(H)) assert.deepEqual(fn(scan), [], name)
 })
 
 // ---------------------------------------------------------------------------------------------
@@ -1303,19 +1396,91 @@ test('H33: every server-side body toggle has a caller that can send it', () => {
 // packet screen showing only the last pass's decisions as if they were the whole story.
 // The invariant, not the incident: any writer that clears provenance for a packet must scope the
 // clear to the pass it is rewriting.
-test('H34: provenance deletes are scoped to a pass, never to a whole packet', () => {
+// AMENDED 2026-08-29, with the owner's explicit approval, to carve out ground zero — and the
+// carve-out is deliberately narrow because the incident above must still be caught.
+//
+// WHY THE ORIGINAL RULE WAS BROADER THAN ITS OWN RATIONALE. H34's invariant is "scope the clear to
+// the pass it is rewriting". At loop 0 there IS no earlier pass of the current build to protect:
+// loop 0 is only ever written at ground zero — `appPackets.ts` renderArtifact for a whole-package
+// build, and `appRemediation.ts:179` guarded by `firstPass === 1`, with a later run deliberately
+// NOT rewriting loop 0. The rows a loop-0 clear removes describe a draft that has just been
+// replaced, so keeping them is not provenance, it is a stale higher number outranking newer text.
+//
+// WHAT THAT COST, measured on the Trinnex resume (artifact cfdd82e7, production, 2026-08-29):
+// a rebuild wrote loop 0 on 08-28 while loops 1-3 from 08-20 survived. `insertionsGet` picks
+// `current` with `Math.max(loop)`, so the screen served the EIGHT-DAY-OLD pass — 7 items, 4 over
+// the 24-char limit — while the rebuild's own compliant 10 items sat beside it unread. Three
+// separate defects were reported off that one cause and none of them were real.
+//
+// THE CARVE-OUT CANNOT REACH THE ORIGINAL INCIDENT. That incident was pass 2 destroying pass 1 via
+// an UNCONDITIONAL packet-wide delete. A delete reachable only under `loop === 0` can never run on
+// pass 2, so the guard below still fails on the exact construct that prompted it — proven by
+// mutation, not assumed: restoring the unconditional delete re-fails this test.
+/**
+ * The [start, end) span of every `if (loop === 0) { ... }` block in a source file.
+ *
+ * Brace-walking, not a character window. H34's carve-out originally accepted any unscoped delete
+ * with a `loop === 0` mention within 400 characters, which tests NEARNESS rather than SCOPE. An
+ * independent verifier defeated it in one edit -- `const isGroundZero = loop === 0` on its own
+ * line, a trivial `if (isGroundZero) {}` after it, then an UNCONDITIONAL packet-wide delete. That
+ * is the P3-21 incident restored verbatim and the suite passed 893/893.
+ *
+ * String and template literals are skipped so a brace inside a SQL string cannot close a block
+ * early -- these files are full of `delete from x where y=$1` inside backticks.
+ */
+function guardedBlocks(code) {
+  const spans = []
+  const re = /\bif\s*\(\s*loop\s*===\s*0\s*\)\s*\{/g
+  let m
+  while ((m = re.exec(code))) {
+    let depth = 0, i = m.index + m[0].length - 1, quote = null
+    for (; i < code.length; i++) {
+      const c = code[i], prev = code[i - 1]
+      if (quote) { if (c === quote && prev !== '\\') quote = null; continue }
+      if (c === '"' || c === "'" || c === '`') { quote = c; continue }
+      if (c === '{') depth++
+      else if (c === '}') { depth--; if (depth === 0) { spans.push([m.index, i]); break } }
+    }
+  }
+  return spans
+}
+
+test('H34: provenance deletes are scoped to a pass, except at ground zero (loop 0)', () => {
   const offenders = []
   for (const [file, body] of allSources()) {
     const code = stripComments(body)
-    // The real construct: a DELETE from a provenance table keyed by packet alone.
+    // The real construct: a DELETE from a provenance table keyed by packet or artifact alone.
     const re = /delete\s+from\s+(swap_decision|skill_candidate|insertion)\s+where\s+([^`'"]*)/gi
     let m
     while ((m = re.exec(code))) {
       const [, table, predicate] = m
-      if (!/\bloop\s*=/.test(predicate)) offenders.push(`${file}: delete from ${table} where ${predicate.trim().slice(0, 60)}`)
+      if (/\bloop\s*=/.test(predicate)) continue
+      // CONTAINMENT, NOT PROXIMITY. The first version of this carve-out accepted any unscoped
+      // delete with a `loop === 0` mention in the preceding 400 characters, which is a test of
+      // NEARNESS and not of SCOPE. An independent verifier broke it in one edit — the P3-21
+      // incident reinstated verbatim, and the whole suite passed 893/893:
+      //
+      //     const isGroundZero = loop === 0
+      //     if (isGroundZero) { console.log('ground zero') }
+      //     await client.query(`delete from swap_decision where packet_id=$1`, [packetId])
+      //
+      // The delete there runs on EVERY loop; only the mention was nearby. Comments were already
+      // stripped, so the miss was real code, which is exactly the case that matters. My own
+      // mutation had only tried the literal construct and so proved the guard caught one shape
+      // while I assumed it caught the class.
+      //
+      // So find each `if (loop === 0)` and walk its braces to get the block's true extent, then
+      // require the delete to sit INSIDE one. A mention that does not open a block protects
+      // nothing and no longer excuses anything.
+      if (guardedBlocks(code).some(([s, e]) => m.index > s && m.index < e)) continue
+      offenders.push(`${file}: delete from ${table} where ${predicate.trim().slice(0, 60)}`)
     }
   }
-  assert.deepEqual(offenders, [], 'a packet-wide provenance delete erases every earlier pass')
+  assert.deepEqual(offenders, [],
+    'a packet-wide provenance delete outside loop 0 erases every earlier pass. The carve-out requires '
+    + 'the delete to sit INSIDE a BRACED `if (loop === 0) { ... }` block -- a brace-less if, or a '
+    + '`loop === 0` mention that does not open the block containing the delete, is not a scope and '
+    + 'does not qualify')
 })
 
 test('H34b: swap_decision and skill_candidate carry the pass in their key', () => {
@@ -3251,11 +3416,24 @@ test('H:model-evidence-is-labelled: a model-proposed evidence row has its own me
   const schema = readFileSync(new URL('../src/functions/tests/schema.ts', import.meta.url), 'utf8')
   const sql = schema.slice(schema.indexOf('SCHEMA_SQL = `') + 14, schema.indexOf('\n`;'))
 
-  // (1) The three provenances, and no more — a fourth added without a thought here should fail.
+  // (1) The FOUR provenances, and no more — a fifth added without a thought here should fail, and
+  // this guard did exactly that when `judged` was added (2026-09-01), which is why it says four now
+  // rather than having been quietly widened to "at least three".
+  //
+  // `judged` is the one that COUNTS toward coverage, so its admission was the deliberate act:
+  // a proposal that survived an adversarial second read (supportJudge.ts) naming what the excerpt
+  // does NOT show before it could claim support, cited to a byte-verified span. It is a separate
+  // value from `proposed` precisely so a query can still tell "a model named this" from "a model
+  // named this AND it survived being attacked" — collapsing them would lose the distinction the
+  // gate now depends on.
   const checks = [...sql.matchAll(/method in \(([^)]*)\)/g)].map(m => m[1].replace(/\s|'/g, ''))
   assert.ok(checks.length >= 1, 'the method CHECK has vanished from SCHEMA_SQL')
-  assert.ok(checks.some(c => c === 'exact,anchored,proposed'),
-    `no method CHECK admits a model-proposed row: found ${JSON.stringify(checks)}`)
+  assert.ok(checks.some(c => c === 'exact,anchored,proposed,vetted'),
+    `no method CHECK admits both a proposed and a judged row: found ${JSON.stringify(checks)}`)
+  for (const c of checks) {
+    if (/proposed/.test(c)) assert.equal(c, 'exact,anchored,proposed,vetted',
+      `a method CHECK admits a different set: ${c} — two homes that disagree is an insert one permits and the other rejects`)
+  }
 
   // (2) Nullable, never defaulted. A default is the silent version of lying about provenance.
   assert.match(sql, /add column if not exists proposal_version int;/,
@@ -4522,4 +4700,992 @@ test('H:deploy-waits-for-its-own-build: pg-migrate cannot run against an older b
   // And it must refuse rather than migrate anyway when convergence never happens.
   assert.match(wf, /Refusing to migrate/,
     'when the worker never reports the deployed sha the workflow must FAIL, not fall through to pg-migrate')
+})
+
+// ── H:rebuild-clears-superseded-loops ───────────────────────────────────────────────────────────
+//
+// EVIDENCE (production, opp 9f9c370a, artifact cfdd82e7 `resume`, read 2026-08-29):
+//
+//   loop 0 | 10 items | longest 24 | 0 over limit | written 2026-08-28 02:50:40  <- the rebuild
+//   loop 1 |  … 2026-08-20 00:44:30
+//   loop 2 |  … 2026-08-20 16:41:35
+//   loop 3 |  7 items | longest 31 | 4 over limit | written 2026-08-20 16:44:40  <- what shipped
+//
+// `insertionsGet` picks `current` with `Math.max(loop)`, so the EIGHT-DAY-OLD pass outranked the
+// rebuild that replaced it: the owner saw 31- and 37-character skill lines against a live 24-char
+// limit, and every `original -> final` arrow vanished because `listBodyModel` matched loop-3 lines
+// against loop-0 `to_label`s. Three separate "bugs" were reported off this one cause; none of them
+// were real. A rebuild writes loop 0 in place while the passes that refined the SUPERSEDED draft
+// survive and keep winning on number.
+//
+// THE INVARIANT: writing loop 0 is ground zero and must clear every later pass, in BOTH tables.
+// Asserted on both because a fix to one alone leaves insertions and swaps describing different
+// passes, which is precisely the state that made the arrows disappear.
+test('H:rebuild-clears-superseded-loops: writing loop 0 clears later passes in both writers', () => {
+  const ins = src('appInsertions.ts')
+  const swp = src('appSwaps.ts')
+
+  // The unscoped delete must exist AND be reachable only under loop 0 — an unconditional unscoped
+  // delete would destroy a live remediation run's earlier passes (the defect P3-21 added `loop` for).
+  assert.ok(/if\s*\(\s*loop\s*===\s*0\s*\)[\s\S]{0,400}?delete from insertion where artifact_id=\$1\s*`/.test(ins),
+    'appInsertions.ts: a loop-0 write must clear EVERY loop for the artifact, or a stale higher-numbered '
+    + 'pass keeps outranking the rebuild that replaced it')
+  assert.ok(/delete from insertion where artifact_id=\$1 and loop=\$2/.test(ins),
+    'appInsertions.ts: loops 1..n must still delete only their own rows (P3-21)')
+
+  assert.ok(/if\s*\(\s*loop\s*===\s*0\s*\)[\s\S]{0,600}?delete from swap_decision where packet_id=\$1\s*`/.test(swp),
+    'appSwaps.ts: a loop-0 write must clear EVERY swap loop, or swaps and insertions describe different '
+    + 'passes and every original->final arrow silently disappears')
+  assert.ok(/delete from skill_candidate where packet_id=\$1\s*`/.test(swp),
+    'appSwaps.ts: skill_candidate must be cleared with swap_decision or candidates outlive their swaps')
+  assert.ok(/delete from swap_decision where packet_id=\$1 and loop=\$2/.test(swp),
+    'appSwaps.ts: loops 1..n must still delete only their own rows (P3-21)')
+})
+
+// ── H:loop-zero-clear-rests-on-the-cache-hit ────────────────────────────────────────────────────
+//
+// THE DEPENDENCY THAT MAKES THE LOOP-0 CLEAR SAFE, PINNED — because it is NOT the one the
+// implementer believed, and an independent verifier had to say so.
+//
+// The claim made when `H:rebuild-clears-superseded-loops` shipped was: "a loop-0 clear cannot run
+// during a live remediation run, because `appRemediation.ts` guards its baseline write with
+// `firstPass === 1`." THAT IS WRONG. `firstPass` guards `writeInsertions` only. `writeSwaps` is
+// never called from `appRemediation.ts` at all — its single call site is `appPackets.ts`
+// `ensurePackage`, which remediation invokes on EVERY run, before that guard.
+//
+// What actually keeps it safe is the CACHE HIT: `ensurePackage` returns early when a package is
+// already stored and still grounded, so run 2+ never reaches the generate-and-writeSwaps path.
+// Remediation refuses to run at all when `!grounded`, so any packet that completed a pass has
+// `jd_grounded = true` and hits the cache next time.
+//
+// That is a real invariant and it holds — but nothing named it, so editing the cache predicate
+// would silently reopen a packet-wide provenance delete inside a live loop with the suite green.
+// This test is that name. If the early return or its predicate moves, come back and re-derive
+// whether `writeSwaps` can now be reached on a second remediation pass BEFORE relaxing this.
+test('H:loop-zero-clear-rests-on-the-cache-hit: ensurePackage still returns early on a cached package', () => {
+  const pk = stripComments(src('appPackets.ts'))
+
+  // The early return must exist and must precede the generation path that calls writeSwaps.
+  const cachedAt = pk.search(/const cached[^\n]*=\s*\(!regen/)
+  const returnAt = pk.search(/if \(cached\) return \{/)
+  const swapsAt = pk.search(/writeSwaps\(/)
+  assert.ok(cachedAt > -1, 'appPackets.ts: the `cached` predicate is gone — the loop-0 clear in '
+    + 'writeSwaps is no longer protected from a second remediation pass')
+  assert.ok(returnAt > cachedAt, 'appPackets.ts: `if (cached) return` no longer follows the predicate')
+  assert.ok(swapsAt > returnAt, 'appPackets.ts: writeSwaps is no longer AFTER the cache early-return — '
+    + 'a remediation run on pass 2+ could now reach it and clear every earlier pass of the live run')
+
+  // And the predicate must still be the conjunction the argument depends on: a stored package,
+  // no explicit regen, and not stale-ungrounded. Dropping any term re-opens the path.
+  const pred = pk.slice(cachedAt, returnAt)
+  for (const term of ['!regen', '!staleUngrounded', 'pkg_json']) {
+    assert.ok(pred.includes(term),
+      `appPackets.ts: the cache predicate no longer tests ${term}; the loop-0 provenance clear `
+      + 'depends on this early return being taken on every remediation pass after the first')
+  }
+
+  // writeSwaps must still be called with the literal ground-zero loop. If a caller ever passes a
+  // computed pass number here, the clear stops being ground-zero-only and the carve-out is void.
+  assert.match(pk, /writeSwaps\([^)]*\{[\s\S]{0,400}?loop:\s*0\s*,?\s*\}/,
+    'appPackets.ts: writeSwaps is no longer called with a literal `loop: 0` — a computed loop would '
+    + 'make the unscoped clear reachable on a real remediation pass')
+})
+
+// ---------------------------------------------------------------------------------------------
+// H:every-evidence-count-has-a-reader — a count nobody reads is a measurement that does not exist.
+//
+// F-9, found by an independent verifier: `vetted` shipped WRITE-ONLY. It was added to
+// `writeEvidence`'s return with the explicit rationale that "a caller must be able to see the
+// number a model moved" — and then omitted from the ONE place those counts surface
+// (`appPackets.ts`). TypeScript stayed quiet because that caller destructures a subset. `vetted` is
+// the count that MOVES must_have_coverage, so the number that changed was the only one invisible.
+//
+// THE INVARIANT, NOT THE INCIDENT: every count the evidence pass returns must be read somewhere.
+// This is the same class as the `correction.frame` write-only defect the repo's CLAUDE.md cites,
+// and the same self-attack the rules prescribe ("Who READS what you wrote?").
+test('H:every-evidence-count-has-a-reader', () => {
+  const body = src('appRequirements.ts')
+  // The declared return type of writeEvidence — read from the source, not from memory.
+  const at = body.indexOf('export async function writeEvidence')
+  assert.ok(at > -1, 'writeEvidence moved — this scan has gone stale')
+  const sig = body.slice(at, body.indexOf('> {', at))
+  const counts = [...sig.matchAll(/(\w+):\s*number\b/g)].map(m => m[1])
+  assert.ok(counts.length >= 6, `expected the count block, found ${JSON.stringify(counts)}`)
+
+  const readers = src('appPackets.ts') + src('appChecks.ts')
+  const unread = counts.filter(c => !new RegExp(`evidence\\?\\.${c}\\b`).test(readers))
+  assert.deepEqual(unread, [],
+    `these counts are written and never read: ${unread.join(', ')} — a coverage change is only ` +
+    'attributable if the run recorded which pass moved it')
+})
+
+// H:the-judge-reports-what-it-did — F-8, same verifier, same class one level up.
+//
+// `runCoverageJudge` and `runStuffingRead` each return `{ calls, refused, failures }` and every one
+// was discarded at `evaluateArtifact`'s return. Three live consequences: a model OUTAGE was
+// invisible (the owner was told "too short to judge either way" when the call had failed), the
+// count of times a model claimed a quote the document does not contain was dropped — while
+// `coverageJudge.ts` names each refusal separately precisely because "only the second is a defect
+// worth alerting on" — and nobody could say what the judge spent.
+test('H:the-judge-reports-what-it-did', () => {
+  const body = stripComments(src('appChecks.ts'))
+  assert.match(body, /const judge = coverage \|\| stuffing \?/,
+    'evaluateArtifact must report the judge passes, not silently discard them')
+  for (const field of ['coverage_calls', 'coverage_refused', 'stuffing_calls', 'failures']) {
+    assert.ok(body.includes(field), `the judge report drops ${field}`)
+  }
+  assert.match(body, /results, score, judge \}/, 'and it must actually be returned')
+})
+
+// ── Master-filled baseline artifacts (appBaseline.ts) ────────────────────────────────────────────
+//
+// The owner asked three times for "the same process we use to build copies of these artifacts but
+// with the mastercontext information and no prompt output changes applied". The first two answers
+// were the tailored builds and the empty templates. The route exists to be neither, and its whole
+// value is the NEGATIVE property — that no model wrote any of it. A guard on that property has to
+// be structural, because a reintroduced generation call would pass every behavioural test in this
+// suite while silently making the output prompt-derived again.
+test('H:baseline-no-model: the baseline route reaches no model transport, directly or by import', () => {
+  const src = readFileSync(new URL('../src/functions/tests/appBaseline.ts', import.meta.url), 'utf8')
+  // Strip comments first: this file DISCUSSES OpenAI and buildPackageForJD at length, and a guard
+  // that fires on its own explanatory prose is the cry-wolf failure hardening rule 2 forbids.
+  const code = src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '')
+  for (const banned of ['api.openai.com', 'buildPackageForJD', 'ensurePackage', 'assemblePackage', 'artifactAiEdit']) {
+    assert.ok(!code.includes(banned),
+      `appBaseline.ts must not reach generation (${banned}); its output would then be prompt-derived`)
+  }
+  // The positive half: it must still go through the SHARED render path rather than growing its own
+  // copy of the copy-and-inject logic, which is what "extend, don't duplicate" requires here.
+  assert.ok(code.includes('renderArtifact'), 'baseline must render via the shared renderArtifact')
+  assert.ok(code.includes('loadMasterBaseline'), 'baseline content must come from loadMasterBaseline')
+})
+
+// The two placeholders MasterContext cannot fill. Left unset they are DELETED by
+// stripLeftoverTokens rather than left visible, so the failure is silent blank space in a slide.
+// The owner supplied the standing values on 2026-09-01: company = Company X, coverletterdate = today.
+test('H:baseline-standing-fields: @Company and @CoverLetterDate are always populated', async () => {
+  const { baselinePkg, todayIso, BASELINE_COMPANY_PLACEHOLDER } =
+    await import('../dist/functions/tests/appBaseline.js')
+
+  // Empty master — the seeded first values must still land.
+  const bare = baselinePkg({})
+  assert.equal(bare['@Company'], BASELINE_COMPANY_PLACEHOLDER)
+  assert.equal(bare['@CoverLetterDate'], todayIso())
+
+  // Master content must SURVIVE the overlay, and the overlay must win only on its own two keys.
+  const withMaster = baselinePkg({ ResumeSummary: 'a standing summary', SkillsBullets1: 'x | y' })
+  assert.equal(withMaster.ResumeSummary, 'a standing summary')
+  // The ITEMS survive; the stored separator does not. This assertion used to read
+  // `equal(..., 'x | y')`, which encoded the pipes DEFECT as expected behaviour and would have
+  // defended it against the fix -- a test asserting the incident rather than the invariant.
+  assert.deepEqual(withMaster.SkillsBullets1.split('\n'), ['x', 'y'])
+  assert.equal(withMaster['@Company'], BASELINE_COMPANY_PLACEHOLDER)
+
+  // A caller override wins over the seed — this is what keeps the value user-changeable rather
+  // than a hardcoded constant, per the repo's no-hardcoded-config rule.
+  const overridden = baselinePkg({}, { company: 'Acme', date: '2026-01-02' })
+  assert.equal(overridden['@Company'], 'Acme')
+  assert.equal(overridden['@CoverLetterDate'], '2026-01-02')
+
+  // Blank/whitespace input must fall back to the seed rather than injecting an empty string, which
+  // would be stripped and blank the field — the exact defect the standing values exist to prevent.
+  const blank = baselinePkg({}, { company: '   ', date: '' })
+  assert.equal(blank['@Company'], BASELINE_COMPANY_PLACEHOLDER)
+  assert.equal(blank['@CoverLetterDate'], todayIso())
+})
+
+// THE SHAPE OF A RENDERED LIST — the check this suite did not have.
+//
+// The owner opened the baseline documents and found two defects no assertion could have told him:
+// skills/expertise/relevant rendered as `A|B|C` instead of bullets, and all 36 pooled relevant terms
+// in each of three slots. `checks.ts` WORD_RULES covers only the six PROSE fields, so nothing
+// anywhere checked the SHAPE of any of the six SLOT_FIELDS.
+//
+// WHY THE PIPES ONLY EVER APPEARED HERE, which is the part worth encoding. In a normal build the
+// master text is PROMPT INPUT — `pipeline.ts:405` passes `mc` to `resolveZapVars(prompts.resume_user,
+// mc, jd)` and the document is filled from `parseResumePackage(<model output>)`. The model emits
+// bullet lists, so the pipe-delimited STORAGE format never reaches a document. `appBaseline` was the
+// first path to render master text directly, so it was the first to surface the stored separator.
+// ` | ` is the COMPACT resume's separator (`compactFit.ts` DEFAULT_SEPARATOR), not the full resume's.
+test('H:baseline-shape: rendered slot fields are newline items, capped by the configured slot count', async () => {
+  const { shapeSlotFields } = await import('../dist/functions/tests/appBaseline.js')
+  const { SLOT_FIELDS } = await import('../dist/functions/tests/slots.js')
+
+  // The live stored shapes, verbatim from diag/skill-sources (api-test run 33548874453).
+  const master = {
+    SkillsBullets1: 'Enterprise Governance|Technology Strategy|Risk Management|Digital Transformation',
+    SkillsBullets2: 'Strategic Roadmaps|Stakeholder Engagement|Revenue Optimization',
+    ExpertiseBullets: 'Budget Development and P&L Management|KPI-driven performance management',
+    RelevantBullets1: 'Governance and Compliance: A, B | Technology Strategy: C, D',
+    ResumeSummary: 'A prose summary | with an incidental pipe that must survive.',
+  }
+  const slots = { SkillsBullets1: 3, SkillsBullets2: null, ExpertiseBullets: null,
+                  RelevantBullets1: 2, RelevantBullets2: null, RelevantBullets3: null }
+  const out = shapeSlotFields(master, slots)
+
+  // NO SEPARATOR SURVIVES IN A SLOT FIELD. This is the defect the owner actually saw.
+  for (const f of SLOT_FIELDS) {
+    if (!out[f]) continue
+    assert.ok(!out[f].includes('|'), `${f} still contains a pipe separator: ${out[f]}`)
+  }
+
+  // Items become newline-separated, and a configured count TRIMS.
+  assert.deepEqual(out.SkillsBullets1.split('\n'),
+    ['Enterprise Governance', 'Technology Strategy', 'Risk Management'])   // capped at 3 of 4
+  assert.equal(out.SkillsBullets2.split('\n').length, 3)                    // null cap -> all kept
+  assert.equal(out.RelevantBullets1.split('\n').length, 2)                  // capped at 2
+
+  // A NULL COUNT NEVER TRIMS. slots.ts: an unset count means unknown, and inventing one "accuses
+  // every item past it" — so an absent count must pass the list through whole, not truncate it.
+  const untrimmed = shapeSlotFields(master, undefined)
+  assert.equal(untrimmed.SkillsBullets1.split('\n').length, 4)
+
+  // PROSE IS NOT A LIST. ResumeSummary is not a slot field and must survive byte-identical,
+  // incidental pipe and all — splitting a paragraph on punctuation would shred it.
+  assert.equal(out.ResumeSummary, master.ResumeSummary)
+})
+
+// THE SEEDED RELEVANT LISTS — the nine that replace "whichever nine happened to be first".
+//
+// With no JD, shapeSlotFields takes items.slice(0, 3) of a 36-term LIBRARY: the first nine in
+// storage order, all of one category and part of another. Mechanically correct, editorially
+// arbitrary. These nine came from the owner's own Zap rule run against the Trinnex JD (exclude
+// anything Skills1/Skills2/competencies already cover, order by ATS match, split 3/3/3), then
+// corrected by the owner for AI redundancy: "replace AI in operations to Ops automation, and AI/ML
+// advancements to Data Insights".
+test('H:baseline-relevant-seed: three lists of three, within the character rule, overridable', async () => {
+  const { SEED_RELEVANT_LISTS, RELEVANT_FIELDS, relevantOverlay, baselinePkg } =
+    await import('../dist/functions/tests/appBaseline.js')
+
+  // SHAPE: exactly three lists of exactly three. The template holds 3 per slot and the Zap states
+  // it as a hard requirement; a fourth item would be silently dropped by the slot trim.
+  assert.equal(SEED_RELEVANT_LISTS.length, 3)
+  for (const list of SEED_RELEVANT_LISTS) assert.equal(list.length, 3)
+
+  // THE CHARACTER RULE, asserted rather than trusted to a comment. The Zap's final wording is "no
+  // more than one item greater than 24 characters, including spaces in any list".
+  for (const list of SEED_RELEVANT_LISTS) {
+    const over24 = list.filter(t => t.length > 24)
+    assert.ok(over24.length <= 1, `list has ${over24.length} items over 24 chars: ${over24.join(', ')}`)
+  }
+
+  // NO DUPLICATES ACROSS THE NINE. Three slots printed side by side make a repeat obvious in a way
+  // one pooled block hides -- the same reason fitCompactSkills collapses duplicates.
+  const all = SEED_RELEVANT_LISTS.flat()
+  assert.equal(new Set(all.map(s => s.toLowerCase())).size, 9, 'the nine must be distinct')
+
+  // THE AI CORRECTION HOLDS. The owner's point was that three AI-prefixed terms read as one idea
+  // repeated. This fails if a later edit reintroduces the cluster.
+  const aiTerms = all.filter(t => /\bAI\b|AI\//i.test(t))
+  assert.ok(aiTerms.length <= 1, `expected at most one AI-prefixed term, got: ${aiTerms.join(', ')}`)
+
+  // THE OVERLAY WINS over the pooled Library text, which is the whole point -- without it these
+  // three fields carry the 36-term pool sliced to length.
+  const pooled = 'Governance and Compliance: A, B | Technology Strategy: C, D | Business: E, F'
+  const pkg = baselinePkg({ RelevantBullets1: pooled, RelevantBullets2: pooled, RelevantBullets3: pooled })
+  RELEVANT_FIELDS.forEach((f, i) => {
+    assert.deepEqual(pkg[f].split('\n'), [...SEED_RELEVANT_LISTS[i]])
+  })
+
+  // A CALLER LIST WINS over the seed -- this is what keeps the nine a seeded first value rather
+  // than a hardcoded constant, per the repo's no-hardcoded-config rule.
+  const custom = relevantOverlay([['A', 'B'], ['C'], ['D', 'E', 'F']])
+  assert.deepEqual(custom.RelevantBullets1.split('\n'), ['A', 'B'])
+  assert.deepEqual(custom.RelevantBullets3.split('\n'), ['D', 'E', 'F'])
+
+  // AND A MALFORMED ONE FALLS BACK rather than blanking the slot. A blank Relevant column is the
+  // silent-deletion failure stripLeftoverTokens already causes once; it must not arrive by a
+  // second route.
+  assert.deepEqual(relevantOverlay([]).RelevantBullets1.split('\n'), [...SEED_RELEVANT_LISTS[0]])
+  assert.deepEqual(relevantOverlay(undefined).RelevantBullets2.split('\n'), [...SEED_RELEVANT_LISTS[1]])
+})
+
+// THE TWO DEFECTS AN INDEPENDENT VERIFIER FOUND IN GUARDS THAT WERE THEMSELVES MUTATION-PROVEN.
+//
+// H:baseline-shape and H:baseline-relevant-seed both FIRED under five mutations -- they are real --
+// and both were still BLIND to the inputs below, which sat in HEAD with the suite 1026/1026 green.
+// That is the lesson worth encoding: a guard proving it can fail is not a guard proving it covers
+// the input space. Each case here is an input the earlier guards never constructed.
+// Evidence: .claude/verify/VERIFY-baseline-relevant-seed-1.md (C1 REFUTED, C5 REFUTED).
+test('H:baseline-shape-empty-items: a separators-only block leaves no separator behind', async () => {
+  const { shapeSlotFields } = await import('../dist/functions/tests/appBaseline.js')
+
+  // The old code hit `if (!items.length) continue`, leaving out[field] as the RAW string -- so the
+  // pipes rendered, through the one branch that skips the rewrite.
+  for (const raw of ['|', '|||', ' | ', '•', '-|-']) {
+    const out = shapeSlotFields({ SkillsBullets1: raw })
+    assert.ok(!('SkillsBullets1' in out) || !out.SkillsBullets1.includes('|'),
+      `separators-only input ${JSON.stringify(raw)} left ${JSON.stringify(out.SkillsBullets1)}`)
+  }
+
+  // The key is DELETED, not set to ''. An absent key leaves the template's own token for
+  // stripLeftoverTokens to clear; '' injects emptiness that reads as legitimately-blank content.
+  assert.equal('SkillsBullets1' in shapeSlotFields({ SkillsBullets1: '|||' }), false)
+
+  // And a block with even ONE real item still renders that item -- the fix must not eat content.
+  assert.equal(shapeSlotFields({ SkillsBullets1: '|Governance|' }).SkillsBullets1, 'Governance')
+})
+
+test('H:baseline-relevant-per-slot: a short or malformed caller list falls back PER SLOT', async () => {
+  const { relevantOverlay, SEED_RELEVANT_LISTS, RELEVANT_FIELDS, baselinePkg } =
+    await import('../dist/functions/tests/appBaseline.js')
+
+  // THE DEFECT: one supplied list used to satisfy the outer `lists.length` test, so slots 2 and 3
+  // got no key and kept the pooled 36-term Library -- exactly what the seed exists to replace.
+  const short = relevantOverlay([['Only', 'One', 'List']])
+  assert.deepEqual(short.RelevantBullets1.split('\n'), ['Only', 'One', 'List'])
+  assert.deepEqual(short.RelevantBullets2.split('\n'), [...SEED_RELEVANT_LISTS[1]])
+  assert.deepEqual(short.RelevantBullets3.split('\n'), [...SEED_RELEVANT_LISTS[2]])
+
+  // Every malformed element falls back to ITS OWN slot's seed rather than vanishing.
+  for (const bad of [[[]], [['']], [[null]], [['   ']], [null], [undefined], [42], ['str']]) {
+    const out = relevantOverlay(bad)
+    assert.deepEqual(out.RelevantBullets1.split('\n'), [...SEED_RELEVANT_LISTS[0]],
+      `input ${JSON.stringify(bad)} did not fall back`)
+  }
+
+  // A FLAT ARRAY MUST NOT THROW. `relevant: ['a','b','c']` is the likeliest caller mistake and used
+  // to raise `(src[i]||[]).map is not a function`, which the route converted to an HTTP 500.
+  assert.doesNotThrow(() => relevantOverlay(['a', 'b', 'c']))
+  assert.deepEqual(relevantOverlay(['a', 'b', 'c']).RelevantBullets1.split('\n'),
+    [...SEED_RELEVANT_LISTS[0]])
+
+  // EVERY slot is always present, so pooled Library text can never survive in one of them.
+  const pooled = 'Governance and Compliance: A, B | Technology Strategy: C, D'
+  const pkg = baselinePkg({ RelevantBullets1: pooled, RelevantBullets2: pooled, RelevantBullets3: pooled },
+    { relevant: [['Solo']] })
+  for (const f of RELEVANT_FIELDS) {
+    assert.ok(!pkg[f].includes('Governance and Compliance:'), `${f} kept pooled Library text`)
+  }
+})
+
+test('H:baseline-slot-override: a named slot list is honoured VERBATIM, and only a real slot', async () => {
+  const { slotOverrides, baselinePkg, SEED_RELEVANT_LISTS } =
+    await import('../dist/functions/tests/appBaseline.js')
+
+  // THE GAP THIS CLOSES: `relevant` set the three Relevant lists positionally and nothing could set
+  // Skills or Core Competencies, so changing them meant hand-writing packet.pkg_json and
+  // re-rendering. Owner, 2026-09-01: "just have a second step after it finishes to update the
+  // relevant section yourself if there is no model to do it in the first pass."
+  const out = slotOverrides({ SkillsBullets1: ['SW Engineering', 'Portfolio Management'] })
+  assert.deepEqual(out.SkillsBullets1.split('\n'), ['SW Engineering', 'Portfolio Management'])
+
+  // ONLY SLOT_FIELDS. An unknown key must not become a merge field, and a prose block must not be
+  // overwritable by a list -- a typo'd key that wrote through would silently replace the summary.
+  const stray = slotOverrides({ ResumeSummary: ['x'], NotAField: ['y'], '@Company': ['z'] })
+  assert.deepEqual(Object.keys(stray), [])
+
+  // AN EMPTY OR BLANK LIST IS IGNORED, NEVER APPLIED. Blanking a slot is the silent-deletion
+  // failure; "the caller sent nothing" must not erase what MasterContext supplied.
+  for (const empty of [[], [''], ['  '], [null], 42, true, {}]) {
+    assert.deepEqual(Object.keys(slotOverrides({ ExpertiseBullets: empty })), [],
+      `input ${JSON.stringify(empty)} was applied instead of ignored`)
+  }
+  const kept = baselinePkg({ ExpertiseBullets: 'Alpha|Beta' }, { fields: { ExpertiseBullets: [] } })
+  assert.deepEqual(kept.ExpertiseBullets.split('\n'), ['Alpha', 'Beta'])
+
+  // NOT TRIMMED TO THE SLOT COUNT. slots.ts: an invented count "accuses every item past it"; the
+  // same applies to a list the caller stated. Nine items against a capacity of eight all survive.
+  const nine = ['a1', 'a2', 'a3', 'a4', 'a5', 'a6', 'a7', 'a8', 'a9']
+  const pkg = baselinePkg({}, {
+    slots: { SkillsBullets1: 10, SkillsBullets2: 8, ExpertiseBullets: 6, RelevantBullets1: 3, RelevantBullets2: 3, RelevantBullets3: 3 },
+    fields: { SkillsBullets2: nine },
+  })
+  assert.deepEqual(pkg.SkillsBullets2.split('\n'), nine)
+
+  // A NAMED FIELD BEATS THE POSITIONAL SHORTHAND when a caller sends both. One field, one winner.
+  const both = baselinePkg({}, {
+    relevant: [['pos1', 'pos2', 'pos3']],
+    fields: { RelevantBullets1: ['named1'] },
+  })
+  assert.deepEqual(both.RelevantBullets1.split('\n'), ['named1'])
+  // ...and the slots `fields` did not name still fall back to the seed, unchanged.
+  assert.deepEqual(both.RelevantBullets2.split('\n'), [...SEED_RELEVANT_LISTS[1]])
+})
+
+test('H:baseline-slot-overflow: an over-capacity list is REPORTED, never silently trimmed', async () => {
+  const { slotOverflow } = await import('../dist/functions/tests/appBaseline.js')
+  const slots = { SkillsBullets1: 10, SkillsBullets2: 8, ExpertiseBullets: 6, RelevantBullets1: 3, RelevantBullets2: 3, RelevantBullets3: 3 }
+
+  // Measured on the owner's own 2026-09-01 lists: the right-hand skills column carried NINE items
+  // against a configured capacity of eight. Honouring it verbatim is only safe because this says so.
+  const nine = Array.from({ length: 9 }, (_, i) => `s${i}`).join('\n')
+  assert.deepEqual(slotOverflow({ SkillsBullets2: nine }, slots),
+    [{ field: 'SkillsBullets2', items: 9, capacity: 8 }])
+
+  // Silent at capacity and under it -- a guard that fires on correct input is the cry-wolf failure.
+  assert.deepEqual(slotOverflow({ SkillsBullets2: Array.from({ length: 8 }, (_, i) => `s${i}`).join('\n') }, slots), [])
+  assert.deepEqual(slotOverflow({ ExpertiseBullets: 'a\nb' }, slots), [])
+
+  // A NULL capacity means UNKNOWN and must stay silent: reporting overflow against a guessed
+  // capacity is the invented-count failure slots.ts forbids, wearing a warning's clothes.
+  assert.deepEqual(slotOverflow({ SkillsBullets2: nine }, { ...slots, SkillsBullets2: null }), [])
+  assert.deepEqual(slotOverflow({ SkillsBullets2: nine }, undefined), [])
+
+  // A capacity of ZERO or below is not a capacity. Treating one as real makes `items > cap` true for
+  // EVERY non-empty slot, turning the report into a firehose that fires on correct content -- the
+  // cry-wolf failure hardening rule 2 forbids. Found by mutation: dropping `|| cap <= 0` left the
+  // suite green, so this sub-rule was unguarded.
+  assert.deepEqual(slotOverflow({ ExpertiseBullets: 'a\nb' }, { ...slots, ExpertiseBullets: 0 }), [])
+  assert.deepEqual(slotOverflow({ ExpertiseBullets: 'a\nb' }, { ...slots, ExpertiseBullets: -1 }), [])
+
+  // Blank lines are not items -- a trailing newline must not manufacture an overflow.
+  assert.deepEqual(slotOverflow({ ExpertiseBullets: 'a\nb\n\n' }, slots), [])
+})
+
+test('H:baseline-slot-element-type: a non-string ELEMENT is dropped, never String()-coerced', async () => {
+  const { slotOverrides, baselinePkg } = await import('../dist/functions/tests/appBaseline.js')
+
+  // FOUND BY THE INDEPENDENT VERIFIER, not by reading (VERIFY-baseline-slot-overrides-1, "Also
+  // report"): the type gate was top-level only, so junk inside an ACCEPTED array was coerced --
+  // `['a', {}, ['b','c']]` wrote "a\n[object Object]\nb,c" into a merge field.
+  const out = slotOverrides({ SkillsBullets1: ['a', {}, ['b', 'c'], 42, null, undefined, true, 'd'] })
+  assert.deepEqual(out.SkillsBullets1.split('\n'), ['a', 'd'])
+  assert.ok(!out.SkillsBullets1.includes('[object Object]'))
+  assert.ok(!out.SkillsBullets1.includes('b,c'))
+
+  // An array of ONLY junk empties the list, which means the field is ignored -- so MasterContext
+  // survives rather than being replaced by nothing. The safe direction, asserted rather than hoped.
+  assert.deepEqual(Object.keys(slotOverrides({ ExpertiseBullets: [{}, 42, null] })), [])
+  const kept = baselinePkg({ ExpertiseBullets: 'Alpha|Beta' }, { fields: { ExpertiseBullets: [{}, 7] } })
+  assert.deepEqual(kept.ExpertiseBullets.split('\n'), ['Alpha', 'Beta'])
+})
+test('H:every-evidence-alias-reaches-the-gate: a column selected and then dropped is invisible', () => {
+  // WRITTEN BECAUSE A MUTATION CAME BACK INERT. Deleting `decision: r.evidence_decision ?? null`
+  // from the appChecks mapping failed no test, and that is a whole-feature no-op: the owner's veto
+  // is written to the database, read back by the loader's SELECT, and then silently discarded three
+  // lines before `ruleEvidenceOf` -- the only code that acts on it. The gate would keep counting a
+  // row the owner rejected, with every other test still green.
+  //
+  // It is the same shape as `H:every-evidence-count-has-a-reader` one level up, and `tsc` cannot
+  // see it: both new fields are OPTIONAL on EvidenceRow, so an absent key type-checks perfectly.
+  //
+  // THE INVARIANT, not the incident: for every `evidence_X` alias the loader projects, if `X` is a
+  // declared field of EvidenceRow then the mapping in appChecks must actually read it. A column
+  // added to the join and to the interface but forgotten in the mapping fails here, whatever it is
+  // called. A source grep rather than a runtime test, per the hardening rule's carve-out for
+  // structural claims a behavioural test cannot express -- the failure is an ABSENT line.
+  const reqSrc = readFileSync(new URL('../src/functions/tests/appRequirements.ts', import.meta.url), 'utf8')
+  const sql = reqSrc.slice(reqSrc.indexOf('export async function loadRequirementsWithEvidence'))
+  const aliases = [...sql.slice(0, sql.indexOf('order by r.seq')).matchAll(/as\s+evidence_([a-z0-9_]+)/g)].map(m => m[1])
+  assert.ok(aliases.length >= 12, `only ${aliases.length} evidence aliases found — the scan has gone stale`)
+
+  const evSrc = readFileSync(new URL('../src/functions/tests/evidence.ts', import.meta.url), 'utf8')
+  const iface = evSrc.slice(evSrc.indexOf('export interface EvidenceRow'))
+  const body = iface.slice(0, iface.indexOf('\n}'))
+  // Comments carry field names in prose; strip them or the guard cries wolf on a mention.
+  const code = body.split('\n').filter(l => !/^\s*(\/\/|\*|\/\*)/.test(l)).join('\n')
+  const declared = new Set([...code.matchAll(/^\s*([a-z_][a-z0-9_]*)\??\s*:/gm)].map(m => m[1]))
+
+  const chkSrc = readFileSync(new URL('../src/functions/tests/appChecks.ts', import.meta.url), 'utf8')
+  const missing = aliases.filter(a => declared.has(a) && !chkSrc.includes(`r.evidence_${a}`))
+  assert.deepEqual(missing, [],
+    `THE LOADER SELECTS THESE AND THE GATE NEVER SEES THEM: ${missing.join(', ')}. ` +
+    'Each is projected by loadRequirementsWithEvidence and declared on EvidenceRow, but the ' +
+    'appChecks mapping does not read it — so it is written, queried, and dropped before the only ' +
+    'code that would act on it. tsc cannot catch this while the field is optional.')
+})
+
+test('H:no-surface-says-a-counted-proposal-is-uncounted: one fact, every surface', () => {
+  // FOUND BY AN INDEPENDENT VERIFIER, and it is the "fix all consumers" rule broken inside the very
+  // lane that inverted the rule. Two places tell the owner what a model-proposed row is worth:
+  // `checks.ts`'s must_have_coverage observed string, and `appRequirements.ts`'s evidenceResolve
+  // note. I updated the first and left the second reading "...awaiting your confirmation; they are
+  // shown but do not count toward the coverage gate" -- true until proposals began counting, and
+  // the exact opposite of `ruleEvidenceOf` afterwards.
+  //
+  // Nothing caught it because no test asserted that literal. This sweeps for the retired wording
+  // across BOTH source trees, so a third surface written later fails here rather than shipping a
+  // contradiction of the gate. Comments are stripped first: this file's own history records two
+  // guards that fired on a COMMENT and had to be rewritten, and the comments above the fixed line
+  // deliberately QUOTE the retired phrase to explain it.
+  const RETIRED = [
+    'awaiting your confirmation',
+    'do not count toward the coverage gate',
+    'does not count toward coverage until',
+  ]
+  const files = [
+    '../src/functions/tests/checks.ts',
+    '../src/functions/tests/appRequirements.ts',
+    '../../app/src/screens/PostingAnalysis.jsx',
+    '../../app/src/postingAnalysis.js',
+  ]
+  const offenders = []
+  for (const rel of files) {
+    const src = readFileSync(new URL(rel, import.meta.url), 'utf8')
+    // Strip line comments and block comments. A phrase inside a comment is the RECORD of the fix,
+    // not the defect -- and a guard that cannot tell those apart is the cry-wolf failure this repo
+    // deleted a whole linter over.
+    const code = src
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      .split('\n').filter((l) => !/^\s*(\/\/|\*)/.test(l)).join('\n')
+      .replace(/\{\/\*[\s\S]*?\*\/\}/g, '')
+    for (const phrase of RETIRED) {
+      if (code.includes(phrase)) offenders.push(`${rel}: "${phrase}"`)
+    }
+  }
+  assert.deepEqual(offenders, [],
+    'A SURFACE STILL TELLS THE OWNER A COUNTED ROW IS EXCLUDED: ' + offenders.join(', ') + '. ' +
+    'A model-proposed row counts toward must_have_coverage until vetoed (ruleEvidenceOf). Any ' +
+    'sentence saying it is awaiting confirmation, or does not count, contradicts the number beside it.')
+})
+
+test('H:one-composite-formula: there is ONE, and both call sites call it', () => {
+  // REPLACES a guard an independent verifier proved INERT (VERIFY-ats-keyword-score-1.md, C9).
+  //
+  // The old one extracted the three `?? 0.x` literals from `appReviewer.ts` in textual order and
+  // compared them to DEFAULT_WEIGHTS. The verifier broke it by SWAPPING WHICH COMPONENT EACH WEIGHT
+  // MULTIPLIES, leaving the literals in the same order — 1050/1050 passed with the reviewer weighting
+  // must_have at 0.3 and keyword at 0.5. It asserted "the same numbers are textually present", not
+  // "the formulas agree".
+  //
+  // THE FIX WAS STRUCTURAL, NOT A BETTER REGEX: `weightedComposite` is now the only implementation
+  // and both sites call it. So this guard no longer polices agreement between two copies — it
+  // polices that there is still only ONE, which is a claim a source grep can actually settle.
+  const rev = readFileSync(new URL('../src/functions/tests/appReviewer.ts', import.meta.url), 'utf8')
+  const code = rev.split('\n').filter(l => !/^\s*(\/\/|\*)/.test(l)).join('\n')
+  assert.match(code, /weightedComposite\(/, 'the reviewer must CALL the shared formula')
+  // No second implementation: nothing outside artifactScore.ts may multiply a component by a weight.
+  assert.ok(!/\*\s*\(?s\.weights\?\.(mustHave|keyword|seniority)/.test(code),
+    'THE REVIEWER HAS ITS OWN WEIGHTED SUM AGAIN. Two implementations cannot be kept in sync by a ' +
+    'guard — the last one that tried was defeated by reordering which weight hit which component.')
+
+  // The shared function refuses a partial composite, at the only place that can now decide it.
+  assert.equal(weightedComposite(50, 67, 95), Math.round(50 * 0.5 + 67 * 0.3 + 95 * 0.2))
+  for (const partial of [[null, 67, 95], [50, null, 95], [50, 67, null]]) {
+    assert.equal(weightedComposite(...partial), null,
+      `a composite was produced from ${JSON.stringify(partial)} — two of three is not a composite`)
+  }
+  // ...and computeArtifactScore routes through it rather than keeping its own copy.
+  const viaFn = computeArtifactScore({
+    requirements: [],
+    checks: [{ check_key: 'must_have_coverage', engine: 'deterministic', state: 'fail',
+               observed: '3/6 must-haves evidenced', offenders: [] }],
+    keyword: { covered: 67, scoreable: 100 }, seniority: 95,
+  })
+  assert.equal(viaFn.composite, weightedComposite(50, 67, 95),
+    'computeArtifactScore must produce exactly what the shared formula produces')
+})
+
+test('H:reviewer-auto-is-off-by-default: an LLM call per artifact is the owner\'s spend', () => {
+  // FOUR model calls per packet build. Defaulting this ON would spend the owner's money on every
+  // build without them choosing it — the same reason `chk_coverage_judge` was defaulted OFF. R1/R7:
+  // at the seeded default a build must behave byte-identically to before.
+  assert.equal(DEFAULT_THRESHOLDS.reviewerAuto, false,
+    'the reviewer must not run unless the owner turned it on')
+  const prefs = readFileSync(new URL('../src/functions/tests/checkPrefs.ts', import.meta.url), 'utf8')
+  assert.match(prefs, /add column if not exists chk_reviewer_auto\s+boolean not null default \$\{DEFAULT_THRESHOLDS\.reviewerAuto\}/,
+    'the column default must be DERIVED from the threshold, not a second literal that can drift')
+  // A NULL from a row written before the column existed must read as OFF, never as "enabled".
+  assert.match(prefs, /reviewerAuto: r\.chk_reviewer_auto === true/,
+    'a truthy test would read a pre-existing NULL as enabled for owners who never opted in')
+})
+
+test('H:reviewer-follows-the-checks: never called when evaluateArtifact threw', () => {
+  // `runReview` refuses with "run the deterministic checks first" when no artifact_gate row exists,
+  // so calling it after a throw produces a SECOND failure describing the same root cause and buries
+  // the first. R3. Structural: the call must be gated on the success flag, in the same expression.
+  const src = readFileSync(new URL('../src/functions/tests/appPackets.ts', import.meta.url), 'utf8')
+  const i = src.indexOf('await runReview(')
+  assert.ok(i > 0, 'the reviewer has no caller again — this is the defect the wiring fixed')
+  const guard = src.slice(Math.max(0, i - 400), i)
+  assert.match(guard, /if \(reviewerOn && checksRan\)/,
+    'the review call must require BOTH the owner setting and a successful deterministic pass')
+  // ...and its own try/catch, so one model outage cannot cost the other three artifacts their
+  // checks and scores. R5 — the isolation pattern is extended, never replaced by a build-wide catch.
+  const after = src.slice(i - 60, i + 400)
+  assert.match(after, /try \{ await runReview\([\s\S]*?\}\s*catch \(e\) \{[\s\S]*?checkWarnings\.push/,
+    'a failed review must be a warning on that artifact, not an exception that ends the build')
+})
+
+test('H:reviewer-outcome-is-reported: a silent reviewer is how the score stayed null', () => {
+  // The whole reason this feature was invisible for weeks is that nothing said whether it ran. R4:
+  // the build response reports it beside every other spend, and the three states stay DISTINCT —
+  // not enabled, enabled-but-everything-failed, and graded — because collapsing them into one
+  // boolean is how "the score is still null" becomes un-diagnosable again.
+  const src = readFileSync(new URL('../src/functions/tests/appPackets.ts', import.meta.url), 'utf8')
+  assert.match(src, /review: \{ enabled: reviewerOn, artifacts: reviewed \}/,
+    'the build response must say whether the reviewer ran and on what')
+  assert.match(src, /const reviewed: string\[\] = \[\]/, 'and it must be populated from real calls')
+})
+
+test('H:reviewer-setting-joins-the-existing-family: no second settings surface', () => {
+  // "Extend, don't duplicate". The chk_* family already has a column set, a reader, a whitelisted
+  // writer and a Settings screen; a new toggle that invented any of those would be the parallel
+  // system this repo has been bitten by before. The writer whitelist is DERIVED from the ensure
+  // statement, so being in that statement is what makes the knob writable — no list to update.
+  const prefs = readFileSync(new URL('../src/functions/tests/checkPrefs.ts', import.meta.url), 'utf8')
+  assert.match(prefs, /chk_reviewer_auto/, 'the setting must live in the chk_* family')
+  const sel = prefs.slice(prefs.indexOf('chk_coverage_judge, chk_coverage_judge_max'))
+  assert.match(sel.slice(0, 300), /chk_reviewer_auto/,
+    'the column must be in the SELECT too — a column the loader does not project is unreadable, ' +
+    'which is the exact shape H:every-chk-column-is-selected was written for')
+})
+
+// ── the fixture instrument: it must SEE the surface it scores ────────────────────────────────────
+// Measured 2026-09-02: `comparison` was absent from every fixture this pipeline ever built, and that
+// ONE key made ~19 of the 27 "missing panels" on the jd step phantom for weeks. The guards below
+// assert the invariants, not that incident. Evidence: docs/qc-evidence/PROTOTYPE-COVERAGE.md 16a,
+// docs/qc-evidence/AC-fixture-comparison.md.
+
+const REPO = new URL('../../', import.meta.url).pathname
+
+test('H:fixture-requirements-is-the-api-body: a captured route is passed through, never reshaped', async () => {
+  const { writeFileSync, mkdtempSync, readFileSync } = await import('node:fs')
+  const { execFileSync } = await import('node:child_process')
+  const { tmpdir } = await import('node:os')
+  const dir = mkdtempSync(`${tmpdir()}/fx-`)
+  const OPP = '00000000-0000-0000-0000-00000000dead'
+
+  // The captured body carries keys the builder's DERIVED shape does not, and a `total` that
+  // deliberately DISAGREES with requirements.length - so any re-derivation is visible.
+  const apiRequirements = {
+    oppId: OPP, requirements: [{ seq: 1, kind: 'must_have', text: 'a' }],
+    total: 99, located: 7, evidenced: 1, unevidenced: 0,
+    comparison: { resolved: true, dimensions: [{ key: 'k', fit: 'strong' }], summary: { graded: 1 }, set: { keys: ['k'] } },
+  }
+  writeFileSync(`${dir}/raw.json`, JSON.stringify({
+    packet: { id: 'p', status: 'review' }, opp: { id: OPP, owner_email: 'o@e.io' },
+    artifacts: [{ id: 'a1', packet_id: 'p', type: 'resume', status: 'review' }],
+    insertions: [], corrections: [],
+    requirements: [{ seq: 1, opp_id: OPP, kind: 'must_have', text: 'a', char_start: 0 }],
+    gates: [], checks: [{ artifact_id: 'a1', name: 'c', pass: true }],
+    swaps: [{ packet_id: 'p', seq: 1, action: 'kept' }],
+    checkPrefs: { owner_email: 'o@e.io', chk_skill_max_chars: 24 },
+    apiRequirements,
+  }))
+  execFileSync('node', [`${REPO}scripts/build-fixtures.mjs`, '--raw', `${dir}/raw.json`,
+    '--opp', OPP, '--out', `${dir}/f.json`], { cwd: REPO })
+  const out = JSON.parse(readFileSync(`${dir}/f.json`, 'utf8'))
+
+  // THE INVARIANT: identical, key for key. `total: 99` surviving is what proves nothing re-derived it.
+  assert.deepStrictEqual(out[`/opportunity/${OPP}/requirements`], apiRequirements)
+})
+
+test('H:canary-refuses-a-hollow-comparison: a present-but-empty comparison fails like an absent one', async () => {
+  const { execFileSync } = await import('node:child_process')
+
+  // THE SHIPPED PREDICATE, exercised - not a local copy of it. `assertFixtureCanSee` calls
+  // process.exit, so each stub is fed to it in a CHILD process and the exit code is the verdict.
+  // An earlier draft of this test re-implemented the predicate inline and would have passed with
+  // the guard reverted: it graded a copy. That is the inert-guard failure this file exists to stop,
+  // committed inside a guard against inert guards.
+  const verdict = (comparison) => {
+    const fixtures = {
+      '/search-prefs': { checks: { skill_max_chars: 24 } },
+      '/swaps': { swaps: [] },
+      '/opportunity/x/requirements': comparison === undefined ? {} : { comparison },
+    }
+    const src = `import('${REPO}scripts/lib/fixture-canary.mjs')`
+      + `.then(m => { m.assertFixtureCanSee(${JSON.stringify(fixtures)}, 'test'); process.exit(0) })`
+    try { execFileSync('node', ['-e', src], { stdio: 'pipe' }); return 0 } catch (e) { return e.status }
+  }
+
+  // Every hollow stub must be REFUSED. `{resolved:true,dimensions:[]}` is the one a `!!comparison`
+  // check lets through, and it is a REAL API body - what the route returns for an opportunity
+  // nobody has resolved. Accepting it leaves the same ~19 panels missing.
+  for (const stub of [
+    undefined,
+    {},
+    { resolved: true, dimensions: [] },
+    { resolved: false, dimensions: [{ key: 'x' }] },
+    { resolved: true, dimensions: [{ key: 'x' }], summary: null },
+    { resolved: true, dimensions: [{ key: 'x' }], summary: { graded: 1 }, set: { keys: [] } },
+  ]) {
+    assert.equal(verdict(stub), 1, `hollow comparison ACCEPTED: ${JSON.stringify(stub) || 'undefined'}`)
+  }
+
+  // ...and a real resolved one must be allowed through, or the canary blocks every measurement.
+  assert.equal(verdict({
+    resolved: true, dimensions: [{ key: 'k', fit: 'strong' }],
+    summary: { graded: 1 }, set: { keys: ['k'] },
+  }), 0, 'a real resolved comparison was refused')
+})
+
+test('H:no-dimension-logic-outside-api: the dimension brain has ONE home', async () => {
+  const { readdirSync, readFileSync, statSync } = await import('node:fs')
+  // Comments stripped first - this file and build-fixtures.mjs both DISCUSS the catalogue at
+  // length, and a guard that fires on the sentence explaining it is the cry-wolf failure.
+  const strip = (t) => t.replace(/\/\*[\s\S]*?\*\//g, '').split('\n')
+    .map((l) => l.replace(/^\s*\/\/.*$/, '')).join('\n')
+  const banned = /\b(DIMENSION_CATALOGUE|DIMENSION_SETS|comparisonStaleness|roleFamilyOf|dimensionsFor)\b/
+  const walk = (d) => readdirSync(d).flatMap((n) => {
+    const p = `${d}/${n}`
+    if (statSync(p).isDirectory()) return walk(p)
+    return /\.(mjs|js)$/.test(n) ? [p] : []
+  })
+  const offenders = walk(`${REPO}scripts`).filter((p) => banned.test(strip(readFileSync(p, 'utf8'))))
+  assert.deepEqual(offenders, [],
+    'dimension logic copied into scripts/ - a re-derived fixture measures itself')
+})
+
+// ── the fixture instrument, part 2: it must answer the SAME QUESTION production answers ──────────
+// Measured 2026-09-02 against the live DB (connector boost-pg-mcp-write). The route
+// `artifactChecksGet` (api/src/functions/tests/appChecks.ts) scopes BOTH check_result and
+// artifact_score to the gate's run; fixture-refresh.yml scoped neither, and pulled no score at all.
+// Consequence: artifact cfdd82e7 returned 271 check rows across 26 distinct check_key where the
+// route sends 25, screens/app-send.png reads "112 items to fix" where live reads "14", and the
+// drawer's Match tab said "No score has been computed for this asset yet" about an asset the gate
+// in the SAME payload called Blocked. docs/qc-evidence/PROTOTYPE-COVERAGE.md 17d + 17f.
+
+test('H:fixture-checks-follow-the-gates-run: the dump asks the route\'s question, not a wider one', () => {
+  // A SOURCE GREP, deliberately: the behaviour under test is a SQL predicate inside a YAML heredoc
+  // that only a live Postgres can execute, and this suite has neither. What a grep CAN assert is
+  // the structural invariant that made the two payloads disagree - that the fixture's check_result
+  // and artifact_score reads are joined to artifact_gate on BOTH columns. (The predicate itself was
+  // executed: against production, returning 71 check rows where the unjoined form returns 239, and
+  // against a local PostgreSQL 16 seeded with three runs, returning 3 rows where the old form
+  // returned 8. Evidence: docs/qc-evidence/PROGRESS-fixture-parity.md.)
+  const yml = readFileSync(new URL('../../.github/workflows/fixture-refresh.yml', import.meta.url), 'utf8')
+  const strip = (t) => t.split('\n').filter((l) => !/^\s*(--|#)/.test(l)).join('\n')
+  const sql = strip(yml)
+
+  for (const [key, table] of [['checks', 'check_result'], ['scores', 'artifact_score']]) {
+    const i = sql.indexOf(`'${key}',`)
+    assert.ok(i > -1, `fixture-refresh.yml no longer selects '${key}' - the fixture cannot carry it`)
+    // The value expression runs until the NEXT top-level key of the json_build_object, or the end.
+    // (An earlier draft cut at the first `)),` and truncated the block to one line - the guard then
+    // failed on correct SQL, which is the cry-wolf failure this file's rule 2 forbids. Caught by
+    // running it, which is the only reason it is not in the shipped guard.)
+    const rest = sql.slice(i + key.length + 3)
+    const next = rest.search(/\n\s+'\w+',\s+\(select/)
+    const block = next > -1 ? rest.slice(0, next) : rest
+    assert.match(block, new RegExp(`from\\s+${table}\\s`),
+      `'${key}' must read ${table}`)
+    assert.match(block, /join\s+artifact_gate\s+g/,
+      `'${key}' must be joined to artifact_gate - without it the dump carries EVERY historical run, ` +
+      'which is how a locally-rendered Checks tab came to repeat every rule and read 112 items to fix')
+    assert.match(block, /g\.artifact_id\s*=\s*\w+\.artifact_id\s+and\s+g\.run_id\s*=\s*\w+\.run_id/,
+      `'${key}' must join on BOTH artifact_id AND run_id. artifact_id alone re-admits every run; ` +
+      'run_id alone is not a predicate at all')
+    // Not "the latest by created_at". That is a DIFFERENT question - it disagrees with the gate the
+    // moment a run finishes after the one the gate was written from - and the brief for this fix
+    // named it as the wrong answer specifically.
+    assert.doesNotMatch(block, /order\s+by\s+\w*\.?(created_at|computed_at)\s+desc\s+limit\s+1\b/,
+      `'${key}' must follow the GATE's run, never "the latest run"`)
+  }
+
+  // history is the ONE read that is deliberately NOT run-scoped, because the route's is not either:
+  // `where artifact_id=$1 order by computed_at desc limit 10`, unconditional. Asserted explicitly so
+  // a future "make it consistent" edit cannot quietly break parity in the name of tidiness.
+  const h = sql.slice(sql.indexOf("'scoreHistory',"))
+  assert.match(h.slice(0, 600), /order\s+by\s+s\.computed_at\s+desc\s+limit\s+10/,
+    'scoreHistory must be the route\'s last-10-by-computed_at, per artifact')
+  assert.match(h.slice(0, 600), /cross\s+join\s+lateral/,
+    'the cap must be PER ARTIFACT - a plain `limit 10` over the packet starves four artifacts to feed one')
+})
+
+test('H:fixture-heredoc-has-no-backticks: an unquoted heredoc runs what you put in backticks', () => {
+  // NOT hypothetical. `git show HEAD~:...` had `-- `/search-prefs`.checks` inside `<<SQL`, and
+  // running that step verbatim under bash printed:
+  //     /tmp/step_before.sh: line 4: /search-prefs: No such file or directory
+  // i.e. bash EXECUTED /search-prefs while expanding the SQL. It was harmless only because the pair
+  // was balanced and the path does not exist; an odd number of backticks swallows SQL, and a
+  // backtick around anything that IS a command runs it on the runner with the DB password in env.
+  const yml = readFileSync(new URL('../../.github/workflows/fixture-refresh.yml', import.meta.url), 'utf8')
+  const body = yml.slice(yml.indexOf('<<SQL'), yml.indexOf('\n          SQL\n'))
+  assert.ok(body.length > 100, 'could not locate the SQL heredoc - this guard has gone blind')
+  const offenders = body.split('\n').map((l, i) => [i, l]).filter(([, l]) => l.includes('`'))
+  assert.deepEqual(offenders, [],
+    'backtick inside the unquoted SQL heredoc - bash will treat it as command substitution')
+})
+
+test('H:fixture-carries-the-score: the instrument refuses a payload that contradicts its own gate', async () => {
+  const { writeFileSync, mkdtempSync } = await import('node:fs')
+  const { execFileSync } = await import('node:child_process')
+  const { tmpdir } = await import('node:os')
+  const OPP = '00000000-0000-0000-0000-00000000beef'
+
+  // THE SHIPPED SCRIPT, run in a child process, so the exit code is the verdict - the same shape as
+  // H:canary-refuses-a-hollow-comparison, and for the same reason: a test that re-implements the
+  // predicate grades a copy of itself and passes with the guard reverted.
+  const build = (dump) => {
+    const dir = mkdtempSync(`${tmpdir()}/fxs-`)
+    writeFileSync(`${dir}/raw.json`, JSON.stringify(dump))
+    try {
+      execFileSync('node', [`${REPO}scripts/build-fixtures.mjs`, '--raw', `${dir}/raw.json`,
+        '--opp', OPP, '--out', `${dir}/f.json`], { cwd: REPO, stdio: 'pipe' })
+      return { code: 0, err: '', out: JSON.parse(readFileSync(`${dir}/f.json`, 'utf8')) }
+    } catch (e) { return { code: e.status, err: String(e.stderr || ''), out: null } }
+  }
+  const base = (over) => ({
+    packet: { id: 'p', status: 'review' }, opp: { id: OPP, owner_email: 'o@e.io' },
+    artifacts: [{ id: 'a1', packet_id: 'p', type: 'resume', status: 'review' }],
+    insertions: [], corrections: [],
+    requirements: [{ seq: 1, opp_id: OPP, kind: 'must_have', text: 'a', char_start: 0 }],
+    gates: [{ artifact_id: 'a1', run_id: 'r3', gate: 'fail', attention_count: 1 }],
+    checks: [{ artifact_id: 'a1', run_id: 'r3', check_key: 'skill_char_limit', engine: 'deterministic', state: 'fail' }],
+    scores: [{ artifact_id: 'a1', run_id: 'r3', composite: 89, band: 'strong', must_have_coverage: 100 }],
+    scoreHistory: [{ artifact_id: 'a1', composite: 89, band: 'strong', must_have_coverage: 100, computed_at: '2026-01-03' }],
+    swaps: [{ packet_id: 'p', seq: 1, action: 'kept' }],
+    checkPrefs: { owner_email: 'o@e.io', chk_skill_max_chars: 24 },
+    apiRequirements: {
+      oppId: OPP, requirements: [], total: 0, located: 0,
+      comparison: { resolved: true, dimensions: [{ key: 'k', fit: 'strong' }], summary: { graded: 1 }, set: { keys: ['k'] } },
+    },
+    ...over,
+  })
+
+  // 1. A COMPLETE dump is written, and the score reaches the key the client reads.
+  const ok = build(base())
+  assert.equal(ok.code, 0, 'a complete dump was refused - the guard cries wolf')
+  const r = ok.out['/artifact/a1/checks-result']
+  assert.equal(r.score.composite, 89, 'the score never reached /checks-result')
+  assert.equal(r.history.length, 1, 'the history never reached /checks-result')
+  // The route projects FOUR columns. artifact_id rides along in the dump purely to route the row and
+  // must be stripped: a fixture carrying MORE than production sends is a parity defect in the other
+  // direction - a panel could render locally off a field the real route never delivers.
+  assert.deepEqual(Object.keys(r.history[0]).sort(),
+    ['band', 'composite', 'computed_at', 'must_have_coverage'],
+    'history rows must carry exactly the four columns appChecks.ts projects')
+
+  // 2. THE SCORE ABSENT - the §17f defect - must be REFUSED, not warned about.
+  assert.equal(build(base({ scores: [] })).code, 1,
+    'a gated artifact with no score was accepted; the Match tab would say "no score has been ' +
+    'computed" about an asset the same payload calls Blocked')
+
+  // 3. THE PREDICATE MUST BE NARROW ENOUGH NOT TO CRY WOLF. An artifact with NO GATE legitimately
+  //    has no score - the route returns `score: null` for it - so the SCORE rule must stay silent.
+  //    Asserted on the MESSAGE, not the exit code: an un-gated dump also trips the pre-existing
+  //    `checkResults` rule, so a bare `code === 0` here would be testing that other rule and would
+  //    pass with this one reverted. (Found by running it: the first draft asserted code 0 and failed
+  //    for exactly that reason.)
+  const ungated = build(base({ gates: [], scores: [], scoreHistory: [] }))
+  assert.ok(!/artifact_score/.test(ungated.err),
+    'the score rule fired for an artifact with no gate, whose correct state IS having no score:\n'
+    + ungated.err)
+
+  // 4. CHECKS NOT SCOPED TO THE GATE'S RUN - the §17d defect - must be REFUSED. The signature needs
+  //    no DB: the route orders one run by check_key, so a repeated check_key is impossible in
+  //    production and proves the dump is every run at once.
+  assert.equal(build(base({ checks: [
+    { artifact_id: 'a1', run_id: 'r2', check_key: 'skill_char_limit', engine: 'deterministic', state: 'fail' },
+    { artifact_id: 'a1', run_id: 'r3', check_key: 'skill_char_limit', engine: 'deterministic', state: 'fail' },
+  ] })).code, 1, 'a dump carrying the same check_key twice for one artifact was accepted')
+})
+
+test('H:fixture-score-gap-is-per-artifact: one starved asset among scored ones must still refuse', async () => {
+  // FOUND BY AN INDEPENDENT VERIFIER, not by the author. The first version of this predicate fired
+  // only when NOT ONE gated artifact carried a score, so a PARTIAL dump - 3 scored, 1 starved -
+  // passed silently and the starved asset's Match tab lied about its own gate.
+  //
+  // The author's first instinct was to reject the tightening on the theory that a gated artifact can
+  // legitimately have no score row, making the strict form cry wolf. PRODUCTION SETTLED IT INSTEAD:
+  // packet 85cee965 read live 2026-09-02 has FOUR gated artifacts and all four carry a score row
+  // (three with a null composite, one with 89); only the un-gated `video` artifact has none, and
+  // that case is exempt by the route's own `const score = g ? ... : null`. So the strict form is
+  // what production actually looks like.
+  //
+  // Runs the SHIPPED script in a child process on purpose: a test that re-implements the predicate
+  // grades a copy of itself and passes with the guard reverted.
+  const { writeFileSync, mkdtempSync } = await import('node:fs')
+  const { execFileSync } = await import('node:child_process')
+  const { tmpdir } = await import('node:os')
+  const OPP = '00000000-0000-0000-0000-0000000partial'.slice(0, 36)
+  const dump = {
+    packet: { id: 'p', status: 'review' }, opp: { id: OPP, owner_email: 'o@e.io' },
+    artifacts: [{ id: 'a1', packet_id: 'p', type: 'resume', status: 'review' },
+      { id: 'a2', packet_id: 'p', type: 'cover', status: 'review' }],
+    insertions: [], corrections: [],
+    requirements: [{ seq: 1, opp_id: OPP, kind: 'must_have', text: 'a', char_start: 0 }],
+    // BOTH gated. a2 is the starved one.
+    gates: [{ artifact_id: 'a1', run_id: 'r3', gate: 'fail', attention_count: 1 },
+      { artifact_id: 'a2', run_id: 'r4', gate: 'fail', attention_count: 1 }],
+    checks: [{ artifact_id: 'a1', run_id: 'r3', check_key: 'skill_char_limit', engine: 'deterministic', state: 'fail' },
+      { artifact_id: 'a2', run_id: 'r4', check_key: 'word_counts', engine: 'deterministic', state: 'fail' }],
+    scores: [{ artifact_id: 'a1', run_id: 'r3', composite: 89, band: 'strong', must_have_coverage: 100 }],
+    scoreHistory: [{ artifact_id: 'a1', composite: 89, band: 'strong', must_have_coverage: 100, computed_at: '2026-01-03' }],
+    swaps: [{ packet_id: 'p', seq: 1, action: 'kept' }],
+    checkPrefs: { owner_email: 'o@e.io', chk_skill_max_chars: 24 },
+    apiRequirements: { oppId: OPP, requirements: [], total: 0, located: 0,
+      comparison: { resolved: true, dimensions: [{ key: 'k', fit: 'strong' }], summary: { graded: 1 }, set: { keys: ['k'] } } },
+  }
+  const dir = mkdtempSync(`${tmpdir()}/fxp-`)
+  writeFileSync(`${dir}/raw.json`, JSON.stringify(dump))
+  let code = 0, err = ''
+  try {
+    execFileSync('node', [`${REPO}scripts/build-fixtures.mjs`, '--raw', `${dir}/raw.json`,
+      '--opp', OPP, '--out', `${dir}/f.json`], { cwd: REPO, stdio: 'pipe' })
+  } catch (e) { code = e.status; err = String(e.stderr || '') }
+  assert.notEqual(code, 0,
+    'a dump where one of two GATED artifacts has no score was WRITTEN - the partial case slips '
+    + 'through and that asset will contradict its own gate on screen')
+  assert.match(err, /artifact_score missing on 1 of 2/,
+    `the refusal must name the ratio and the offender so a reader knows what to fix; got: ${err}`)
+})
+
+test('H:committed-fixture-passes-the-canary: the file every render uses must satisfy the rules the canary enforces', async () => {
+  const { execFileSync } = await import('node:child_process')
+
+  // WHY THIS EXISTS, and why the two tests above did not cover it.
+  //
+  // `H:canary-refuses-a-hollow-comparison` proves the canary's RULES are right. The build-fixtures
+  // passthrough test proves the BUILDER is right. Neither looks at `docs/qc-evidence/fixtures.json`
+  // - the artifact every `render-app.mjs` / `compare-ui.mjs` invocation actually loads. So a canary
+  // rule can land, the committed fixture can stop satisfying it, and the suite stays green while
+  // the file is unusable.
+  //
+  // That is not hypothetical. Measured 2026-09-02 in ONE measurement pass, twice:
+  //   1. the committed fixture carried `{prefs:{}}` with no `checks`, and the render refused;
+  //   2. mid-pass a parallel lane added the `comparison` rule, and the just-rebuilt fixture refused
+  //      too - its dump predated `apiRequirements` being captured.
+  // Each cost a full `fixture-refresh.yml` round trip, and each was discovered THREE tool calls into
+  // a measurement rather than by the suite. The canary did its job both times; the point of this
+  // case is that the suite should have said so first.
+  //
+  // THE SHIPPED PREDICATE, in a child process - `assertFixtureCanSee` calls `process.exit`, so the
+  // exit code is the verdict. Same technique as the hollow-comparison case above, and for the same
+  // reason: grading a local copy of the rules is how a guard goes inert.
+  const src = `import('${REPO}scripts/lib/fixture-canary.mjs').then(m => {`
+    + `const fx = JSON.parse(require('fs').readFileSync('${REPO}docs/qc-evidence/fixtures.json','utf8'));`
+    + `m.assertFixtureCanSee(fx, 'committed fixtures.json'); process.exit(0) })`
+  let status = 0, stderr = ''
+  try { execFileSync('node', ['-e', src], { stdio: 'pipe' }) }
+  catch (e) { status = e.status; stderr = String(e.stderr || '') }
+
+  assert.equal(status, 0,
+    'docs/qc-evidence/fixtures.json NO LONGER SATISFIES THE CANARY, so every render measured against '
+    + 'it is a claim about the fixture rather than about the app. Rebuild it: trigger '
+    + 'fixture-refresh.yml, then `git show origin/ui-fixtures:raw-dump.json > /tmp/raw.json` and '
+    + '`node scripts/build-fixtures.mjs --raw /tmp/raw.json --opp <oppId> --out '
+    + `docs/qc-evidence/fixtures.json\`. The canary said:\n${stderr}`)
+})
+
+test('H:attribution-follows-the-posting-line-not-the-keyword: a swap row never says which keyword drove it', () => {
+  // WHY THIS EXISTS. `swap_decision.requirement_id` looks like it answers "which keyword caused this
+  // swap". It does not, and the gap is invisible from the column name — which is exactly how a
+  // reader (this one, on 2026-09-02) concludes the two correlate and proposes UI that says so.
+  //
+  // MEASURED on the live eMoney packet, 30 `swapped` rows, 17 carrying a `requirement_id`:
+  //   **8 of those 17 share ZERO tokens** between the requirement's `model_keyword` and the
+  //   `to_label` that replaced the phrase — `AI governance` against `Risk Management`,
+  //   `lean governance` against `Operational Excellence`, at confidence **1.000**.
+  // Confidence is high in those rows because it scores the replacement against the POSTING LINE.
+  // The keyword is a sibling field on whichever line won; it took no part in the match.
+  //
+  // This is a BEHAVIOURAL demonstration rather than a source grep, deliberately: a grep forbidding
+  // `model_keyword` near `attribute` would fire on a legitimate future change (threading the keyword
+  // in to build the judge's SHORTLIST is planned — see docs/qc-evidence/SCOPE-swap-driving-keyword.md).
+  // What must never change is that the ATTRIBUTION itself is decided by the posting line.
+  const text = 'Global Engineering Teams'
+
+  // Matches on its VERBATIM, and its keyword is irrelevant to the text.
+  const byPostingLine = { seq: 1, kind: 'responsibility', item_text: 'global engineering organization',
+    verbatim: 'global engineering organization', model_keyword: 'zzz unrelated token' }
+  // The inverse: its KEYWORD is literally the text, but its verbatim has nothing to do with it.
+  const byKeyword = { seq: 2, kind: 'responsibility', item_text: 'quarterly finance compliance reporting',
+    verbatim: 'quarterly finance compliance reporting', model_keyword: 'Global Engineering Teams' }
+
+  const got = attribute(text, [byPostingLine, byKeyword])
+
+  assert.ok(got, 'the posting-line requirement clears the threshold, so an attribution is expected')
+  assert.equal(got.seq, 1,
+    'attribution must follow the VERBATIM POSTING LINE. It picked the requirement whose keyword '
+    + 'matched instead, which would make `requirement_id` a keyword link and the UI claim '
+    + '"this keyword took the place of X" true — it is not, and 8 of 17 live rows prove it')
+  assert.equal(attribute(text, [byKeyword]), null,
+    'a requirement whose ONLY connection to the text is its `model_keyword` must not attribute at '
+    + 'all — the keyword is not an input to the match')
+  assert.ok(similarity(text, byPostingLine.verbatim) >= ATTRIBUTION_THRESHOLD,
+    'the fixture must actually exercise the threshold, or this test proves nothing')
 })

@@ -432,7 +432,7 @@ const checkOf = (rs, key) => rs.find(r => r.check_key === key)
 test('P3-15 the loop targets evidence_placed, never must_have_coverage', () => {
   assert.equal(CLOSE_CHECK_KEY, 'evidence_placed')
   // The denominator function must read the document-side check and ignore the profile-side one.
-  const evidenced = { profileReadable: true, bySeq: { 1: { excerpt: 'ran a platform modernization programme', source_label: 'work history' } } }
+  const evidenced = { profileReadable: true, bySeq: { 1: { excerpt: 'ran a platform modernization programme', source_label: 'work history', method: 'exact' } } }
   const v = coverageView(placedRun('nothing relevant here at all', evidenced))
   assert.equal(v.judged, true, 'the loop must be able to judge placement')
   assert.deepEqual(v.openSeqs, [1], 'the evidenced-but-unstated requirement is the loop\'s work')
@@ -441,7 +441,7 @@ test('P3-15 the loop targets evidence_placed, never must_have_coverage', () => {
 })
 
 test('P3-15 a rewrite MOVES the check the loop targets — the whole premise', () => {
-  const evidenced = { profileReadable: true, bySeq: { 1: { excerpt: 'ran a platform modernization programme', source_label: 'work history' } } }
+  const evidenced = { profileReadable: true, bySeq: { 1: { excerpt: 'ran a platform modernization programme', source_label: 'work history', method: 'exact' } } }
   const before = checkOf(placedRun('I enjoy sailing and baking bread.', evidenced), 'evidence_placed')
   const after = checkOf(placedRun(COVERAGE_REQ, evidenced), 'evidence_placed')
   assert.notEqual(before.state, 'pass', 'a document that omits the evidenced claim must not pass')
@@ -471,7 +471,7 @@ test('P3-15 a requirement too short to judge is in neither the numerator nor the
     company: 'Trinnex',
     requirements: [{ id: 'r1', seq: 1, verbatim: THIN, item_text: THIN, kind: 'must_have' }],
     postingText: THIN, profileText: 'a profile',
-    evidence: { profileReadable: true, bySeq: { 1: { excerpt: 'led operations', source_label: 'work history' } } },
+    evidence: { profileReadable: true, bySeq: { 1: { excerpt: 'led operations', source_label: 'work history', method: 'exact' } } },
   })
   const v = coverageView(rs)
   assert.deepEqual(v.openSeqs, [], 'a too-thin requirement must never enter the loop\'s denominator')

@@ -17,8 +17,9 @@ import {
   coverageCards, requirementState, openSeqs, offenderSeq, qcStepState, qcStepDone, packetGate,
   loopsModel, rowsForRequirement, swapsForRequirement, pctWidth, packetReadiness,
   offendersByField, offendersForField, fieldSeverities,
-  railDecisions, DECISION_NOTE, packetFailList, qcSummaryModel, NO_ASSETS_REASON, firstFixTarget, listOwnersFromArtifacts, requirementUsage } from '../src/qcRail.js'
-import { scoreParts } from '../src/assetGate.js'
+  railDecisions, DECISION_NOTE, packetFailList, qcSummaryModel, NO_ASSETS_REASON, firstFixTarget, listOwnersFromArtifacts, requirementUsage, swapAskWhy,
+  swapUndo, ATTENTION_ORDER, attentionRank, severityFor, firstFixFinding, firstOffenderField, keepAvailability } from '../src/qcRail.js'
+import { scoreParts, FIELD_LABEL } from '../src/assetGate.js'
 import { TALLY_SCORE_DEFER } from '../src/postingAnalysis.js'
 
 const SRC = new URL('../src/', import.meta.url)
@@ -1533,7 +1534,13 @@ test('H:first-fix-target-reads-packetFailList-not-a-second-walk', () => {
   const expected = items.find((i) => i.mergeField)
   const got = firstFixTarget(entries, 'a1')
   assert.ok(expected, 'precondition: the fixture must produce at least one openable finding')
-  assert.deepEqual(got, { artifactId: expected.artifactId, mergeField: expected.mergeField })
+  // The target now also NAMES the finding it opens, so the badge cannot title itself from a
+  // different row than the one the click lands on. Asserted field by field rather than by widening
+  // the deepEqual, so a future key cannot be added silently.
+  assert.equal(got.artifactId, expected.artifactId)
+  assert.equal(got.mergeField, expected.mergeField)
+  assert.equal(got.check_key, expected.check_key, 'the target must carry the check it opens')
+  assert.ok(got.title && typeof got.title === 'string', 'and its human label, from assetGate checkLabel')
 })
 
 test('H:first-fix-target-skips-a-finding-that-names-no-field', () => {
@@ -1683,4 +1690,437 @@ test('H:jd-field-link-is-wired-not-just-derived: the hop 4.1-20 built stays conn
   //    was guarded — dropping `usage &&` renders a link that navigates nowhere.
   assert.match(pa, /\{usage && onGoToFieldRef && \(/,
     'the link must render only when a swap names the requirement AND a navigator exists')
+})
+
+// ── SPEC 4.8-21 — `Ask why` on a swap row ───────────────────────────────────────────────────────
+
+test('H:ask-why-never-names-the-raw-list-enum: the question says "Skills 1", never "skills_1"', () => {
+  // THE DEFECT THIS EXISTS TO PREVENT, and it is one the prototype hands you. `evidence.jsx:233`
+  // interpolates `${r.list}` — correct THERE, where the prototype's fixture holds display names.
+  // In this app `swap_decision.list` is a CHECK-constrained enum (`api/.../schema.ts:567`:
+  // 'skills_1','skills_2','relevant_1','relevant_2','relevant_3'), so copying the prototype's
+  // sentence verbatim puts `skills_1` in front of the reader. That is the same class as
+  // `assetBlocks.js:765` — the THIRD render site, which shipped `swapped · owner` on a list item
+  // because a guard covered two of the three places a raw enum could reach the screen.
+  //
+  // The resolution is the one table: insertion.merge_field -> FIELD_LABEL (`assetGate.js:208`),
+  // which already heads the field, writes the correction sentences and labels the gate drawer.
+  const entries = [
+    { artifactId: 'r1', type: 'resume', label: 'Resume',
+      insertions: { insertions: [{ list: 'skills_1', merge_field: 'SkillsBullets1' }] } },
+  ]
+  const owners = listOwnersFromArtifacts(entries)
+  const ask = swapAskWhy({ list: 'skills_1', from_label: 'Stakeholder management', to_label: 'Cross-functional leadership' }, owners)
+
+  assert.equal(ask.text, 'Why did you change "Stakeholder management" in Skills 1?')
+  assert.equal(ask.artifactId, 'r1', 'the question must be bound to the asset that renders the list')
+  // The invariant, not the incident: NO list key may appear in a sentence a reader sees, whichever
+  // one the row names.
+  for (const key of ['skills_1', 'skills_2', 'relevant_1', 'relevant_2', 'relevant_3']) {
+    assert.ok(!ask.text.includes(key), `the seeded question leaks the raw list enum ${key}`)
+  }
+  // An `added` row has no original. It still names a real label and a real field - never `-`, which
+  // is what the Original column prints for it.
+  const added = swapAskWhy({ list: 'skills_1', from_label: null, to_label: 'Cross-functional leadership' }, owners)
+  assert.equal(added.text, 'Why did you add "Cross-functional leadership" to Skills 1?')
+  // A field FIELD_LABEL does not know still resolves to the slot name, never to the list enum.
+  const other = listOwnersFromArtifacts([{ artifactId: 'c1', label: 'Cover letter',
+    insertions: { insertions: [{ list: 'relevant_2', merge_field: '@SomeNewSlot' }] } }])
+  assert.equal(swapAskWhy({ list: 'relevant_2', from_label: 'A' }, other).text,
+    'Why did you change "A" in @SomeNewSlot?')
+
+  // ...and that fallback is DEFENSIVE ONLY, proven against the producer rather than assumed.
+  // `insertions.ts:20 LIST_FIELD_TO_LIST` is the only thing that ever writes `insertion.list`, and
+  // it writes it from exactly five merge fields. Every one of them must be a key FIELD_LABEL knows,
+  // or a real swap row would seed a sentence ending in a bare template slot. (CLAUDE.md 0b: "can
+  // the system PRODUCE your fixture?" - a guard that passes on a hand-made row the writers never
+  // emit has proven nothing.)
+  const producer = readFileSync(new URL('../../api/src/functions/tests/insertions.ts', import.meta.url), 'utf8')
+  const block = producer.slice(producer.indexOf('LIST_FIELD_TO_LIST'))
+  const fields = [...block.slice(0, block.indexOf('}')).matchAll(/^\s*(\w+):\s*'/gm)].map((m) => m[1])
+  // ASSERT THE SET, NOT THE COUNT (2026-08-30). This was `fields.length === 5` and it broke the day
+  // `ExpertiseBullets` legitimately joined the map. A bare count is a rubber stamp: the only repair
+  // it ever invites is bumping the number, which is exactly what someone does when a field is
+  // WRONGLY added or silently REMOVED. Naming the set costs the same line and says which fields.
+  assert.deepEqual(fields.slice().sort(),
+    ['ExpertiseBullets', 'RelevantBullets1', 'RelevantBullets2', 'RelevantBullets3',
+     'SkillsBullets1', 'SkillsBullets2'],
+    'the producer map did not parse, or its fields changed - re-read insertions.ts before trusting this')
+  for (const f of fields) {
+    assert.notEqual(FIELD_LABEL[f], undefined,
+      `insertion.list can be written for ${f}, but FIELD_LABEL does not name it - the question would end in a raw slot`)
+  }
+})
+
+test('H:ask-why-is-null-unless-it-has-an-artifact-to-be-about', () => {
+  // NO DEAD UI, and here it is also a hard requirement rather than a preference: `seedAssistant`
+  // (`PacketBuilder.jsx:765`) returns early without an artifactId — "never open a panel that cannot
+  // send", because `canSend` (`assistantPanel.js:116`) needs one. A swap row is PACKET-level and
+  // carries no artifact at all (`swap_decision` has no artifact_id column), so a row the map cannot
+  // place would render a button whose click does nothing whatsoever.
+  const owners = listOwnersFromArtifacts([{ artifactId: 'r1', label: 'Resume',
+    insertions: { insertions: [{ list: 'skills_1', merge_field: 'SkillsBullets1' }] } }])
+  // a list NO artifact renders
+  assert.equal(swapAskWhy({ list: 'relevant_3', from_label: 'A' }, owners), null)
+  // insertions not loaded yet — the map is {} by contract, not partial
+  assert.equal(swapAskWhy({ list: 'skills_1', from_label: 'A' }, {}), null)
+  assert.equal(swapAskWhy({ list: 'skills_1', from_label: 'A' }, null), null)
+  // a row naming nothing a question could be about
+  assert.equal(swapAskWhy({ list: 'skills_1', from_label: null, to_label: null }, owners), null)
+  assert.equal(swapAskWhy({ list: 'skills_1', from_label: '  ', to_label: '' }, owners), null)
+  // no list, no swap
+  assert.equal(swapAskWhy({ from_label: 'A' }, owners), null)
+  assert.equal(swapAskWhy(null, owners), null)
+})
+
+test('H:ask-why-seeds-the-panel-and-sends-nothing', () => {
+  // The whole row is a SPEC 4.11 substitution wearing a 4.8 name: the prototype's `onAsk` is the
+  // assistant-panel SEED and nothing else (`AC-packet-ui-final.md` §2f). A seeder that sends is a
+  // second edit path wearing a different name (`assistantPanel.js:74`), so the wiring is asserted
+  // structurally — a pure function cannot see whether the component calls `api.` next to it.
+  const jsx = stripComments(readSrc('screens/QcRail.jsx'))
+  const pb = stripComments(readSrc('screens/PacketBuilder.jsx'))
+
+  // 1. The sentence and the binding come from the module. The .jsx composes neither.
+  assert.match(jsx, /swapAskWhy\(s,\s*owners\)/, 'the row must ask the module for the question')
+  assert.ok(!/Why did you (change|add)/.test(jsx),
+    'the question is hand-typed in the component - it must come from swapAskWhy, or the enum rule has two homes')
+
+  // 2. Rendered ONLY behind the null check. Dropping it is exactly the dead button the case above
+  //    proves swapAskWhy refuses to describe.
+  assert.match(jsx, /\{ask && \(/, 'the button must render only when the question has a target')
+  assert.match(jsx, /data-qc=\{QC_HOOKS\.askWhy\}/)
+
+  // 3. It seeds. It does not send, and it does not mutate the swap.
+  assert.match(jsx, /onClick=\{\(\)\s*=>\s*onAsk\(ask\.text,\s*ask\.artifactId\)\}/,
+    'the click must hand the sentence AND its artifact to the seeder')
+  const cell = jsx.slice(jsx.indexOf('QC_HOOKS.askWhy'))
+  assert.ok(!/api\./.test(cell.slice(0, 400)), 'Ask why must call no route - there is none, and it seeds rather than acts')
+
+  // 4. WHAT AC 34 ACTUALLY FORBADE, restated. This clause used to read `!/>Undo this</` - "no
+  //    per-swap undo may ship". That is not AC 34's condition and the two are not the same claim:
+  //    AC 34 forbids a swap-revert MUTATION, and the prototype's own `Undo this`
+  //    (`docs/qc-evidence/qc/evidence.jsx:232`) calls `onAsk(...)` - the identical seeder its
+  //    `Ask why` neighbour on `:233` calls. Banning the CONTROL because one implementation of it
+  //    would need a route it cannot have is reading a constraint on a use as the absence of the
+  //    thing, which is the exact error `CLAUDE.md`'s feasibility rule names. The owner decided to
+  //    keep both. So the invariant is enforced where it lives - on the mutation - and it is
+  //    enforced HARDER than the old line, which said nothing about routes at all.
+  assert.match(jsx, /data-qc=\{QC_HOOKS\.undoSwap\}/, 'SPEC 4.8-20 - the undo control must render')
+  const undoCell = jsx.slice(jsx.indexOf('QC_HOOKS.undoSwap'))
+  assert.ok(!/api\./.test(undoCell.slice(0, 400)),
+    'Undo this must call no route - AC 34 forbids a swap-revert mutation, and appSwaps.ts is GET-only')
+  assert.match(jsx, /onClick=\{\(\)\s*=>\s*onAsk\(undo\.text,\s*undo\.artifactId\)\}/,
+    'it must seed the same panel Ask why seeds, handing over the sentence AND its artifact')
+  // The sentence is the module's, exactly as clause 1 requires of Ask why.
+  assert.ok(!/Undo the swap of|Undo adding|it was dropped and I would rather/.test(jsx),
+    'the undo sentence is hand-typed in the component - it must come from swapUndo')
+
+  // 4b. THE MUTATION ITSELF, checked at the client's one door to the API. If a swap-revert call is
+  //     ever added to api.js, AC 34's real condition has changed and this must be re-decided rather
+  //     than discovered later on a screen.
+  const apiSrc = stripComments(readSrc('api.js'))
+  const swapCalls = apiSrc.match(/^[^\n]*swap[^\n]*$/gim) || []
+  for (const line of swapCalls) {
+    assert.ok(!/\b(post|put|patch|del)\s*\(/.test(line),
+      'a swap MUTATION reached api.js - AC 34 forbids one: ' + line.trim())
+  }
+
+  // 5. Threaded from the seed slot that owns the panel, using the map 4.1-20 already derives rather
+  //    than a second one.
+  assert.match(jsx, /listOwnersFromArtifacts\(entries\)/)
+  assert.match(jsx, /owners=\{listOwners\}\s+onAsk=\{onSeedAssistant\}/s)
+  const railTag = pb.slice(pb.indexOf('<QcRail'))
+  assert.match(railTag.slice(0, railTag.indexOf('/>')), /onSeedAssistant=\{seedAssistant\}/,
+    'the rail must reach the SAME seed slot the asset cards use, never a second one')
+})
+
+// ── SPEC 4.8-20 — `Undo this` on a swap row ─────────────────────────────────────────────────────
+//
+// PREVIOUSLY MIS-CLOSED, and the miss is the lesson. The recorded objection was that no swap-revert
+// MUTATION exists (`appSwaps.ts:234` registers exactly one route, `GET|OPTIONS
+// app/packet/{id}/swaps`), and that objection was read as "so the control must not ship". But the
+// prototype's `Undo this` (`docs/qc-evidence/qc/evidence.jsx:232`) is a SEED - it calls the same
+// `onAsk(...)` its `Ask why` sibling on `:233` calls - so the route it does not have is a
+// constraint on one implementation, not the absence of the control. The mutation ban is still
+// enforced, in `H:ask-why-seeds-the-panel-and-sends-nothing` clauses 4 and 4b.
+
+test('H:swap-undo-is-null-unless-it-has-an-artifact-to-be-about', () => {
+  // `seedAssistant` (PacketBuilder.jsx:765) refuses a seed with no artifact - "never open a panel
+  // that cannot send" - and a swap row is PACKET-level, carrying none of its own. Every path that
+  // cannot reach one must return null so the component renders NO BUTTON. This is the identical
+  // contract swapAskWhy keeps, asserted independently rather than assumed to be inherited.
+  const owners = { skills_1: [{ id: 'a1', label: 'Resume', mergeField: 'SkillsBullets1' }] }
+  const ok = swapUndo({ list: 'skills_1', action: 'swapped', from_label: 'A', to_label: 'B' }, owners)
+  assert.ok(ok && ok.artifactId === 'a1', 'precondition: the happy path must produce a target')
+
+  assert.equal(swapUndo({ list: 'relevant_3', action: 'swapped', from_label: 'A' }, owners), null,
+    'a list no artifact renders has nothing to seed')
+  assert.equal(swapUndo({ list: 'skills_1', action: 'swapped', from_label: 'A' }, {}), null,
+    'insertions not loaded yet - the map is empty, so there is no artifact')
+  assert.equal(swapUndo({ list: 'skills_1', action: 'swapped', from_label: 'A' }, null), null)
+  assert.equal(swapUndo({ action: 'swapped', from_label: 'A' }, owners), null, 'a row with no list')
+  assert.equal(swapUndo({ list: 'skills_1', action: 'swapped', from_label: null, to_label: null }, owners), null,
+    'a row naming neither side describes nothing a request could act on')
+  assert.equal(swapUndo({ list: 'skills_1', action: 'swapped', from_label: '  ', to_label: '' }, owners), null,
+    'whitespace is not a name')
+  assert.equal(swapUndo(null, owners), null)
+  // An owner entry with no id cannot be bound to, and must not be treated as a target.
+  assert.equal(swapUndo({ list: 'skills_1', action: 'swapped', from_label: 'A' }, { skills_1: [{ label: 'Resume' }] }), null)
+})
+
+test('H:swap-undo-refuses-a-kept-row-where-ask-why-does-not', () => {
+  // THE ONE REFUSAL THE TWO CONTROLS DO NOT SHARE, and the reason they need separate hooks. A
+  // `kept` row is the tailoring pass deciding to change nothing. There is no change to undo, so an
+  // undo there would send a request about an event that never happened - dead in the strictest
+  // sense. Why something was LEFT ALONE is still a real question, so `Ask why` must survive on the
+  // same row; a shared refusal would have deleted it.
+  const owners = { skills_1: [{ id: 'a1', label: 'Resume', mergeField: 'SkillsBullets1' }] }
+  const kept = { list: 'skills_1', action: 'kept', from_label: 'A', to_label: 'A' }
+  assert.equal(swapUndo(kept, owners), null, 'a kept row offered an undo for a change never made')
+  assert.ok(swapAskWhy(kept, owners), 'and Ask why must NOT have been taken down with it')
+})
+
+test('H:swap-undo-never-names-the-raw-list-enum', () => {
+  // `swap_decision.list` is a CHECK-constrained enum (`schema.ts:567`), not copy. The prototype
+  // interpolates it because there it is a display name. Here it must be resolved through the
+  // insertion row's merge_field to FIELD_LABEL, the same table that heads the field and writes the
+  // correction sentences - so `skills_1` reaches the reader as "Skills 1".
+  const owners = { skills_1: [{ id: 'a1', label: 'Resume', mergeField: 'SkillsBullets1' }] }
+  for (const swap of [
+    { list: 'skills_1', action: 'swapped', from_label: 'A', to_label: 'B' },
+    { list: 'skills_1', action: 'dropped', from_label: 'A' },
+    { list: 'skills_1', action: 'added', to_label: 'B' },
+  ]) {
+    const u = swapUndo(swap, owners)
+    assert.ok(u, 'precondition: ' + swap.action + ' must produce a request')
+    assert.ok(!u.text.includes('skills_1'), 'the raw enum reached the reader: ' + u.text)
+    assert.ok(u.text.includes('Skills 1'), 'the field was not resolved through FIELD_LABEL: ' + u.text)
+  }
+  // No merge field on the insertion row - the ASSET label carries the sentence. The enum is never
+  // the fallback, which is the case that would otherwise leak it.
+  const noField = swapUndo({ list: 'skills_1', action: 'dropped', from_label: 'A' },
+    { skills_1: [{ id: 'a1', label: 'Compact resume' }] })
+  assert.ok(noField && noField.text.includes('Compact resume'))
+  assert.ok(!noField.text.includes('skills_1'))
+})
+
+test('H:swap-undo-says-what-actually-happened-on-each-action', () => {
+  // THREE ACTIONS, THREE ASKS. One wording cannot serve all three: a drop has no replacement to
+  // name and an add has no original to restore, so "Undo the swap of X for Y" would describe a
+  // change that did not happen on two of the three - a seeded request the reader then has to
+  // correct by hand, which is worse than no seed.
+  const owners = { skills_1: [{ id: 'a1', label: 'Resume', mergeField: 'SkillsBullets1' }] }
+  const swapped = swapUndo({ list: 'skills_1', action: 'swapped', from_label: 'A', to_label: 'B' }, owners)
+  const dropped = swapUndo({ list: 'skills_1', action: 'dropped', from_label: 'A' }, owners)
+  const added = swapUndo({ list: 'skills_1', action: 'added', to_label: 'B' }, owners)
+  assert.ok(swapped.text.includes('"A"') && swapped.text.includes('"B"'), 'a swap names BOTH sides')
+  assert.ok(dropped.text.includes('"A"') && !dropped.text.includes('"B"'), 'a drop has no replacement to name')
+  assert.ok(added.text.includes('"B"') && !added.text.includes('"A"'), 'an add has no original to restore')
+  assert.equal(new Set([swapped.text, dropped.text, added.text]).size, 3,
+    'two actions produced the same sentence, so one of them is describing the wrong event')
+
+  // THESE FOUR WERE ADDED AFTER A MUTATION SURVIVED. Collapsing the three branches to the swap
+  // wording alone still passed everything above it: with `to_label` absent the template renders
+  // `Undo the swap of "A" for "" in Skills 1`, which contains "A", does not contain "B", and is
+  // still distinct from its siblings - three assertions satisfied by a sentence with a hole in it
+  // that misnames a drop as a swap. An EMPTY QUOTED PAIR is the tell, and so is the verb.
+  for (const [action, u] of [['dropped', dropped], ['added', added]]) {
+    assert.ok(!u.text.includes('""'),
+      'the ' + action + ' sentence has an empty quoted slot - a template is being used for an event it does not fit: ' + u.text)
+    assert.ok(!/\bswap\b/i.test(u.text),
+      'a ' + action + ' row is not a swap and must not be described as one: ' + u.text)
+  }
+  assert.match(swapped.text, /\bswap\b/i, 'and the swap row must still say what it was')
+})
+
+// ── SPEC 4.8-11 — attention ordering: fail -> open -> warn -> fixed -> soft ──────────────────────
+
+test('H:attention-order-has-one-home-and-severityWeight-reads-it', () => {
+  // The order is a CLAIM ABOUT SEVERITY and it is stated once. A second literal list at a sort site
+  // is how the Checks tab and the "Needs a decision" list come to present the same findings in two
+  // different orders - the shape this repo names as fixing one consumer and missing the others.
+  assert.deepEqual(ATTENTION_ORDER, ['fix', 'open', 'review', 'fixed', 'soft'],
+    'the design order (SPEC 4.8-11) changed - if that is deliberate, every consumer moves with it')
+
+  // The weight is DERIVED, proven by agreement across the whole vocabulary rather than by reading
+  // the implementation: a lower rank must always weigh more.
+  const rowFor = { fix: { engine: 'deterministic', state: 'fail' },
+    review: { engine: 'deterministic', state: 'warn' },
+    soft: { engine: 'reviewer', state: 'fail' } }
+  for (const [a, b] of [['fix', 'review'], ['review', 'soft'], ['fix', 'soft']]) {
+    assert.ok(attentionRank(a) < attentionRank(b), 'precondition: ' + a + ' ranks before ' + b)
+    assert.ok(severityWeight(rowFor[a]) > severityWeight(rowFor[b]),
+      'weight disagrees with rank for ' + a + ' vs ' + b + ' - two orderings exist')
+  }
+})
+
+test('H:reviewer-warn-outranks-reviewer-fail: the ordering defect 4.8-11 names', () => {
+  // THE ACTUAL BUG. The old severityWeight sorted on `state` first and consulted `engine` only to
+  // break the tie, so a reviewer `fail` (50) beat a reviewer `warn` (40). Through severityFor those
+  // are `soft` ("Your call") and `review` ("Review") - opposite ends of the design's order. So an
+  // opinion the gate may NEVER act on (D6) sorted above a finding actually asking for a decision.
+  const revFail = { engine: 'reviewer', state: 'fail', check_key: 'rf' }
+  const revWarn = { engine: 'reviewer', state: 'warn', check_key: 'rw' }
+  assert.equal(severityFor(revFail), 'soft')
+  assert.equal(severityFor(revWarn), 'review')
+  assert.ok(severityWeight(revWarn) > severityWeight(revFail),
+    'a reviewer fail outranks a reviewer warn - the 4.8-11 inversion is back')
+  assert.deepEqual(bySeverity([revFail, revWarn]).map((r) => r.check_key), ['rw', 'rf'])
+  // And D6's own floor still holds in the same breath: a reviewer fail never reaches a measured one.
+  assert.ok(severityWeight({ engine: 'deterministic', state: 'fail' }) > severityWeight(revFail))
+})
+
+test('H:unknown-severity-is-surfaced-never-dropped', () => {
+  // A sort keyed on `indexOf` returns -1 for an unrecognised key, and a caller that reads the miss
+  // as "no severity" DELETES the row - which is how a finding nobody has a label for disappears
+  // from the one list that exists to show it. It sorts to the TOP instead, following bandTone's
+  // stance twenty lines away: an unrecognised verdict is not permission.
+  assert.equal(attentionRank('a-severity-nobody-has-defined'), -1)
+  assert.ok(attentionRank('a-severity-nobody-has-defined') < attentionRank('fix'),
+    'an unknown severity must sort somewhere EXPLICIT and visible')
+  // A pass and a not_applicable are the ABSENCE of a severity, not an unknown one, and must not be
+  // dragged to the top with it.
+  assert.ok(attentionRank(null) > attentionRank('soft'), 'no severity is not an unknown severity')
+  assert.equal(severityWeight({ state: 'pass' }), 0)
+  assert.ok(severityWeight({ state: 'not_applicable' }) > severityWeight({ state: 'pass' }),
+    'an unanswered question outranks a settled one')
+})
+
+test('H:decisions-are-ordered-by-severity-not-by-engine', () => {
+  // `railDecisions` built its rows with a hand-rolled nest - engine outermost, then fail/warn -
+  // which was a THIRD ordering of the same rows, free to disagree with bySeverity above it and with
+  // the drawer. It produced det-fail, det-warn, rev-fail, rev-warn: the 4.8-11 inversion again.
+  const entries = [{
+    artifact: { id: 'a1' }, artifactId: 'a1', label: 'Resume',
+    result: { gate: 'warn', attention: 3, engines: {
+      deterministic: { results: [{ check_key: 'dw', state: 'warn', engine: 'deterministic' }] },
+      reviewer: { results: [
+        { check_key: 'rf', state: 'fail', engine: 'reviewer' },
+        { check_key: 'rw', state: 'warn', engine: 'reviewer' },
+      ] },
+    } },
+  }]
+  const rows = railDecisions(entries).assets[0].rows
+  assert.deepEqual(rows.map((r) => r.row.check_key), ['dw', 'rw', 'rf'],
+    'the reviewer fail (soft) sorted above a warn (review)')
+  // Ordered by the SHARED rank, proven by agreement rather than by re-reading the implementation.
+  const ranks = rows.map((r) => attentionRank(severityFor(r.row)))
+  assert.deepEqual(ranks, [...ranks].sort((a, b) => a - b), 'the list is not in attentionRank order')
+  // Every row still carries the severity it was sorted by, so the DOM can be checked against it.
+  assert.deepEqual(rows.map((r) => r.sev), ['review', 'review', 'soft'])
+  // And `kind` still answers the OTHER question - which counter the row belongs to (D6).
+  assert.deepEqual(rows.map((r) => r.kind), ['fix', 'review', 'review'])
+})
+
+// ── SPEC 4.4-14 — the gate count deep-links `n to fix -> <title>` ────────────────────────────────
+
+test('H:fail-list-field-is-resolved-from-the-offenders-not-a-two-key-map', () => {
+  // THE DEFECT RENDER-SWEEP.md MEASURED. `mergeField` was `CHECK_SUBJECT_FIELD[check_key] || null`,
+  // and that map holds exactly TWO keys. So every real resume finding produced a null field,
+  // firstFixTarget returned null for the whole asset, and PacketBuilder passed
+  // `onClick={undefined}` - a badge reading "70 to fix" with `cursor: "default"` whose click moved
+  // nothing. The handler was wired the whole time; the TARGET could never be produced.
+  // THE FIXTURES ARE THE ENGINE'S OWN OFFENDER SHAPES, read out of
+  // `api/src/functions/tests/checks.ts`, because a fixture the producer cannot emit proves nothing
+  // about the producer:
+  //   relevant_char_limit  `:435`  `${f}: ${i} (${i.length})`
+  //   word_counts          `:621`  `${f}: ${w} words (want ${lo}-${hi})`
+  //   empty_merge_fields   `:600`  the bare field name
+  // The first draft of this test used `skill_char_limit` with a `SkillsBullets1:` prefix and that
+  // shape DOES NOT EXIST: `:350` emits `${s} (${s.length})` - the skill text and its length, no
+  // field - because `skills` is flattened across SkillsBullets1 and 2 (`:343`) and the check
+  // genuinely cannot say which one an over-long item came from. So that check correctly resolves to
+  // NO field and is not evidence either way; these three are.
+  const entries = [{
+    artifactId: 'a1', type: 'resume',
+    result: { gate: 'fail', results: [
+      { check_key: 'relevant_char_limit', state: 'fail', engine: 'deterministic', observed: 'x',
+        offenders: ['RelevantBullets1: led the platform rebuild end to end (44)'] },
+    ] },
+  }]
+  assert.equal(packetFailList(entries).items[0].mergeField, 'RelevantBullets1',
+    'a real failing resume check still resolves to no field')
+  const _t = firstFixTarget(entries, 'a1')
+  assert.equal(_t.artifactId, 'a1')
+  assert.equal(_t.mergeField, 'RelevantBullets1', 'so the badge has somewhere to send the reader')
+  // The pairing this row now guards: the title the badge prints must be the title of THIS finding.
+  assert.equal(_t.check_key, packetFailList(entries).items[0].check_key,
+    'the badge would otherwise name one finding and open another - measured live on both assets')
+  // The other two producers, so this rests on the CLASS of offender rather than on one check.
+  assert.equal(firstOffenderField({ check_key: 'word_counts',
+    offenders: ['@AboutMe1_50words: 61 words (want 45-55)'] }), '@AboutMe1_50words')
+  assert.equal(firstOffenderField({ check_key: 'empty_merge_fields',
+    offenders: ['SkillsBullets2'] }), 'SkillsBullets2')
+  // And the check that honestly names no field stays unresolved rather than being guessed at.
+  assert.equal(firstOffenderField({ check_key: 'skill_char_limit',
+    offenders: ['stakeholder management and delivery (38)'] }), null,
+  'skill_char_limit offenders carry no field prefix - resolving one would be a guess')
+
+  // The refusals of `sectionIdForOffender` are INHERITED, not re-decided: an offender naming two
+  // fields is a finding ABOUT the relationship between them, and one naming none names none.
+  assert.equal(firstOffenderField({ check_key: 'cross_list_redundancy',
+    offenders: ['item (SkillsBullets1 + SkillsBullets2)'] }), null, 'a two-field offender was picked apart')
+  assert.equal(firstOffenderField({ check_key: 'must_have_coverage', offenders: ['#3 something'] }), null)
+  assert.equal(firstOffenderField({ check_key: 'x', offenders: [] }), null)
+  assert.equal(firstOffenderField(null), null)
+
+  // And the two-key map is still the FALLBACK for a failing row that sent no offenders at all.
+  const noOffenders = [{ artifactId: 'a2', type: 'cover',
+    result: { gate: 'fail', results: [{ check_key: 'company_named', state: 'fail', engine: 'deterministic', offenders: [] }] } }]
+  assert.equal(packetFailList(noOffenders).items[0].mergeField, '@Company')
+})
+
+test('H:first-fix-finding-names-a-blocker-never-a-reviewer-opinion', () => {
+  // SPEC 4.4-14's `<title>` half. D6: only a deterministic row can block, so a badge reading
+  // "3 to fix - <a reviewer's opinion>" would name as a blocker the one row that cannot block.
+  const result = { gate: 'fail', attention: 2, engines: {
+    deterministic: { results: [{ check_key: 'skill_char_limit', state: 'fail', engine: 'deterministic' }] },
+    reviewer: { results: [{ check_key: 'ai_tells', state: 'fail', engine: 'reviewer' }] },
+  } }
+  const f = firstFixFinding(result)
+  assert.equal(f.check_key, 'skill_char_limit')
+  assert.equal(f.title, 'Skill lines fit the template', 'the title must be the CHECK_LABEL, not the raw key')
+  // A reviewer fail ALONE names nothing - there is no blocker to open.
+  assert.equal(firstFixFinding({ gate: 'warn', engines: { reviewer: { results: [
+    { check_key: 'ai_tells', state: 'fail', engine: 'reviewer' }] } } }), null,
+  'a reviewer fail was offered as the thing to fix')
+  assert.equal(firstFixFinding({ gate: 'pass', results: [] }), null, 'a clean asset named a blocker')
+  assert.equal(firstFixFinding(null), null)
+})
+
+// ── SPEC 4.11-7 — Keep / Revert / Re-run QC on a recorded change ─────────────────────────────────
+
+test('H:correction-keep-renders-a-reason-not-a-vacuous-button', () => {
+  // A correction is applied BEFORE the reader sees it (R1: the change log is a record of finished
+  // work), so there is no pending state for a `Keep` to move. The button would send nothing, change
+  // nothing and record nothing. The rule is the repo's: a control with nothing to act on must not
+  // render, and the reason renders in its place.
+  for (const row of [{ undone: false }, { undone: true }]) {
+    const k = keepAvailability(row)
+    assert.equal(k.can, false, 'Keep became actionable - it has no route and no pending state')
+    assert.ok(k.reason && k.reason.length > 20, 'a refusal with no reason teaches nothing')
+  }
+  assert.notEqual(keepAvailability({ undone: true }).reason, keepAvailability({ undone: false }).reason,
+    'an undone change and an applied one are different states - one sentence is false for one of them')
+
+  const jsx = stripComments(readSrc('screens/QcRail.jsx'))
+  assert.match(jsx, /data-qc=\{QC_HOOKS\.correctionKeepNote\}/, 'the reason must be selectable')
+  assert.ok(!/>Keep</.test(jsx), 'a Keep BUTTON shipped: it commits nothing and is worse than vacuous')
+  assert.match(jsx, /keepAvailability\(row\)/, 'the sentence must come from the module, not the component')
+})
+
+test('H:correction-rerun-calls-the-real-route-and-re-reads-after-it', () => {
+  // SPEC 4.11-7's third control. `Re-run QC` has a REAL route - the same `api.runArtifactChecks` the
+  // gate drawer's footer calls - so unlike Keep it is a button, not a sentence. It must be followed
+  // by the same re-read every other action on this row ends with, or the gate, the counts and this
+  // log describe three different moments.
+  const jsx = stripComments(readSrc('screens/QcRail.jsx'))
+  assert.match(jsx, /data-qc=\{QC_HOOKS\.correctionRerun\}/)
+  const rerun = jsx.slice(jsx.indexOf('const doRerun'), jsx.indexOf('const doAsk'))
+  assert.match(rerun, /api\.runArtifactChecks\(artifactId\)/, 'it must call the SAME route the drawer footer does')
+  assert.match(rerun, /await onUndid\(\)/, 'without the re-read the counts above it go stale')
+  // NO ARTIFACT, NO BUTTON: a row with nothing to run the checks for has no request to make.
+  assert.match(jsx, /\{artifactId && \(\s*<button[^>]*QC_HOOKS\.correctionRerun/s,
+    'the control must be gated on having an artifact to run the checks for')
 })
