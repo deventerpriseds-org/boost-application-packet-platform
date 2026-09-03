@@ -117,10 +117,23 @@ remember to check before implementation steps require db"*)
    to read or write live Postgres (a measurement, a regression baseline, a row count, an AC's
    verification)? Say so up front. Discovering it three tool calls in, after the plan is committed,
    is the failure this rule prevents.
-2. **If it does and the connector is lapsed or off, NUDGE and STOP.** Name the step, name the query
-   it needs, and ask for a refresh. Do not quietly reroute through `db-query.yml`. The owner will
-   then either refresh it (fastest — ~1s per query) or tell you to use the workflow. **That choice
-   is theirs, not yours.**
+2. **If it does and the connector is lapsed or off, TAKE THE FALLBACK *AND* ASK FOR A REFRESH.**
+   Both, in the same turn. Run the query through `db-query.yml`, get the data, keep working — and
+   render the reconnect card so the owner can restore the fast path when convenient.
+
+   **CORRECTED 2026-09-03, owner-instructed:** *"you need to correct whatever instruction has you
+   only using the connection and not falling back to the yml until you can ask me to refresh it.
+   forgoing data is absolutely unacceptable."* The previous version of this rule said NUDGE AND STOP
+   and forbade "quietly rerouting" through the workflow. That was wrong in one specific way: it
+   traded **the data itself** for the owner's convenience in choosing a transport. It produced a
+   real cost the same day — an AC pass shipped with every number sourced from a committed fixture
+   dump and an explicit "no live DB read was possible", when `db-query.yml` was available the whole
+   time and would have grounded it in production.
+
+   **The rule now:** never return without the data. The transport is a convenience question and it
+   is the owner's to answer at their leisure; the DATA is not optional and is never what waits.
+   "Quietly" was the real objection in the old wording — so do it LOUDLY: say which query took the
+   fallback and what a refresh would have made faster.
 
    **RENDER THE RECONNECT CARD — do not write the nudge as prose.** A sentence saying "the connector
    needs re-auth" makes the owner leave the conversation, find the settings screen and identify the
