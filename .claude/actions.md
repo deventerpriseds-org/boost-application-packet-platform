@@ -8561,3 +8561,25 @@ Lane 1's own seven mutations all FIRED on its scratch harness; the two re-run on
 - Lane 2 (judge observability) still running; the shared hardening file is uncommitted until it lands.
 - Not started: config stamp + bounded backfill, re-extraction trigger, swap-attribution judge.
 - **Nothing deployed yet.** `main` has not moved.
+
+### ACT-69d — Lane 2 SHIPPED: judge failures are recorded (2026-09-03)
+
+Commit `711893d`. New `judgeOutcome.ts` sink, `judge_outcome` table + 2 indexes,
+`usage_metering.outcome`, and two routes. Additive: 1082/1082 across the whole suite is the evidence,
+since `matcher`, `stuffingRead` and `evidenceConfirmDb` all read the fields it extends.
+
+**Mutation-proved on the REAL `/workspace/eds-claude-skills/scripts/mutate.sh`** (the lane could only
+use a sha256-oracle variant — mutate.sh correctly refuses a dirty file and the lane could not commit):
+- reinstate "a transport failure meters nothing" -> **FIRED** (`H:metering-sees-a-failed-call`)
+- delete the sink call entirely -> **FIRED** (`H:judge-outcome-not-gating`), after one UNDETERMINED
+  from naming the wrong guard
+- eighth-writer + render-root, from Lane 1 -> both **FIRED**
+Every restore verified against HEAD by the script itself.
+
+**OPEN:**
+- **No Settings UI for the retention window.** Seeded 90 days per-owner on `owner_search_prefs`,
+  reachable by API, not from a screen. A real miss against the no-hardcoded-config rule.
+- `checksStale`/`checksError` still have no frontend consumer (Lane 1).
+- `judge_outcome` does not exist in production until `diag/pg-migrate` runs; the write-time
+  `ENSURE_SQL` covers that window and a parity guard holds the two declarations in step.
+- Not started: config stamp + bounded backfill, re-extraction trigger, swap-attribution judge.

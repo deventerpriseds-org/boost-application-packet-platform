@@ -6838,3 +6838,39 @@ checking failure would roll back the very edit it is checking.
 - **`git status --short` before `git add`, when a lane is running.** Committing by explicit path kept
   Lane 2's six in-flight files out of Lane 1's commit. `git add -A` would have committed another
   agent's half-finished work under my message.
+
+## 2026-09-03 — Lane 2 shipped: a judge that STOPPED ANSWERING is no longer invisible
+
+New `judge_outcome` sink + two routes. All three judges recorded wins and dropped losses; the losses
+are the half worth seeing, because a dead judge and a judge that found nothing looked identical.
+
+**`usage_metering` never saw a transport failure** — `logUsage` sat AFTER the `!r.ok` throw in
+`openaiJson.ts`, so a network failure produced ZERO rows, not a failed one. The ledger could only
+describe the calls that worked. Fixed on both the throw path and the `!r.ok` path.
+
+**Two deviations from the ACs, both right.** (1) A3 is satisfied at OPPORTUNITY level, not
+requirement level — the AC's own `H:judge-outcome-volume-bounded` slug forbids per-requirement rows,
+so the two ACs contradicted each other and the volume bound wins. (2) The `judge` CHECK domain has
+FOUR values, not three: `escalation_refusals` is fed by two different model passes, and filing
+`escalateOne`'s failures under `support` would make an escalation outage look like a support outage.
+
+**Schema EXECUTED against a POPULATED database**, per the strict rule: main's SCHEMA_SQL applied to a
+fresh DB, seeded with real rows including a pre-existing `usage_metering` row, then this branch's
+applied on top — psql exit 0, and 0 again on a second apply. `to_regclass('judge_outcome')` was NULL
+beforehand, so the create was not skipped. The populated run proved what a fresh one cannot: the
+`not null default` ALTER BACKFILLED the existing row.
+
+Verified independently by me, not taken from the lane's report: build clean, hardening **159/159**,
+full suite **1082/1082**.
+
+## Hardening
+
+- **`mutate.sh` has a FOURTH outcome and it fired today: `UNDETERMINED`.** Deleting the sink call
+  made the suite fail — but under `H:judge-outcome-not-gating`, not the guard I named. The script
+  refused to credit it: *"a DIFFERENT test failed, so this run says nothing about your guard.
+  NOTHING IS PROVEN."* A harness that only checked the exit code would have reported my mutation
+  proven by an unrelated failure. **Guardrail: a red suite is not proof your guard caught anything —
+  the FAILING TEST'S NAME must be the one you claimed.** Re-run against the right name: FIRED.
+- **Second anchor lesson in one session.** Both non-FIRED results today were mine, not the guards':
+  one anchor on comment lines (INERT), one guard name that did not match the catching test
+  (UNDETERMINED). The guards were real in both cases.
