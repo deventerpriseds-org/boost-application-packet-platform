@@ -6655,3 +6655,57 @@ is the first deploy with a stamp on both sides, and the first to wait.
   time, and that is an owner decision, not a test-file change.
 - `H:deploy-sha-comes-from-the-bundle` -- health must report the compiled sha, and must not name
   `DEPLOYED_SHA` at all so the fallback cannot be reintroduced at the call site.
+
+## 2026-09-03 — THE VIDEO CHAIN, end to end, and the grep that could not see it
+
+**Owner asked what script was generated for Trinnex. Answer: none — and the interesting part is why.**
+
+**The chain, in series** (this is the thing no single grep reveals, because the video case is DATA
+inside a shared generator, not video-specific code):
+
+| # | Function | File | Effect |
+|---|---|---|---|
+| 1 | `runPacketBuild` → `ensureArtifacts` | `appPackets.ts:60,83` | creates 5 rows from `ARTIFACT_TYPES` incl. `video`, status `todo` |
+| 2 | **`artifactGenerate`** | `appPackets.ts:271` | `POST /api/app/artifact/{id}/generate` → OpenAI `gpt-4o-mini`, brief `ARTIFACT_BRIEF.video` → **writes `artifact.content` = THE SCRIPT** |
+| 3 | `artifactVideoGenerate` | `appVideo.ts:35` | `POST .../video` → reads `content`, POSTs to HeyGen |
+| 4 | `artifactVideoStatus` | `appVideo.ts:74` | `GET .../video` → polls, persists `doc_url` |
+| 5 | archive | `appVideoArchive.ts` | copies to Drive |
+
+**Step 2 is never reached by the build.** `runPacketBuild` carries
+`if (!metaFor(a.type)) continue // skip video (HeyGen) + non-templated`. So the four templated types
+get content at build time and video does not; a video script exists only if someone makes an explicit
+per-artifact generate call. **Measured live 2026-09-03 (`boost-pg-mcp-write`): 40 video artifacts,
+39 `todo` with 0 content / 0 `heygen_video_id` / 0 `doc_url`; exactly 1 filled.**
+
+**The sharp edge is step 3's fallback**, and it is the reason this has stayed invisible:
+`const script = (art.content || '').trim() || 'Hi, this is my Executive Engine intro...'`. An empty
+script does not error — it returns HTTP 200 and a real HeyGen video that never mentions the employer.
+A silent wrong answer, which is exactly the class this repo's *"a 200 with a zero count is a result to
+investigate, not a pass"* rule already names.
+
+**The one filled script — Cloudflare `177fa8d3`, 2026-07-09** — was rendered and archived to Drive
+containing `[Your Name]`, `[X years]`, `[Previous Company]`, `[X%]`. `artifactGenerate`'s user message
+(`appPackets.ts:289`) passes only role, company, comp, persona, why_surfaced, company_signals and
+pain_hypotheses — **no profile, no master context, no name**. A first-person spoken script with no
+first person available can only emit placeholders. Causal link INFERRED from reading both, not proven
+by a re-run. Ledger rows: `D:video-script-is-never-authored-by-the-build`,
+`D:video-script-prompt-omits-the-candidate` (both OPEN, guard green at 16/16).
+
+## Hardening — 2026-09-03: I grepped the feature NAME instead of reading the shared abstraction
+
+I told the owner *"nothing in the product authors a video script."* Wrong, and they corrected me with
+*"im sure there are a set of functions to happen in series."*
+
+I did sweep broadly — two source trees, the DB, `packet.pkg_json`, `asset_event`, 40 artifact rows —
+so the existing *"never claim ABSENT from a single-file grep"* rule was satisfied in letter. **It
+still failed, because every probe was keyed on the same NAME (`video`/`heygen`), and the producer has
+no video-specific code to name.** Breadth does not help when the axis is wrong.
+
+**The structural step that was missing:** when the thing sought is ONE TYPE AMONG SEVERAL, find the
+enumeration (`ARTIFACT_TYPES`, a `Record`, a switch) and read the SHARED consumer before concluding
+the type is unhandled. The disconfirming evidence was already in my own query output — four of five
+sibling artifacts had content — and I never asked why those four worked. **Asymmetry between siblings
+is the tell that a shared producer exists.**
+
+Also reaffirmed, and it is what rescued this: **the owner's stated observation about their own product
+is ground truth.** A confident sweep that contradicts their recollection is evidence about the sweep.

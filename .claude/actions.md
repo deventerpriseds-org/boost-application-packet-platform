@@ -8449,3 +8449,71 @@ app 454/0; 4 unit guards harness-FIRED, browser assertion hand-proved.
 - **Guards:** 4 unit, all mutation-proved FIRED; 8 DOM checks (20 → 28 on the assistant probe).
 
 **Evidence:** api 1071/0 · app 462/0 · margin 61/61 · browser 52/52 · deploy run 33734904497.
+
+## ACT-2026-09-03-a — "What was the video script generated for Trinnex?" — there is none
+
+**Owner question, answered from live Postgres via `boost-pg-mcp-write` (connector live; no fallback needed).**
+
+**ANSWER: no video script was ever generated for Trinnex.** The recalled script is **Cloudflare's** —
+the only filled video artifact in the entire database.
+
+**Trinnex** — opp `9f9c370a-4ac9-441e-b58e-02e3ffcf669e`, *Director of Digital Technology Operations
+& Innovation*, packet `85cee965-f435-4b8e-910f-c806232092ce`. Video artifact
+`25559c31-26d8-41a8-ae25-a127e57822ba`: `status=todo`, `content=NULL`, `heygen_video_id=NULL`,
+`doc_url=NULL`, `drive_url=NULL`, `version_history=[]`, and `created_at = updated_at`
+(2026-08-14 20:00:39) — **never touched since the packet was built.** Its four siblings
+(`resume`, `compact_resume`, `cover`, `portfolio`) are all `review` with content.
+
+**ABSENCE SWEPT, not asserted from one query** (this is the heaviest claim available):
+- `packet.pkg_json` (7,839 chars) — no `video`, no `script` substring
+- `asset_event` for the Trinnex opp — **0 rows**
+- producer located in code: `artifactVideoGenerate`, `api/src/functions/tests/appVideo.ts:35`
+- fleet-wide: of **40** `video` artifacts, **39 are `todo` with 0 content / 0 heygen id / 0 doc_url**;
+  exactly **1** is filled
+
+**CORRECTION — the paragraph below as first written was WRONG, and the owner caught it.**
+I claimed *"nothing in the product authors a video script."* False. The author is
+`artifactGenerate` (`appPackets.ts:271`, `POST /api/app/artifact/{id}/generate`), a SHARED per-type
+generator: the video case is one entry in the `ARTIFACT_BRIEF` record —
+`video: 'a 90-second intro video script (spoken, first person) opening tailored to this company'` —
+so there is no video-specific write path to grep for, which is exactly why my sweep missed it. The
+owner's *"im sure there are a set of functions to happen in series"* was correct and my analysis was
+the thing that was wrong. **The real finding is narrower and more useful:** the author exists and is
+reachable, but `runPacketBuild` deliberately skips the type —
+`if (!metaFor(a.type)) continue // skip video (HeyGen) + non-templated` — so a script only ever
+exists if someone makes an explicit per-artifact `generate` call, and for 39 of 40 nobody has.
+
+**THE CHAIN, in series:**
+1. `runPacketBuild` → `ensureArtifacts` (`appPackets.ts:60,83`) creates 5 rows from `ARTIFACT_TYPES` incl. `video` (`todo`)
+2. **`artifactGenerate` (`appPackets.ts:271`) — OpenAI `gpt-4o-mini` writes `artifact.content` = THE SCRIPT**
+3. `artifactVideoGenerate` (`appVideo.ts:35`) — reads `content`, POSTs to HeyGen
+4. `artifactVideoStatus` (`appVideo.ts:74`) — polls, persists `doc_url`
+5. `appVideoArchive.ts` — copies to Drive
+
+**The consumer's silent fallback (unchanged, and still the sharp edge):**
+`artifactVideoGenerate` CONSUMES `artifact.content`; it never writes it:
+
+```ts
+const script = (art.content || '').trim() || 'Hi, this is my Executive Engine intro. I lead platform
+modernization at scale, and I would be excited to bring that to your team.'
+```
+
+So an empty `content` does not fail — it silently ships a **hardcoded generic sentence** to HeyGen.
+Pressing generate on Trinnex today would produce a video that never mentions Trinnex. The 39/40
+`todo` rate is the visible consequence: the build pipeline creates the row and no producer fills it.
+
+**The one filled script** — Cloudflare *CTO, Infrastructure Modernization*, opp
+`809a07a0-93c9-4090-987b-3a6d53fafb34`, artifact `177fa8d3-5567-427b-8bde-f5ceb30a004d`, 1,748 chars,
+generated 2026-07-09, `heygen_video_id=e59299c812ae48d49f621b626a1cbb08`, archived to Drive. It
+contains **four unfilled placeholders** — `[Your Name]`, `[X years]`, `[Previous Company]`, `[X%]` —
+in a script that was rendered to video and archived.
+
+**Reconciled against the ledger before calling anything new:** the only `DEFERRED.md` row mentioning
+video is `D:approval-needs-checks-that-never-run` (**CLOSED**), which is about the approval gate, not
+about script authorship. **No row owns the empty-script gap**, so two are opened below.
+
+**NOT investigated, and deliberately not guessed at:** whether the placeholder leakage is a known
+defect, a stale pre-master-context row, or already covered elsewhere. Flagged to the owner as an
+open question rather than diagnosed.
+
+**Status: ANSWERED. No code changed.** Two ledger rows opened; the fix itself is the owner's call.

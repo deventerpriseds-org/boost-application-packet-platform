@@ -802,3 +802,19 @@ and `git show origin/main:...masterContext.ts` still reads `entity[r.block_key]`
 
 For the trend table: `peer-caught`. Not self-caught, not instrument-caught. That is the worst category
 in this log and the first entry in it.
+
+## 2026-09-03 — "nothing authors a video script" — wrong, and the owner had to correct me
+
+| | |
+|---|---|
+| **Claim** | "Nothing in the product ever writes a video script" / "there is no Trinnex video script and no producer for one." |
+| **Ground truth** | `artifactGenerate` (`api/src/functions/tests/appPackets.ts:271`) authors it, from `ARTIFACT_BRIEF.video` = *"a 90-second intro video script (spoken, first person)"*. `runPacketBuild` simply skips the type: `if (!metaFor(a.type)) continue // skip video (HeyGen) + non-templated`. |
+| **The single source that would have settled it up front** | `grep -n "ARTIFACT_TYPES\|ARTIFACT_BRIEF" api/src/functions/tests/appPackets.ts` — the per-type map, read once. |
+| **Root-cause pattern** | **I grepped for the FEATURE NAME instead of reading the SHARED abstraction it is a case of.** My sweep was `heygen|video` in the write path. The video producer has no video-specific code: it is one string in a `Record<string,string>` consumed by a generic generator. A feature implemented as *data inside a shared function* is invisible to a name-based grep, by construction. |
+| **Guard it implies** | The existing rule *"never claim a capability is ABSENT from a single-file / single-name grep"* was followed in letter — I swept two trees, the DB, the packet blob and `asset_event` — and still failed, because every probe was keyed on the same NAME. **The missing step is structural, not more breadth: when the thing sought is one TYPE among several, find the enumeration of those types (`ARTIFACT_TYPES`, a `Record`, a switch) and read the shared consumer, before concluding the type is unhandled.** Four of five sibling types were visibly generated; that asymmetry was the disconfirming evidence sitting in my own query output, and I did not ask why the other four worked. |
+| **What it cost** | One wrong answer to the owner, and two ledger rows written on a false premise that had to be rewritten. Caught in one turn because the owner said so. |
+
+**The rule that actually saved this:** *the user's stated observation IS ground truth.* The owner said
+*"im sure there are a set of functions to happen in series"* — treating that as the fact to explain
+rather than something to argue with pointed straight at the enumeration. **A confident sweep that
+contradicts the owner's recollection of their own product is evidence about the sweep.**
