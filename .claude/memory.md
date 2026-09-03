@@ -573,6 +573,44 @@ incident twice.
 
 
 ## Active work
+**2026-09-03 - I CONFLATED BOOST'S ConvAI VOICE BRIDGE WITH HUDDLE'S VOICE CALLS, and started
+building on it.** The owner said *"voicecalls work fine"* -- about HUDDLE. I took it as clearance and
+began implementing a shared-secret guard on BOOST's `/api/app/voice/chat`, its ElevenLabs ConvAI
+custom-LLM endpoint. Different systems. I compounded it by designing the guard from TAVILY SEARCH
+RESULTS describing the ConvAI `custom_llm` schema rather than from running code. The owner stopped
+me: *"the convo AI is a wild goose chase... don't move forward until you've researched how huddle
+agents work and the current model, text and voice settings."* Reverted before any commit; S2
+(`9d0788e`) and S3 (`8c94fd9`) are untouched and remain valid.
+
+**The tell:** I was about to write a literal (a header name) into a system I had not read, sourced
+from a web search -- the "NEVER TYPE A LITERAL THAT MUST EXIST IN SOMETHING YOU HAVE NOT READ" rule,
+with the weakest possible source.
+
+**HOW HUDDLE ACTUALLY RUNS, from source at `3148bcd`** -- what I should have established first:
+
+| | Text message | Voice call |
+|---|---|---|
+| Engine | `runHuddleTurn`, per-agent backend fork (`huddle.functions.ts:2881`) | OpenAI Realtime over WebRTC |
+| Model | `openai` or `lovable`, **defaulting to lovable** (`:1900`) | `REALTIME_MODEL = "gpt-realtime"` (`realtime.functions.ts:21`) |
+| Writes the reply | the app's own pipeline | **Realtime itself** -- `create_response: true` (`:110`) |
+| Voice | none -- text NEVER calls TTS | ElevenLabs `eleven_flash_v2_5` (`elevenlabs.server.ts:166`), cloned per agent |
+
+Realtime is minted `output_modalities: ["text"]` (`:89`), so OpenAI writes text and ElevenLabs speaks
+it; transcription is `gpt-4o-mini-transcribe`. And `agentsCfg = data.agents ?? {}` (`:856`) -- the
+per-agent backend config arrives in the REQUEST PAYLOAD from the client, not from server settings,
+so any per-agent toggle must live where that payload is built.
+
+**THE FINDING THAT CHANGES THE COLE BRIDGE SPEC — a FIFTH registration site.** A voice call does
+**not** pass through `runHuddleTurn`; it carries its own toolset (`realtime.functions.ts:116` <-
+`realtime-tools.server.ts`). A Boost tool registered only at the four text dispatch sites would work
+when the owner TYPES to Cole and **silently not exist when he TALKS to him** -- the worst failure
+shape, because it reads as the agent choosing not to use the tool rather than as a missing wire.
+`COLE_BRIDGE_SPEC_v2.md` H2 mentions voice as a trailing clause; it is load-bearing.
+
+**Still open, deliberately not asserted:** whether Huddle's own ConvAI code (`/v1/convai/agents`,
+`get-signed-url` in `elevenlabs.server.ts`) is LIVE or dead scaffolding. That is the real question
+behind the owner's remark; a background pass is tracing every caller.
+
 **2026-09-03 - TWO AUTH BYPASSES FOUND ON THE COACH ROUTES. Both read in source, neither exploited.**
 Found while auditing an inherited feature spec, not while looking for them. Recorded here because the
 second one makes an innocuous-looking change dangerous, and the next session will not see that from

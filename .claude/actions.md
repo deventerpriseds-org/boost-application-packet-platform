@@ -8,6 +8,25 @@ Status values: `open` | `in-progress` | `blocked` | `done`
 
 ## Open
 
+### ACT:huddle-agent-architecture — establish how Huddle agents run before wiring the Boost tool (2026-09-03)
+- **Origin:** owner, stopping an implementation mid-flight: *"the convo AI is a wild goose chase...
+  don't move forward until you've researched how huddle agents work and the current model, text and
+  voice settings."*
+- **What I got wrong:** conflated BOOST's ConvAI custom-LLM endpoint with HUDDLE's voice calls after
+  the owner said *"voicecalls work fine"*, and began implementing S1 against the wrong system,
+  designing from search results rather than source. Reverted before commit.
+- **Established from source (`huddle` `3148bcd`):** text = `runHuddleTurn`, per-agent `openai` |
+  `lovable` fork defaulting to lovable, config arriving in the request payload; voice = OpenAI
+  Realtime (`gpt-realtime`) as the BRAIN (`create_response:true`, `output_modalities:["text"]`) with
+  ElevenLabs `eleven_flash_v2_5` speaking the result. Text never calls TTS at all.
+- **Consequence for `ACT:cole-bridge-spec`:** the voice path does NOT go through `runHuddleTurn` and
+  carries its OWN toolset — a FIFTH registration site. A tool wired only into the text dispatch
+  sites would silently not exist on a voice call.
+- **OPEN:** is Huddle's ConvAI code live or dead scaffolding? Background pass tracing callers;
+  artifact `huddle-extension-app/docs/spec-research/D-agent-architecture.md`.
+- **Status:** OPEN — research in progress. **S1 is PAUSED** until this settles what it would guard.
+  S2 and S3 are unaffected and remain committed.
+
 ### ACT:capture-anonymous-write — `/api/app/capture` accepts an anonymous body-asserted owner (2026-09-03)
 - **Origin:** found by the Phase 0 AC pass while auditing the coach routes; **outside** that brief's
   named scope. Owner decision 2026-09-03: *"2- track it separately"* — so it is tracked here and
