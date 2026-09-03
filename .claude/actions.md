@@ -7942,18 +7942,29 @@ fuzzy `requirement_id` — is explicitly REFUSED (`CLAUDE.md:432`).
 **Owner decision required before any code.** Option A is Tier 1 and needs an independent AC pass
 first; Option B is Tier 2 and can start on a go-ahead.
 
-### ACT-68f — 4.6-8 DECIDED: exact PROPOSES, judge CONFIRMS everything (2026-09-02)
+### ACT-68f — 4.6-8 DECIDED: exact settles what it can, judge takes the rest (2026-09-02)
 
 **Owner's decision**, after rejecting my three-option menu as the wrong menu: *"I thought that's when
 the judge llm was supposed to come into play? we know keyword is insufficient"*, then
 *"I want a hybrid ... the keyword can try and land x% and the judge can cleanup and confirm/settle
 the rest"*, sharpened to **confirm what exact containment tried to settle AS WELL AS the remainder**.
 
-**The design.** Two passes. (1) Exact containment of `requirement.model_keyword` in `to_label`
-PROPOSES a candidate link — free, deterministic. (2) **The judge CONFIRMS every claim, the exact ones
-included.** The owner's sharpening is the correct one and I had it wrong: containment proves the
-keyword is PRESENT in the replacement, never that the swap was made FOR it. **Presence is not
-causation.** So nothing reaches the screen unconfirmed.
+**The design — TWO LANES, no overlap, each claiming only what its own evidence supports.**
+1. **Exact containment settles what it can, with no model.** Where `requirement.model_keyword`
+   appears verbatim in `to_label`, the panel says so as PLACEMENT — *"'global engineering' is in
+   'Global Engineering Teams', which replaced 'Agile Transformation'"*. True by containment.
+2. **The judge takes the remainder.** There it may make the causal statement (*"Took the place of
+   X"*), because it must CITE and code verifies the citation byte-exact. No citation -> `absent`,
+   and the panel stays quiet.
+
+**The judge does NOT re-check the exact matches.** An intermediate version of this entry said it
+should. That was mine, not the owner's: I read their "confirm what exact containment tried to settle"
+as requiring a second pass over the deterministic rows, wrote it into the brief, and read it back.
+The owner withdrew it — *"forget I corrected you on confirmation... what you read back seemed super
+complicated"* — and they were right. **What made it complicated was my insisting both lanes make the
+SAME claim.** They need not: placement and causation are different statements with different
+evidence, and once each lane says only what it can prove, the confirmation pass disappears. Spending
+model calls to re-confirm a string comparison is cost with no finding.
 
 **MY MISS, and it is the reason this took four turns.** I proposed three NEW mechanisms (change the
 generation contract / exact-only / posting-line-anchored) without grepping for the system that
