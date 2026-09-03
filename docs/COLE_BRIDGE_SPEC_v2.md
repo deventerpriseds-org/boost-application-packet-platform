@@ -130,6 +130,9 @@ v1 assumed passthrough and filed the consequence as "optional". It is the decisi
 | Makes hard later | Cole can never blend Boost data with Huddle context; his voice/persona must be rebuilt on the Boost side | Two prompts stay in sync |
 | Reversible? | **Hard to reverse** — the snapshot decays once bypassed | **Yes** — delete the tool |
 
+> **RESOLVED 2026-09-03 — the owner chose B.** *"go ahead with the boost tool."* The fork below
+> is kept for the reasoning, not as an open question. All Phase 2 work targets option B.
+
 **Recommendation: B.** It is additive (no sign-off needed), it has a complete working precedent in
 `groom_backlog`, and it is reversible. A's only advantage — one prompt — is bought by discarding
 the longest-tuned persona you have.
@@ -180,14 +183,19 @@ of which involves voice. §6's voice line should be read as applying to voice se
 agents now carry real ~20-char EL ids, Cole's `o2zd9K5QOO7ppTb04Lx0` among them, so `resolveVoiceId`'s
 fallback never fires for a roster agent today.
 
-**Not verified:** whether `ELEVENLABS_API_KEY` is actually populated on the deployed SWA. The
-sandbox cannot reach it, and Huddle exposes no config-status route (`src/routes/api/public/` has
-none). Settle it by reading the SWA app setting, or by starting one voice call and watching for the
-"Couldn't play voice" toast.
+**SETTLED 2026-09-03 by the owner: `ELEVENLABS_API_KEY` IS populated and working.** *"voicecalls
+work fine."* That is the observation the code could not give me — the sandbox cannot reach the SWA
+and Huddle exposes no config-status route. It also means the two documented silent-failure modes
+(`:179-181` mobile autoplay, `:213-214` `ok:false` synth) are NOT firing in the owner's environment.
+So the live picture is: EL works on voice, and is simply never invoked by text chat — which is the
+whole of the original observation.
 
 ## 7. Build order
 
-**Phase 0 — SECURITY (blocks everything).**
+**Phase 0 — SECURITY (blocks everything). AUTHORISED by the owner 2026-09-03 (*"kickoff 0"*); IN
+PROGRESS.** Tier 1 by this repo's tiering — it decides whether a request is authorised — so ACs are
+being written by an independent pass (`AC-phase0-auth.md`) BEFORE any code. Landing it on `main`
+deploys live auth and is a separate confirmation.
 - **S1** Guard `/api/app/voice/chat`: shared-secret header, ElevenLabs-side. Prove anonymous ⇒ 401.
 - **S2** Close the body-`owner` bypass: `requireWrite` and the handler must read identity from
   one function. Prove body-only `owner` ⇒ 401 on a non-demo account.

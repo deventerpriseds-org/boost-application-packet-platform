@@ -29,9 +29,13 @@ Status values: `open` | `in-progress` | `blocked` | `done`
 - **Status:** OPEN, **not fixed, not exploited**. Verified by READING source at `a041d8f` — no live
   call was made (egress blocks `azurewebsites.net`; both Postgres connectors were unauthorized this
   session), so production behaviour is inferred from source, not observed.
-- **Owner decision needed** before any code lands: these are unrequested changes to live auth on a
-  deployed Function App, which is exactly the "confirm the plan before building" case. Proposed
-  Phase 0 (S1/S2/S3) is written up in `docs/COLE_BRIDGE_SPEC_v2.md`.
+- **AUTHORISED by the owner 2026-09-03:** *"kickoff 0 as you mentioned"*. Phase 0 (S1/S2/S3) is
+  IN PROGRESS. Tier 1 by this repo's tiering — this code decides whether a request is authorised —
+  so an independent AC pass runs BEFORE any code (`docs/qc-evidence/AC-phase0-auth.md`, brief at
+  `BRIEF-phase0-auth.md`), then implementation, then an independent verifier, with every new guard
+  mutation-proved via `scripts/mutate.sh`.
+- **Still a separate confirmation:** landing Phase 0 on `main` DEPLOYS live auth changes to
+  `job-platform-api`. Authorising the work is not authorising the deploy; that gets its own ask.
 - **Evidence:** `docs/spec-research/A-coach-engine.md` (per-claim, file:line).
 
 ### ACT:cole-bridge-spec — corrected spec for the Huddle ↔ Boost coach bridge (2026-09-03)
@@ -53,8 +57,14 @@ Status values: `open` | `in-progress` | `blocked` | `done`
   Recommended the tool — additive rather than subtractive (Huddle's CLAUDE.md forbids subtractive
   prompt edits without explicit sign-off), a complete precedent in `groom_backlog`, and reversible.
   Cole has the longest-tuned snapshot of all 15 agents; passthrough discards it.
-- **Status:** OPEN — spec delivered, **nothing built**. Awaiting the owner on the fork above and on
-  the Phase 0 security work.
+- **FORK RESOLVED 2026-09-03:** the owner chose **option B — give Cole a Boost tool**, not the thin
+  passthrough. *"go ahead with the boost tool."* Phase 2 (H1-H4) targets B. Cole's snapshot is left
+  intact, so no subtractive prompt edit and no sign-off needed under Huddle's additive-only rule.
+- **ALSO SETTLED by the owner:** *"voicecalls work fine"* — so `ELEVENLABS_API_KEY` IS populated on
+  the deployed SWA and neither documented silent-failure mode is firing. The original observation
+  ("not using ElevenLabs") is fully explained by text chat never invoking TTS at all; see spec §6b.
+- **Status:** OPEN — spec delivered; Phase 0 in progress (see `ACT:coach-auth-bypass`), Phase 1 and
+  Phase 2 not started.
 
 <!-- SessionStart extracts the range between the two headings that bracket this section. Before they
      existed it matched nothing and surfaced 0 lines out of 5,279 — measured 2026-08-29.
