@@ -82,6 +82,7 @@ export const BLOCK_HOOKS = {
   keywordActions: 'blocks-keyword-actions',   // 4.6-10/11 - "Not comfortable claiming this?"
   keywordDrop: 'blocks-keyword-drop',         // seeds the field's ask box with a drop REQUEST
   keywordSwap: 'blocks-keyword-swap',         // 4.6-9 - the picker of the owner's OWN banked skills
+  keywordPutBack: 'blocks-keyword-put-back',  // SPEC 4.6-8 - restore what this keyword displaced
   keywordNoAction: 'blocks-keyword-no-action', // why no drop is offered, said rather than implied
   fieldWordingKept: 'blocks-wording-kept',    // "Wording kept from the posting", in the field's margin
   reqLegend: 'blocks-req-legend',             // what RQ-MH / RQ-NTH / RESP mean, once per asset
@@ -609,6 +610,40 @@ export function keywordDisplacement(swapsForList, keyword) {
 export function keywordDisplacementText(d) {
   if (!d || !d.from) return null
   return d.list ? `Took the place of ${d.from} in ${d.list}.` : `Took the place of ${d.from}.`
+}
+
+/**
+ * SPEC 4.6-8 — "Put back "<original>"", the third of the prototype's three keyword-panel actions
+ * (`docs/qc-evidence/qc/assets.jsx:70-74`). Every one of the panel's three actions is an `onAsk` in
+ * the prototype — see the comment on `keywordActions` for why Drop and Swap are seed-only requests
+ * rather than mutations — and this one is no different.
+ *
+ * THIS CORRECTS A RECORDED CONCLUSION. `PROTOTYPE-COVERAGE.md` row 4.6-8 was reopened as a FEATURE
+ * needing `POST /app/packet/{id}/swaps/{swapId}/revert`, reasoned from the button's LABEL rather
+ * than its `onClick`. The prototype source reads `onClick={() => onAsk(...)}` — it seeds the ask
+ * box, exactly like the Drop and Swap buttons beside it. No mutation route is needed, because the
+ * control it is asked to match does not use one either.
+ *
+ * ONLY OFFERED when a real displacement exists (`keywordDisplacement` is non-null) AND the keyword
+ * is PRESENT in the field — the same `present` gate `keywordActions`/`keywordSwapOptions` already
+ * apply, for the same reason: a keyword not actually claimed in the text has nothing here to
+ * un-claim by restoring what it replaced.
+ *
+ * NAMES BOTH TERMS, the same discipline `keywordSwapOptions`' ask holds, and makes no coverage
+ * claim — `requirement.model_keyword` counts toward nothing, as the panel already says two lines
+ * above, so a sentence about "coverage" here would contradict it.
+ */
+export function keywordPutBackOption({ keyword, present, canEdit, swapsForList } = {}) {
+  const k = typeof keyword === 'string' ? keyword.trim() : ''
+  if (!k || !canEdit || !present) return { ask: null, from: null }
+  const d = keywordDisplacement(swapsForList, k)
+  if (!d || !d.from) return { ask: null, from: null }
+  return {
+    from: d.from,
+    ask: d.list
+      ? `Put "${d.from}" back into ${d.list} in place of "${k}". Rewrite the line so it reads naturally with the original restored.`
+      : `Put "${d.from}" back in place of "${k}". Rewrite the line so it reads naturally with the original restored.`,
+  }
 }
 
 export function keywordSwapOptions({ keyword, present, canEdit, bank, inField } = {}) {

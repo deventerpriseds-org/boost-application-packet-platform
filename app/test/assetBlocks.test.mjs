@@ -13,7 +13,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import {
-  keywordDisplacement, keywordDisplacementText,
+  keywordDisplacement, keywordDisplacementText, keywordPutBackOption,
   keywordGrade, GRADE_WORD, GRADE_MARK,
   UNKNOWN_REQS_NOTE, UNKNOWN_TERMS_NOTE,
   countMismatchNote, deriveItems, draftSizeText, expectationFor, itemCountOf, joinLabels,
@@ -1648,6 +1648,43 @@ test('H:displacement-tolerates-junk-input-without-throwing', () => {
   assert.equal(keywordDisplacement(blankTo, ''), null)
   assert.equal(keywordDisplacement(blankTo, null), null)
   assert.equal(keywordDisplacement([{ action: 'swapped', from_label: 'Real Predecessor' }], ''), null)
+})
+
+test('H:put-back-only-offered-for-a-real-displacement-that-is-present-and-editable', () => {
+  const swaps = [
+    { action: 'swapped', from_label: 'Digital Transformation', to_label: 'Cloud-native Services', list: 'Skills 1' },
+    { action: 'kept', from_label: 'Kept Thing', to_label: 'Kept Thing', list: 'Skills 1' },
+  ]
+  // All four gates must hold at once: a keyword, canEdit, present, and a real displacement.
+  assert.equal(keywordPutBackOption({ keyword: 'Cloud-native Services', present: true, canEdit: true, swapsForList: swaps }).from,
+    'Digital Transformation')
+  assert.equal(keywordPutBackOption({ keyword: 'Cloud-native Services', present: true, canEdit: false, swapsForList: swaps }).ask, null)
+  assert.equal(keywordPutBackOption({ keyword: 'Cloud-native Services', present: false, canEdit: true, swapsForList: swaps }).ask, null)
+  assert.equal(keywordPutBackOption({ keyword: 'Kept Thing', present: true, canEdit: true, swapsForList: swaps }).ask, null)
+  assert.equal(keywordPutBackOption({ keyword: '', present: true, canEdit: true, swapsForList: swaps }).ask, null)
+  assert.equal(keywordPutBackOption({ present: true, canEdit: true, swapsForList: swaps }).ask, null)
+})
+
+test('H:put-back-names-both-terms-and-claims-no-coverage-state', () => {
+  const withList = [{ action: 'swapped', from_label: 'Digital Transformation', to_label: 'Cloud-native Services', list: 'Skills 1' }]
+  const ask = keywordPutBackOption({ keyword: 'Cloud-native Services', present: true, canEdit: true, swapsForList: withList }).ask
+  assert.equal(ask,
+    'Put "Digital Transformation" back into Skills 1 in place of "Cloud-native Services". '
+    + 'Rewrite the line so it reads naturally with the original restored.')
+  // The prototype's own sentence ("record the keyword as uncovered rather than met") is a coverage
+  // claim this app cannot make - model_keyword is declared never scoreable. It must not appear here.
+  assert.ok(!/uncovered|coverage|scored?/i.test(ask))
+
+  const noList = [{ action: 'swapped', from_label: 'A', to_label: 'B' }]
+  const askNoList = keywordPutBackOption({ keyword: 'B', present: true, canEdit: true, swapsForList: noList }).ask
+  assert.equal(askNoList, 'Put "A" back in place of "B". Rewrite the line so it reads naturally with the original restored.')
+})
+
+test('H:put-back-tolerates-junk-input-without-throwing', () => {
+  for (const bad of [null, undefined, 'nope', 42, {}]) {
+    assert.deepEqual(keywordPutBackOption({ keyword: 'X', present: true, canEdit: true, swapsForList: bad }), { ask: null, from: null })
+  }
+  assert.deepEqual(keywordPutBackOption(), { ask: null, from: null })
 })
 
 

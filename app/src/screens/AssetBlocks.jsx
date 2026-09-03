@@ -37,7 +37,7 @@ import {
   ASSET_ANSWERS_DEFAULT_OPEN, correctionsForField,
   keywordActions, keywordSwapOptions, keywordPresence,
   omitListCaveat, restoreOptions, shortenAction, rewordAction,
-  keywordDisplacement, keywordDisplacementText,
+  keywordDisplacement, keywordDisplacementText, keywordPutBackOption,
   keywordGrade, GRADE_WORD, GRADE_MARK,
   meterModel, originalState, PLACEHOLDER_NOTE, placeholderToken, proposedKeywordDetail,
   proposedKeywordsForRow, reqsForRow, scopeSwaps,
@@ -1226,6 +1226,30 @@ function AssetBlock({ row, reqs, swapsForList, wide, artifactId, listOwners, thr
                   return (
                     <div data-qc={BLOCK_HOOKS.keywordActions} style={{ marginTop: 8 }}>
                       <div className="px-small" style={{ fontWeight: 700 }}>Not comfortable claiming this?</div>
+                      {/* SPEC 4.6-8 - "Put back" a real displacement, first because it is the most
+                          specific of the three: it names exactly what this keyword took the place
+                          of. Rendered ONLY when a swap actually produced this keyword AND it is
+                          present, the same gate Drop/Swap already hold below. */}
+                      {(() => {
+                        const putBack = keywordPutBackOption({
+                          keyword: openKeywordDetail.keyword,
+                          present: kwPresent.has(openKeywordDetail.keyword),
+                          canEdit: Boolean(artifactId) && !isStatic,
+                          swapsForList,
+                        })
+                        if (!putBack.ask) return null
+                        return (
+                          <span className="px-link" role="button" tabIndex={0}
+                            data-qc={BLOCK_HOOKS.keywordPutBack}
+                            style={{ fontSize: 11, marginTop: 3, display: 'block' }}
+                            onClick={() => seedAsk(putBack.ask)}
+                            onKeyDown={(e) => {
+                              if (e.key !== 'Enter' && e.key !== ' ') return
+                              e.preventDefault()
+                              seedAsk(putBack.ask)
+                            }}>Put back {'\u201c'}{putBack.from}{'\u201d'}</span>
+                        )
+                      })()}
                       <span className="px-link" role="button" tabIndex={0}
                         data-qc={BLOCK_HOOKS.keywordDrop}
                         style={{ fontSize: 11, marginTop: 3, display: 'inline-block' }}
