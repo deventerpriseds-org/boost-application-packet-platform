@@ -1,10 +1,10 @@
 import { app, HttpRequest, HttpResponseInit, InvocationContext, Timer } from '@azure/functions'
-import { TableClient } from '@azure/data-tables'
 import { resolveOwner, requireWrite } from './appSession'
 import { getPgClient } from './pgClient'
 import { groundingText } from './jdText'
 import { logUsage } from './usageMeter'
 import { loadConfig } from './mailWatch'
+import { readMasterContextEntity } from './masterContext'
 
 // G3 Phase B (structured apply) + Phase C (ATS match score).
 // - match-score: keyword match-rate + gap list per opportunity (Jobscan-style),
@@ -20,9 +20,7 @@ const CONN = process.env.AZURE_STORAGE_CONNECTION_STRING
 async function masterContextSummary(): Promise<string> {
   if (!CONN) return ''
   try {
-    const ctx = TableClient.fromConnectionString(CONN, 'MasterContext')
-    let mc: any = {}
-    for await (const e of ctx.listEntities({ queryOptions: { filter: "PartitionKey eq 'context'" } })) mc = e
+    const { entity: mc } = await readMasterContextEntity()
     // Pull a compact profile from whatever fields exist.
     const parts = Object.entries(mc).filter(([k]) => !k.startsWith('_') && !['partitionKey', 'rowKey', 'etag', 'timestamp'].includes(k))
       .map(([k, v]) => `${k}: ${String(v).slice(0, 300)}`).slice(0, 12)

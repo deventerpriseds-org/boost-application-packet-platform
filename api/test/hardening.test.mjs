@@ -5613,3 +5613,33 @@ test('H:fixture-score-gap-is-per-artifact: one starved asset among scored ones m
   assert.match(err, /artifact_score missing on 1 of 2/,
     `the refusal must name the ratio and the offender so a reader knows what to fix; got: ${err}`)
 })
+
+// H:mastercontext-one-accessor -- the owner's master profile is read in ONE place.
+//
+// EVIDENCE, measured 2026-09-03: `grep -rn "PartitionKey eq 'context'" api/src` returned TEN hits
+// across NINE files, each opening its own TableClient against the same global partition. That is
+// what made "move this store" a ten-file edit with no way to bisect a failure, and it is why the
+// accessor lands as its own commit BEFORE anything about the store changes
+// (docs/qc-evidence/AC-mastercontext-to-postgres.md, commit ccc28c6: "one accessor first,
+// store-swap second -- confirmed correct").
+//
+// THE MT-XX HARNESS IS DELIBERATELY EXEMPT, and this is a scope decision rather than an oversight.
+// `CLAUDE.md` names `web/` + the mt* routes as the LEGACY DEV CONSOLE, "NOT the product". Dragging
+// four dead files behind the accessor would widen a bisectable commit for no reader. If the harness
+// is ever revived, the exemption list is the one place to change.
+//
+// MUTATION that must make this FIRE: re-add a raw
+// `listEntities({ queryOptions: { filter: "PartitionKey eq 'context'" } })` loop to any product
+// file -- e.g. restore the old body of `loadMasterBaseline` in appInsertions.ts.
+test('H:mastercontext-one-accessor: only masterContext.ts reads the MasterContext partition', () => {
+  // The legacy MT-XX harness (CLAUDE.md: "NOT the product") and the accessor itself.
+  const EXEMPT = /^(mt\d+\.ts|masterContext\.ts)$/
+  const offenders = allSources()
+    .filter(([name]) => !EXEMPT.test(name))
+    .filter(([, text]) => text.includes("PartitionKey eq 'context'"))
+    .map(([name]) => name)
+  assert.deepEqual(offenders, [],
+    `these product files read the MasterContext partition directly instead of calling ` +
+    `readMasterContextEntity() from masterContext.ts: ${offenders.join(', ')}. ` +
+    `Every raw read is one more file the store-swap has to touch at once.`)
+})
