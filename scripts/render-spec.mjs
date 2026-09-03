@@ -149,6 +149,13 @@ const ACTS = {
   // containing the label has text "≈Cycle Time Reduction" and an anchored ^…$ regex misses it.
   keychip:  { click: 'Cloud-native Services', anchor: 'Took the place of',    pad: 300,
               proves: ['Took the place of', 'Not comfortable claiming this?', 'Swap for another skill'] },
+  // The VARIANT half of the same control, and the reason it needs its own recipe: a variant chip
+  // renders a nested "~" span, so the smallest element containing the label has text
+  // "~P&L Ownership" and the anchored regex the `keychip` recipe uses cannot match it. Clicking by
+  // the panel's own grade word instead. This is the shot that shows what SPEC 4.6's grade and the
+  // "~" marker actually look like on a REWORDED term, beside `keychip`'s Exact one.
+  'keychip-variant': { click: 'P&L Ownership', anchor: 'Reworded', pad: 300, exact: false,
+              proves: ['Reworded', 'Posting says'] },
   // SPEC 4.11 - the assistant panel, which is COLLAPSED at rest ("Open assistant", row 4.11-2), so
   // a resting screenshot shows the card and none of the panel. `proves` names the three scopes
   // because the scope selector (4.11-4) is the row the owner is deciding on, and a silent no-op
@@ -165,7 +172,15 @@ let actResult = null
 if (ACT) {
   const spec = ACTS[ACT]
   if (spec.click) {
-    const target = page.locator(`text=/^${spec.click.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$/`).first()
+    // ANCHORED BY DEFAULT, because a loose match picks up the first mention anywhere on the page
+    // and clicks the wrong thing silently. `exact: false` opts out for the one case the anchor
+    // cannot express: a chip whose label is wrapped by a sibling marker span (a VARIANT keyword
+    // renders "~" beside the term), so the smallest element containing the label has text
+    // "~P&L Ownership" and `^P&L Ownership$` matches nothing. The assertion below still proves the
+    // click opened the intended state, so a loose match that hits the wrong element fails loudly
+    // rather than screenshotting the resting page.
+    const esc = spec.click.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    const target = page.locator(spec.exact === false ? `text=/${esc}/` : `text=/^${esc}$/`).first()
     await target.scrollIntoViewIfNeeded()
     await target.click()
     await page.waitForTimeout(900)
