@@ -36,7 +36,7 @@ on:
         required: false
         default: ''
       click_sel:
-        description: 'Optional CSS selector to click before asserting (reaches surfaces behind an interaction)'
+        description: "Optional ';'-separated CSS selectors, clicked IN ORDER before asserting (reaches surfaces one or several interactions deep). Every step must fire; the run stops at the first that does not and names it."
         required: false
         default: ''
       measure_sel:
