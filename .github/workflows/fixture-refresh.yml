@@ -216,11 +216,76 @@ jobs:
                                'capturing this would bake an outage into the fixture')
 
           dump['apiRequirements'] = body
-          json.dump(dump, open('raw-dump.json','w'))
           d = cmp_.get('dimensions') or []
           graded = len([r for r in d if r.get('fit') not in (None, 'not_applicable')])
           print(f'captured /requirements: {len(body.get("requirements") or [])} requirements, '
                 f'{len(d)} dimensions ({graded} graded), total={body.get("total")}')
+
+          # EVERY OTHER ENDPOINT THE APP CALLS, captured with the SAME token rather than derived.
+          #
+          # WHY THIS LOOP EXISTS. Deriving a fixture from the raw tables has now produced the same
+          # class of defect twice, and both times it read as the APP missing a feature:
+          #   * `comparison` was never emitted, so ~19 panels on the `jd` step were "missing".
+          #   * `/opportunity/{id}` was emitted as `{opportunity: <raw snake_case row>}` while the
+          #     API returns `{...rowToOpp(opp), contacts}` FLAT and camelCased, so `opp.jdSummary`
+          #     was undefined and the ENTIRE "Extracted from this posting" panel fell back to "No
+          #     posting text is stored". bodyLen 10,146 -> 17,478 and 0 -> 21 requirement rows once
+          #     captured instead of derived.
+          # And measured 2026-09-03, the drift had already recurred: `compare-ui --all` reported
+          # FOUR unmatched `/artifact/{id}/remediation` calls and one `/skill-bank`, with the qc
+          # step rendering 72,477 FEWER characters than its last recorded run. A capture cannot go
+          # stale this way; a derivation goes stale every time another lane adds a route.
+          #
+          # NON-FATAL BY DESIGN, and that is the difference from the block above. `/requirements`
+          # carries `comparison`, whose absence silently disarms the compare surface, so it fails
+          # the run. These are additive: a 404 means the route does not exist yet on the deployed
+          # Function, which must not block refreshing everything else. Each miss is printed.
+          def capture(path):
+              u = f'https://job-platform-api.azurewebsites.net/api/app/{path}'
+              u += ('&' if '?' in u else '?') + 'owner=' + urllib.parse.quote(owner)
+              rq = urllib.request.Request(u, headers={'Authorization': f'Bearer {token}'})
+              try:
+                  with urllib.request.urlopen(rq) as r:
+                      if r.status != 200: return None, f'HTTP {r.status}'
+                      b = json.loads(r.read())
+                      if isinstance(b, dict) and 'error' in b: return None, f'error body: {b["error"]}'
+                      return b, None
+              except urllib.error.HTTPError as e:
+                  return None, f'HTTP {e.code}'
+              except Exception as e:
+                  return None, str(e)[:90]
+
+          missed = []
+          o_body, err = capture(f'opportunity/{opp}')
+          if err: missed.append(f'opportunity/{opp}: {err}')
+          elif not isinstance(o_body, dict) or 'jdSummary' not in o_body:
+              missed.append('opportunity: response has no jdSummary - shape changed, NOT captured')
+          else:
+              dump['apiOpportunity'] = o_body
+              print(f'captured /opportunity: jdSummary={len(o_body.get("jdSummary") or "")} chars')
+
+          rem = {}
+          for a in (dump.get('artifacts') or []):
+              aid = a.get('id')
+              if not aid: continue
+              b, err = capture(f'artifact/{aid}/remediation')
+              if err: missed.append(f'artifact/{aid}/remediation: {err}')
+              else: rem[aid] = b
+          if rem:
+              dump['apiRemediation'] = rem
+              print(f'captured /remediation for {len(rem)} artifact(s)')
+
+          sb, err = capture('skill-bank')
+          if err: missed.append(f'skill-bank: {err}')
+          else:
+              dump['apiSkillBank'] = sb
+              print('captured /skill-bank')
+
+          if missed:
+              print('!!! NOT CAPTURED (the fixture will be thin for these surfaces):')
+              for m in missed: print(f'      {m}')
+
+          json.dump(dump, open('raw-dump.json','w'))
           PYEOF
 
       - name: Report what came back

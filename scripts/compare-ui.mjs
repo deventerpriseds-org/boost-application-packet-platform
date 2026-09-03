@@ -237,3 +237,34 @@ s1.close(); s2.close()
 const text = JSON.stringify(report, null, 1)
 if (JSON_OUT) await writeFile(JSON_OUT, text)
 console.log(text)
+
+// AN INSTRUMENT THAT CANNOT SEE HAS NO STANDING TO REPORT AN ABSENCE.
+//
+// `unmatchedFixtures` was already COLLECTED here and merely printed, and printing was not enough:
+// the same defect has now shipped a gap number twice.
+//   * `comparison` was never emitted by the fixture builder, so ~19 panels on the `jd` step were
+//     reported missing from the APP. They were missing from the FIXTURE.
+//   * `/opportunity/{id}` was emitted in the wrong shape, so the whole "Extracted from this
+//     posting" panel fell back to "No posting text is stored" -- and a coverage row was written
+//     saying a divergence was "confirmed in both source and screenshot" when the screenshot could
+//     not have contained it.
+// Measured 2026-09-03, drifted AGAIN inside a day: four unmatched `/artifact/{id}/remediation`
+// calls and one `/skill-bank`, with the qc step 72,477 characters short of its last run. Any
+// reader would have read that as the app losing most of the QC surface.
+//
+// So a run with unmatched calls now EXITS NON-ZERO. The numbers still print -- they are useful
+// for diagnosis -- but nothing downstream may treat them as a measurement. `--allow-unmatched`
+// exists for deliberately partial runs and has to be typed on purpose, the same contract as
+// `build-fixtures.mjs --allow-thin`.
+const blind = report.filter((r) => (r.unmatchedFixtures || []).length)
+if (blind.length && !has('allow-unmatched')) {
+  console.error('\n!!! REFUSING TO REPORT A GAP: the app called endpoints this fixture does not carry.')
+  for (const r of blind) {
+    console.error(`    ${r.step}: ${r.unmatchedFixtures.length} unmatched`)
+    for (const u of r.unmatchedFixtures.slice(0, 4)) console.error(`        ${u}`)
+  }
+  console.error('    Every "only in prototype" count above is a LOWER BOUND on what the app renders.')
+  console.error('    Re-run fixture-refresh.yml, then re-measure. Or pass --allow-unmatched to')
+  console.error('    accept a diagnostic-only run whose numbers must not be quoted as coverage.')
+  process.exit(2)
+}
