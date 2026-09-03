@@ -6964,3 +6964,49 @@ test('H:coach-single-identity-source: no coach handler reads body.owner directly
     'coachAgent handlers must take identity from resolveOwnerForWrite(), never from the request body '
     + '-- that divergence between guard and handler IS the bypass')
 })
+
+// H:signing-secret-precedence-parity -- Phase 0 / AC-S3.4. appSession.ts secret() resolves
+// SESSION_SIGNING_SECRET first, then MICROSOFT_CLIENT_SECRET, then AZURE_CLIENT_SECRET.
+// api-test.yml mints its own Bearer with a Python HMAC signer, so the two resolve the SAME key
+// independently -- and independent copies drift. Measured 2026-09-03: before this change the
+// workflow signed with AZURE_CLIENT_SECRET only, so the moment SESSION_SIGNING_SECRET was set on
+// the Function App, every api-test.yml dispatch would have started failing to verify. That is a
+// self-inflicted outage triggered by a SECRET being added, with nothing in the diff to point at.
+//
+// The invariant: the workflow must consult SESSION_SIGNING_SECRET BEFORE the fallback, exactly as
+// secret() does. Checking precedence (not merely that the name appears) is what makes this real.
+//
+// MUTATION that must make this FIRE: in api-test.yml, change the signer back to
+// `client_secret = os.environ['AZURE_CLIENT_SECRET']`.
+test('H:signing-secret-precedence-parity: api-test.yml resolves the signing key in secret() order', () => {
+  const wf = readFileSync(join(import.meta.dirname, '../../.github/workflows/api-test.yml'), 'utf8')
+  const line = wf.split('\n').find((l) => /^\s*client_secret\s*=/.test(l))
+  assert.ok(line, 'api-test.yml must still mint its own session token')
+  const iNew = line.indexOf('SESSION_SIGNING_SECRET')
+  const iOld = line.indexOf('AZURE_CLIENT_SECRET')
+  assert.ok(iNew !== -1,
+    'api-test.yml must consult SESSION_SIGNING_SECRET -- otherwise setting that secret on the '
+    + 'Function App silently breaks every dispatch')
+  assert.ok(iOld === -1 || iNew < iOld,
+    'SESSION_SIGNING_SECRET must be resolved BEFORE the AZURE_CLIENT_SECRET fallback, mirroring '
+    + 'appSession.ts secret() -- mirroring the ORDER is what removes the flag day')
+
+  const src = readFileSync(join(import.meta.dirname, '../src/functions/tests/appSession.ts'), 'utf8')
+  const fn = src.split('\n').find((l) => l.includes('function secret()'))
+  assert.ok(fn && fn.indexOf('SESSION_SIGNING_SECRET') < fn.indexOf('AZURE_CLIENT_SECRET'),
+    'appSession.ts secret() must still resolve SESSION_SIGNING_SECRET first -- if this flips, the '
+    + 'workflow parity above is asserting the wrong order')
+})
+
+// H:deploy-syncs-signing-secret -- Phase 0 / AC-S3.1. CLAUDE.md: a name mismatch in the --settings
+// list silently BLANKS the setting, so the app falls back with no error anywhere. An exact-name
+// assertion is the only cheap guard against a typo that would look like "the fix didn't work".
+//
+// MUTATION that must make this FIRE: delete the SESSION_SIGNING_SECRET line from api-deploy.yml,
+// or misspell either side of the '=' in it.
+test('H:deploy-syncs-signing-secret: api-deploy.yml syncs SESSION_SIGNING_SECRET by exact name', () => {
+  const wf = readFileSync(join(import.meta.dirname, '../../.github/workflows/api-deploy.yml'), 'utf8')
+  assert.ok(/"SESSION_SIGNING_SECRET=\$\{\{ secrets\.SESSION_SIGNING_SECRET \}\}"/.test(wf),
+    'api-deploy.yml --settings must carry SESSION_SIGNING_SECRET with an exact name match on both '
+    + 'sides -- a mismatch blanks the setting silently')
+})

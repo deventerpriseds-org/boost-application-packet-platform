@@ -8,6 +8,31 @@ Status values: `open` | `in-progress` | `blocked` | `done`
 
 ## Open
 
+### ACT:capture-anonymous-write — `/api/app/capture` accepts an anonymous body-asserted owner (2026-09-03)
+- **Origin:** found by the Phase 0 AC pass while auditing the coach routes; **outside** that brief's
+  named scope. Owner decision 2026-09-03: *"2- track it separately"* — so it is tracked here and
+  deliberately NOT fixed in the Phase 0 branch.
+- **The defect, read from source at `a041d8f`:** `appCapture.ts:56` registers the route
+  `authLevel:'anonymous'`, the file contains **no `requireWrite` call at all**, and `:22` reads
+  `const owner = ro.verified ? ro.owner : (body?.owner || ro.owner)`. So an anonymous POST of
+  `{owner:"von.ellis@enterpriseds.io", url, title}` inserts an `opportunity` row into the real
+  production pipeline via `routeOpportunity`. Same SHAPE as the coach bypass, and worse in one
+  respect: coachChat at least ran a (flawed) guard first; this route runs none.
+- **WHY IT IS NOT SIMPLY A BUG, and why it was not folded into Phase 0.** The behaviour is
+  deliberate. The file header calls it *"the universal-capture endpoint the Chrome extension posts
+  to"*, and `:20-21` comments *"Prefer the server-verified token; else the extension's configured
+  owner (body)"*. The extension has no session to present. **Applying the S2 fix as-is would break
+  a working feature the owner uses** — which is exactly why this needed a decision rather than a
+  silent fold-in.
+- **What a real fix needs (not started):** the extension must carry something the server can check —
+  the same shared-secret shape S1 needs for ElevenLabs ConvAI, or a long-lived extension token
+  minted per owner. Both are a change to the EXTENSION as well as the API, so this is not a
+  one-file fix and should not be attempted inside a branch scoped to the coach routes.
+- **Interim risk, stated plainly:** the route is live and unauthenticated today. It writes
+  opportunity rows only — it does not read owner data back, send email, or reach the coach tool
+  belt, so the blast radius is data POLLUTION of one owner's pipeline, not exfiltration.
+- **Status:** OPEN, tracked, not scheduled. Not in the Phase 0 branch by owner decision.
+
 ### ACT:coach-auth-bypass — two auth bypasses on the coach routes (2026-09-03)
 - **Origin:** found incidentally while auditing an inherited feature spec
   (`BOOST_COPILOT_COLE_BRIDGE_SPEC.md`), not from an owner report. Nobody asked for a security
