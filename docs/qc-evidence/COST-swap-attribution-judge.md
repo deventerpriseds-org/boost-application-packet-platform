@@ -4,22 +4,30 @@
 (eMoney Advisor · SVP Development and Enterprise Architecture), from the
 `fixture-refresh.yml` dump. Sized BEFORE the criteria so they land against a real budget.
 
-## The shape of the call
+## The shape of the call — CORRECTED 2026-09-03
 
-`coverageJudge` takes **many requirements against one text** (`buildCoverageUser(reqs, fieldName,
-fieldText)`). Attribution wants the same shape — one replacement item, a shortlist of candidate
-requirements — so **one call per swap row**, not one per row-requirement pair. That is the
-difference between 28 calls and 980.
+**An earlier version of this document said "one call per swap row: 28 calls". That was wrong**, and
+the owner caught it: *"the 28 judge calls shouldn't be individual... I assume they can fire in 1-3
+batches calls max."* Correct.
 
-## The numbers
+I had copied `coverageJudge`'s call shape (many requirements against ONE field text) and treated it
+as a constraint. It is that judge's shape, not a law: it batches on the REQUIREMENT axis because it
+asks about one document at a time. Attribution asks the opposite question and can batch on BOTH
+axes — every replacement item in the packet, against the shortlisted requirements, in one request.
 
-| | count |
+**The payload is small.** The items are skill labels (`"Global Engineering Teams"`), not documents:
+30 rows of a few words each, plus 35 requirement lines. That is a small prompt, well inside one
+call.
+
+| | calls |
 |---|---:|
-| `action='swapped'` rows in the packet | 30 |
-| **Lane 1 — exact containment, no model** | **2** |
-| **Lane 2 — judge calls, uncached** | **28** |
-| Distinct requirements available as candidates | 35 |
-| Cached steady state | **0** |
+| **Whole packet in one request** | **1** |
+| Split per list (`skills_1`, `relevant_*`, `expertise`) for smaller, more focused prompts | **2-3** |
+| ~~One per swap row~~ | ~~28~~ — superseded |
+
+**Why 2-3 might still beat 1:** a per-list call keeps each prompt to items that compete for the same
+slots, which is the context that makes an attribution judgeable. That is an AC question, not a cost
+one — both are cheap.
 
 ## THE HONEST HEADLINE: lane 1 is thin
 
@@ -47,7 +55,7 @@ the minority case.
 
 ## What the ACs still have to settle
 
-1. Is 28 calls per packet acceptable at the owner's packet volume, or does lane 2 need a trigger
-   (on panel open, on build, on demand) rather than running for every row?
+1. One batched call for the packet, or one per list? Both are cheap; per-list gives each prompt only
+   the items competing for the same slots, which may make the attribution more judgeable.
 2. Does the shortlist cap the candidate count per call, and at what number?
 3. Is a cache miss on a re-judged row visible to the reader, or silent?
