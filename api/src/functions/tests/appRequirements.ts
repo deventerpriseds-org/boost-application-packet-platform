@@ -13,7 +13,7 @@ import {
   refusalReason, NEVER_EVIDENCE,
 } from './evidence'
 import { sourceText, loadFacts } from './appFacts'
-import { resolveOptionsFor } from './checkPrefs'
+import { resolveOptionsFor, loadReextractRecheckMax } from './checkPrefs'
 import { claimTokens, segments, tokensOf, sameWord } from './requirementSupport'
 import { writeComparison, comparisonPayload } from './appDimensions'
 import { escalateOne, PROPOSAL_VERSION, type EscalationOutcome } from './evidenceProposal'
@@ -638,7 +638,9 @@ export async function clearRequirements(client: any, oppId: string): Promise<{ c
  * most likely to silently fan out model calls at scale. See this file's own module comment / the
  * IMPL progress doc for the owner-setting this cap SHOULD become — `owner_search_prefs` does not yet
  * have a column for it, and this lane does not own schema.ts, so the bound below is a literal
- * default until that column is routed and read here instead.
+ * last-resort default, reached only when the owner cannot be resolved or their own setting cannot
+ * be read. `owner_search_prefs.srch_reextract_recheck_max_artifacts` (checkPrefs.ts) is now the
+ * real bound, owner-changeable per the no-hardcoded-config rule, seeded from this same literal.
  */
 const DEFAULT_REEXTRACT_RECHECK_MAX_ARTIFACTS = 5
 
@@ -655,9 +657,25 @@ export async function recheckArtifactsAfterRequirementsChange(
   // fetched from a real database), but the ceiling this function GUARANTEES is enforced independent
   // of what the query driver hands back, so it is provable with a fake client in a unit test and not
   // only against a real Postgres LIMIT clause.
-  const max = Number.isFinite(opts?.maxArtifacts) && (opts!.maxArtifacts as number) > 0
-    ? Math.floor(opts!.maxArtifacts as number)
-    : DEFAULT_REEXTRACT_RECHECK_MAX_ARTIFACTS
+  let max: number
+  if (Number.isFinite(opts?.maxArtifacts) && (opts!.maxArtifacts as number) > 0) {
+    max = Math.floor(opts!.maxArtifacts as number)
+  } else {
+    // No override was passed. Resolve the OWNER'S OWN setting rather than the literal default —
+    // one extra cheap query, only reached when `writeRequirements`/`clearRequirements` already
+    // reported a REAL change, so this is never on the byte-identical-reparse hot path AC 9 protects.
+    // Any failure (opp not found, prefs table unreachable) falls back to the literal — this must
+    // never throw, matching the non-fatal contract the whole function already holds.
+    max = DEFAULT_REEXTRACT_RECHECK_MAX_ARTIFACTS
+    try {
+      const own = opts?.owner || (await client.query(
+        `select owner_email from opportunity where id = $1`, [oppId])).rows[0]?.owner_email
+      if (own) {
+        const fromSetting = await loadReextractRecheckMax(client, own)
+        if (Number.isFinite(fromSetting) && fromSetting > 0) max = Math.floor(fromSetting)
+      }
+    } catch { /* keep the literal default */ }
+  }
   let ids: string[] = []
   try {
     const { rows } = await client.query(
