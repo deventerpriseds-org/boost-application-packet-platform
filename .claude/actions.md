@@ -8380,3 +8380,20 @@ unstorable). Storage untouched.
 REMAINING: (2) confirm AC-5, `masterBaseline` byte-identical from both stores on this real data;
 (3) flip the switch; (4) the Settings text editor. Step 3 waits on
 `VERIFY-mastercontext-and-deploy-gate-1.md` (independent verifier, in flight).
+
+### ACT:ensure-only-tables-are-unmigrated — OPEN, pre-existing, surfaced by the verifier
+14 production tables are created ONLY by request-time `ensure*()` helpers and appear in neither
+`SCHEMA_SQL` nor `EXPECTED_TABLES`, so `pgMigrate` can never report them missing:
+`ats_source, bulk_job, coach_activity, coach_thread, folder_role_map, mail_alert_state,
+mail_watch_config, opportunity_stage_history, owner_search_prefs, role_profile, seniority_routing,
+taxonomy_title, template, title_tier_draft`. `owner_search_prefs` is created in five files and backs
+the `chk_*` settings family.
+
+Found by the independent verifier (VERIFY-mastercontext-and-deploy-gate-1.md C5), reproduced
+independently. PRE-DATES the MasterContext lane. `H:every-declared-table-is-registered` now PRINTS
+them rather than pretending to cover them.
+
+**Do NOT "fix" this by adding them to EXPECTED_TABLES** — pgMigrate would report them MISSING on
+every deploy, since SCHEMA_SQL does not create them: a red deploy over a healthy schema. The real
+fix is D21's, moving each table's DDL into SCHEMA_SQL. OWNER DECISION: worth doing, and how many at
+a time.

@@ -6562,5 +6562,16 @@ is the first deploy with a stamp on both sides, and the first to wait.
 **Two guards earned here, both mutation-proved:**
 - `H:every-declared-table-is-registered` -- H11 walked a HAND-MAINTAINED list and was therefore
   blind to any genuinely new table; the new one derives the list from SCHEMA_SQL.
+  **OVERSTATED, and the independent verifier caught it (C5).** That closes the gap for tables
+  DECLARED IN SCHEMA_SQL. It does nothing for a table created only by a request-time `ensure*()`
+  helper in its own file -- invisible to pgMigrate, to H11 and to the new guard alike, since all
+  three only look at EXPECTED_TABLES' universe. **14 such tables exist today** (reproduced
+  independently of the verifier), including `owner_search_prefs`, created across FIVE files and
+  backing the whole `chk_*` settings family. They PRE-DATE this lane. The guard now PRINTS them
+  so nobody reads its name as a general fix.
+  **THE TRAP, if anyone tries the obvious fix:** adding them to EXPECTED_TABLES makes pgMigrate
+  report them MISSING on every deploy, because SCHEMA_SQL does not create them -- a red deploy
+  over a healthy schema. The real fix is D21's, moving the DDL into SCHEMA_SQL one table at a
+  time, and that is an owner decision, not a test-file change.
 - `H:deploy-sha-comes-from-the-bundle` -- health must report the compiled sha, and must not name
   `DEPLOYED_SHA` at all so the fallback cannot be reintroduced at the call site.

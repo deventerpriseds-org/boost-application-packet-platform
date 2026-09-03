@@ -344,6 +344,37 @@ test('H:every-declared-table-is-registered: SCHEMA_SQL and EXPECTED_TABLES canno
   assert.ok(declared.length >= 30, `only ${declared.length} tables parsed out of SCHEMA_SQL -- the ` +
     `extraction broke, and an empty list would make this guard pass vacuously, which is the exact ` +
     `failure it exists to catch`)
+
+  // THE PART THIS GUARD DOES **NOT** COVER, surfaced so nobody reads its name as a general fix.
+  //
+  // REFUTED BY THE INDEPENDENT VERIFIER, 2026-09-03 (VERIFY-mastercontext-and-deploy-gate-1.md, C5).
+  // The assertion above closes the D21-shaped gap for tables DECLARED IN SCHEMA_SQL. A table created
+  // only by a request-time `ensure*()` helper in its own file is invisible to it -- and to H11, and
+  // to pgMigrate, all three of which only ever look at EXPECTED_TABLES' universe. Reproduced here
+  // independently of the verifier: 14 such tables, `owner_search_prefs` among them, created across
+  // FIVE files and backing the whole `chk_*` settings family this suite polices at length.
+  //
+  // SURFACED, NOT FAILED, and the reason is a trap worth naming: adding these to EXPECTED_TABLES
+  // would make pgMigrate report them MISSING on every deploy -- SCHEMA_SQL does not create them --
+  // turning a green deploy red for a schema that is actually fine. The real fix is D21's: move the
+  // DDL into SCHEMA_SQL, one table at a time. That is a tracked decision, not something to do inside
+  // a test file.
+  const elsewhere = new Map()
+  for (const [name, text] of allSources()) {
+    if (name === 'schema.ts') continue
+    const bare = text.split('\n').map((l) => l.replace(/--.*$/, '')).join('\n')
+    for (const m of bare.matchAll(/create table if not exists (\w+)/g)) {
+      if (!elsewhere.has(m[1])) elsewhere.set(m[1], [])
+      if (!elsewhere.get(m[1]).includes(name)) elsewhere.get(m[1]).push(name)
+    }
+  }
+  const invisible = [...elsewhere.keys()]
+    .filter((t) => !declared.includes(t) && !new RegExp(`'${t}'`).test(registered)).sort()
+  if (invisible.length) {
+    console.log(`       note: ${invisible.length} table(s) are created ONLY by an ensure*() helper ` +
+      `and are invisible to pgMigrate, H11 and this guard:`)
+    for (const t of invisible) console.log(`         ${t}  (${elsewhere.get(t).join(', ')})`)
+  }
 })
 
 // ---------------------------------------------------------------------------------------------
