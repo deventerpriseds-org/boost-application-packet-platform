@@ -96,14 +96,36 @@ auto-crediting a model's excerpt; (ii) `checks.ts`'s `coverageJudge` and `review
 **off** specifically because they are model judgements that can move a number the owner reads,
 with the owner switching them on once satisfied. A reword that changes what the resume *says* about
 the candidate is at least as consequential as either.
+**Where a PENDING proposal lives, since nothing in `correction` today can represent "not yet
+applied."** Every row in `correction` today, of every existing `source`, is applied the instant it
+is written — the revert path (`revertOne`) exists to undo an applied change, not to accept an
+unapplied one, and its offset/hash invariants assume the phrase is CURRENTLY in the text. Rather
+than bending that table to hold a state it was never designed for, a pending reword is **not a
+`correction` row at all until accepted.** It is stored the same way `ensurePackage` already stores
+other per-build-but-not-merge-field output — `packet.last_build` (jsonb), which already carries
+`analysis` and `lineage` for exactly this reason (`appPackets.ts`'s `last_build` write, and the
+`packetAnalysis` route that reads `last_build.analysis` back, `appPackets.ts:packetAnalysis`). A
+new `last_build.pendingRewords` array (`{field, phrase, char_start, char_end, replacement,
+requirement_text, reason}` per entry — the same shape a `correction` row would eventually take)
+holds proposals nothing has accepted yet. **Accepting one is a new route**,
+`POST /api/app/artifact/{artifactId}/reword/{index}/accept`, that does exactly what
+`artifactOwnerEdit` already does for a manual edit (`appCorrections.ts:artifactOwnerEdit`): locate
+the phrase in the CURRENT field text via `locateOwnerPhrase` (exact, unambiguous, or refuse — the
+text may have moved since the proposal was computed), splice it, write ONE `correction` row with
+`source='reworded'` and `frame='applied'`, update `packet.pkg_json`, and remove the entry from
+`last_build.pendingRewords`. Rejecting one simply removes it from the pending array with no
+`correction` row ever created — matching AC-3's "no substitute found" outcome exactly (nothing was
+written, the text is untouched).
+
 **AC-0c:** `Given` a detected near-echo span and a candidate reword, `when` the pass runs,
-`then` it writes the reword as a **pending** proposal (see §2's storage shape) that does not appear
-in the shipped document until the owner accepts it, UNLESS the owner has set a settings-store
-threshold `rewordAuto` (seeded `false`, following the `reviewerAuto`/`coverageJudge`/`gateAdvisory`
-precedent in `CheckThresholds`, `checks.ts:132-179` — never a hardcoded constant, per this repo's
-"no hardcoded config" rule) to `true`, in which case it auto-applies and logs exactly as a
-`generalized` correction does today. **A fresh owner who has touched nothing sees no change in
-behaviour** — the same safety argument `reviewerAuto`'s own comment makes for itself.
+`then` it is appended to `packet.last_build.pendingRewords` and does NOT appear in the shipped
+document or in `correction` until the owner accepts it through the route above, UNLESS the owner
+has set a settings-store threshold `rewordAuto` (seeded `false`, following the
+`reviewerAuto`/`coverageJudge`/`gateAdvisory` precedent in `CheckThresholds`, `checks.ts:132-179` —
+never a hardcoded constant, per this repo's "no hardcoded config" rule) to `true`, in which case the
+pass calls the accept logic itself at generation time and the reword ships applied and logged
+exactly as a `generalized` correction does today. **A fresh owner who has touched nothing sees no
+change in behaviour** — the same safety argument `reviewerAuto`'s own comment makes for itself.
 
 ## 2. AC-1 — the reword does not change meaning
 
@@ -265,3 +287,126 @@ substring test against un-reworded text.
   with `source='reworded'` exists, so AC-5b's separate count is absent (not zero — `atsCoverage`'s
   own `NOT_PARSED`/null discipline applies: nothing to report is `reason: null` component simply not
   shown, never a `0` that reads as "measured and found none").
+
+## 7. AC-6 — the `figureEcho.ts:422-445` refusal is honoured
+
+§1 already resolved the substantive question (field scope, span scope, confirmation default). This
+section states the criteria that make that resolution checkable rather than aspirational.
+
+- **AC-6a.** `Given` the reword pass's field allow-list, `when` it is exercised against every merge
+  field of every artifact type (not only `resume`), `then` it never fires on `compact_resume`,
+  `cover`, or `portfolio` — none of their merge fields (`packetTemplates.ts:45-56`) is
+  `ResumeSummary` except `compact_resume`'s own copy, and AC-6b below settles that case explicitly
+  rather than by omission.
+- **AC-6b (the compact resume shares the resume's `ResumeSummary` text, and shares its reword).**
+  `compact_resume`'s template also declares `{{ResumeSummary}}` (`packetTemplates.ts:47`). `Given` a
+  reword was applied to the resume's `ResumeSummary`, `when` the compact resume is rendered from the
+  SAME `pkg`, `then` it renders the reworded text — there is one `pkg.ResumeSummary` value shared by
+  both artifacts' templates (confirmed: both are filled from the same `pkg` object in
+  `ensurePackage`/`renderArtifact`), so this requires no special-casing as long as the reword pass
+  runs before BOTH artifacts are rendered from the shared package, which it already does per §0.3.
+- **AC-6c (owner primacy: a reword never touches a span the owner has already edited).** This is a
+  criterion the brief's minimum list does not name explicitly, and it is added here because it is a
+  direct, foreseeable consequence of extending `correction`: `artifactOwnerEdit`
+  (`appCorrections.ts`) lets the owner rewrite ANY span of ANY merge field, including
+  `ResumeSummary`, and `applyCorrectionPass` already re-applies those owner edits (via
+  `reapplyOwnerEdits`, `correction.ts:220-238`) BEFORE the point in `ensurePackage` where the reword
+  pass would run (§0.3's ordering). If the reword pass's own near-echo scan is run against the
+  post-owner-edit text with no exclusion, it could detect and rewrite the very words the owner just
+  chose — silently undoing DECISION A (`schema.ts`'s own comment: *"an owner's own edit SURVIVES A
+  REBUILD"*) one step further down the same function. `Given` the owner has an unrevoked
+  `source='owner_edit'` correction on `ResumeSummary` for this artifact, `when` the reword pass
+  scans the field, `then` it excludes the exact character range that owner-edit row currently
+  occupies (located via `locateOwnerPhrase`, the SAME exact-and-unambiguous rule
+  `reapplyOwnerEdits` already uses, `correction.ts:206-218`) from candidate spans, and reports
+  nothing for that range even if it would otherwise match a requirement near-echo.
+
+## 8. AC-7 — ordering and migration safety across the deploy window
+
+`api-deploy.yml` deploys code at `:81` and runs the migration at `:109` (grep confirms these line
+numbers point at "Deploy to Azure Functions" and "Apply the database schema" respectively). Code
+ships first. `ensureCorrectionTable()` (`appCorrections.ts:63-96`) already self-heals `correction`'s
+schema on every route entry — but reading it line by line surfaces a gap this feature would
+otherwise walk straight into.
+
+**Finding, not assumed:** `ensureCorrectionTable()` widens `frame` with its own
+`alter table ... add column if not exists` + `drop constraint if exists` / `add constraint` pair
+(`appCorrections.ts`, the `frame`-column lines), but it does **NOT** have any equivalent ALTER for
+`correction_source_check` — only the inline `create table if not exists` declares the `source`
+domain, which is a no-op on a table that already exists (every production database, since P8.1
+shipped). Today this is latent and harmless, because the three currently-shipped `source` values
+(`profile_figure`, `generalized`, `owner_edit`) reached production through `schema.ts`'s own ALTER
+(`schema.ts`, the widening comment above `correction_source_check`), which DOES run — just later,
+at migration time, not at `ensureCorrectionTable()` time. **Widening `source` to include a 4th value
+for reword walks back into the exact deploy-window hazard `schema.ts`'s own comment already
+describes for itself** ("between those two steps a route can run against a database whose CHECK has
+not yet been widened, and an owner's edit is rejected by the database with the code already live"),
+UNLESS `ensureCorrectionTable()` gets the same treatment `frame` already has.
+
+- **AC-7a.** `Given` `schema.ts`'s `correction_source_check` is widened to admit the 4th value (§9
+  names it), `when` `ensureCorrectionTable()` is next edited for this feature, `then` it ALSO gets a
+  `drop constraint if exists correction_source_check` / `add constraint ... check (source in (...))`
+  pair widened to the SAME value set, mirroring the `frame` column's existing precedent exactly —
+  closing the deploy-window gap the same way `frame` already closes it, per the inherited
+  feasibility table's own "confirmed hazard, but already mitigated by precedent" line, which this AC
+  makes true by actually extending that precedent rather than citing it.
+- **AC-7b.** `Given` the new `requirement_text` column, `when` it is added, `then` it is added via
+  `alter table correction add column if not exists requirement_text text` in BOTH `schema.ts` and
+  `ensureCorrectionTable()`, nullable (a row with no link, i.e. the four EXISTING sources, has none)
+  — following the exact pattern `frame` set for itself (`schema.ts`'s own comment: "Nullable and
+  unbackfilled by design... which is what makes every already-stored row undoable without touching a
+  single one of them"). No backfill is required or attempted.
+- **AC-7c (H39/H39b ordering).** `Given` any statement that names `requirement_text` or the widened
+  `source` domain, `when` it appears in `schema.ts`, `then` it appears strictly AFTER the
+  `create table if not exists correction` statement — the general rule this file already states for
+  itself and already has two measured failures on record (a composite FK and a `create index` each
+  naming a column an idempotent ALTER added later in the file).
+
+## 9. AC-8 — do the three DDL-parity guards actually catch this change?
+
+`H:correction-ddl-parity`, `H:correction-source-widened-by-alter`, and
+`H:correction-ddl-column-parity` (`api/test/correctionDdlParity.test.mjs:35,63,104`) already exist.
+Read literally against what they actually compare (not what their names suggest), rather than
+assumed to "just work":
+
+- **`H:correction-ddl-parity` (line 35) DOES catch a missed 4th `source` value in one of the three
+  inline `create table` blocks.** It extracts the domain from each home's `correctionBlock` (the
+  text between `create table if not exists correction (` and the first `);`) and asserts all three
+  are textually identical. If `schema.ts`'s inline CREATE, `appCorrections.ts`'s inline CREATE, and
+  `test/sql/correction.sql`'s CREATE do not all list the SAME four values, this test fails. **This
+  guard is sufficient for the inline-CREATE half of the change, and needs no modification** — it is
+  generic over the domain's contents, not hardcoded to three values (confirmed by reading
+  `sourceDomains()`, which is a bare regex over `check (source in (...))` with no value list of its
+  own).
+- **`H:correction-source-widened-by-alter` (line 63) DOES catch a missed or mismatched ALTER — but
+  ONLY for `schema.ts`.** It re-parses `schema.ts` specifically (`read('../src/functions/tests/
+  schema.ts')` is hardcoded in this test) and asserts its ALTER matches its own inline CHECK. It has
+  **no equivalent assertion for `appCorrections.ts`**, which is exactly the gap AC-7a names — this
+  test would stay green even if `ensureCorrectionTable()` never got its own ALTER for `source` at
+  all, because it never reads that file.
+  **AC-8a (new guard required, not merely inherited).** `Given` AC-7a's requirement that
+  `ensureCorrectionTable()` gets its own `source`-widening ALTER, `when` a test is written for it,
+  `then` it extends `correctionDdlParity.test.mjs` with a new case,
+  `H:correction-ensure-table-widens-source-too`, that parses `appCorrections.ts` for a
+  `drop constraint if exists correction_source_check` / `add constraint ... check (source in (...))`
+  pair and asserts its value set equals `schema.ts`'s ALTER's value set (the same shape
+  `H:correction-source-widened-by-alter` already uses, pointed at the second home). Without this,
+  the second file could ship the deploy-window gap AC-7a exists to close and no test would notice.
+- **`H:correction-ddl-column-parity` (line 104) DOES catch `requirement_text` missing from one of
+  the three homes' INLINE CREATE statements — but is structurally BLIND to it being added correctly
+  via ALTER in only one or two homes.** `columnsOf()` only parses inside `correctionBlock` (the
+  inline CREATE), exactly as the parity test does; a column delivered entirely by `alter table ...
+  add column if not exists` (which is where `requirement_text` MUST live, per AC-7b and H39/H39b)
+  never appears inside that block in ANY of the three files, so this guard would report all three
+  homes agreeing (on a column none of them declares inline) even if only one of the three files'
+  ALTER actually ran. **This mirrors exactly the blind spot `frame` already has in this same test**
+  — `frame` is also ALTER-only and the existing test's `assert.ok(byHome[firstName].includes('frame'))`
+  line only works because `frame` ALSO happens to appear in the test/sql fixture's inline CREATE
+  (`test/sql/correction.sql`'s `frame text,` line), not because the guard parses ALTERs. The SAME
+  trick keeps `H:correction-ddl-column-parity` honest for `requirement_text`: the fixture
+  (`test/sql/correction.sql`) is a standalone file with no deploy-window constraint of its own (it
+  is not applied through `ensureCorrectionTable`'s ALTER dance), so it can and must declare
+  `requirement_text text` inline, giving the existing column-parity test real teeth for it exactly
+  as it does for `frame` — no new test is required here, only remembering to update the fixture
+  (§9's guard table makes this an explicit, mutation-proved line item rather than an implicit
+  expectation).
