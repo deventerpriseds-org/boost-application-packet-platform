@@ -6376,3 +6376,72 @@ table, so their yield cannot be measured at all.
   numbers means it is misused or underused.* Applied app-wide it found four artifact types with zero
   verdicts. **Re-run the sweep in `docs/qc-evidence/LLM-YIELD-SWEEP.md` whenever a judge is enabled
   or a model path is added.**
+
+## 2026-08-29 — EDS discipline stack v19 armed in-session; boost-pg-mcp-write is the live-DB path
+
+New parallel session on this repo. `setup.sh` from `eds-claude-skills` (`cbf8f7b`, v19) run and
+**verified from disk rather than from its own exit code**. Full evidence in `actions.md`
+(`ACT-2026-08-29-a`); the parts worth carrying forward:
+
+**What is now enforced mechanically, not by my memory of a rule.** Six hooks at `_eds_version: 19`
+in `/home/user/.claude/settings.json` — the project-root file, never `launcher-settings.json`, which
+is regenerated from a stock template on every launch and would silently drop them. The `Stop` gate
+runs as a haiku agent and hard-blocks a completion claim; a second `Stop` hook checks the phase tag
+in code, because the model-judged version raced the transcript flush. `PostToolUse` mirrors every
+edit to `refs/heads/eds-wip/<branch>`; `UserPromptSubmit` checks for a container rewind and for
+orphaned subagents, and demands the phase tag on the reply.
+
+**A clean-tree autosave that pushes nothing is the guard working.** `eds-git-guard.sh:87` exits 0 on
+an empty `git status --porcelain`. I nearly recorded "autosave pushed no ref" as a defect; the source
+line settles it, and five `eds-wip/*` refs from other lanes prove the push path works through the CCR
+proxy in this repo. Worth remembering because the same shape — an absent artefact read as a broken
+mechanism — is what the ground-truth rule exists to catch.
+
+**`boost-pg-mcp-write` is the one Postgres connector, and it is live.** `connected: true`,
+`enabledInChat: true`; queried directly: `boost_resume_n_packet_builder` as `mcp_readwrite_boost`,
+PG 17.10, 50 public tables, `opportunity`/`persona`/`packet`/`correction`/`requirement` all present.
+The other two were deliberately **not** queried (owner-instructed) — both are `enabledInChat: false`,
+and `Azure_pg_mcp` is a different database entirely. GitHub Actions (`db-query.yml`) stays the
+FALLBACK for when this connector lapses, never the default. Reminder that survives from before: the
+Azure Storage **tables** (`MasterContext`, `AppConfig`, `Prompts`, `JobApplications`) are not in
+Postgres and no connector reaches them — those go through a Function route via `api-test.yml`.
+
+**One honest gap.** `SessionStart` fired before the hooks existed, so `/workspace/eds-claude-skills`
+is absent this session and the banner did not print. Not load-bearing — the org repo is attached at
+`/home/user/eds-claude-skills` and bootstrap was closed with `register_repo_root`. Self-heals next
+session.
+
+**Parallel-session posture.** Started at `2c693d1` with local == `origin/<branch>` == `origin/main`
+and a clean tree. Other sessions are on this same codebase, so the rewind/drift rule is doing double
+duty: `git fetch origin` before every commit, push, deploy **and before answering any status
+question** — a stale local checkout is the specific way a parallel session gets contradicted.
+
+**And that is exactly what happened, within the hour.** By merge time `origin/main` had moved
+`2c693d1` → `1f07992`, ~250 commits from parallel lanes. The fetch-before-answering rule paid twice:
+
+- **A count I had already given the owner went stale.** I answered "43 `OPEN`" for
+  `.claude/DEFERRED.md` from the pre-merge tree; the merged tree is **45 `OPEN` / 50 `CLOSED` / 95
+  rows**. Counted both times with the ledger's own parser rather than by eye, which is the only
+  reason the drift was visible at all. **A count from a repo with active parallel lanes is valid
+  only for the SHA it was taken at — quote the SHA with the number, or it will be wrong by the time
+  it is read.**
+- **An ID I minted was already taken, twice.** `ACT-2026-08-29-a` existed on `main` from two other
+  lanes. Renamed mine to `ACT-2026-08-29-e`.
+
+## Hardening — 2026-08-29: `actions.md` has no duplicate-ID guard, and it shows
+
+`DEFERRED.md` is machine-checked by `api/test/deferredLedger.test.mjs`, whose `one-id-one-row`
+assertion makes a duplicate `D` row fail the suite. **`actions.md` has no equivalent**, and the
+consequence is measurable on `main` right now: `ACT-2026-08-29-a` (x2), `ACT-68` and `ACT-69` each
+name two rows, none of them mine, all pre-existing (`git show origin/main:.claude/actions.md |
+grep -oE '^## ACT-[A-Za-z0-9-]+' | sort | uniq -d`).
+
+Root cause is the one `H26` already named for the `H`-counter and the `D`-counter: **a per-file
+numeric or date-sequential ID requires coordination between branches that cannot see each other.**
+`DEFERRED.md` solved it with slugs plus a guard. `actions.md` adopted the date format but never got
+the guard, so it inherited the collision without the detection.
+
+Not fixed here, deliberately: the rows belong to other lanes and repairing them would widen a
+tracking-docs PR into someone else's history. The guard itself — a `one-act-id-one-row` assertion
+mirroring `one-id-one-row` — is the right fix and is a change to a file that decides a gate, so it
+is TIER 1 and needs its own AC pass. Left as the owner's call rather than bolted on here.
