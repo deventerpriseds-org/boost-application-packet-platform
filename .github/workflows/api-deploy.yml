@@ -56,6 +56,18 @@ jobs:
           cd api
           zip -r ../api-deploy.zip . --exclude '*.ts' --exclude 'src/*'
 
+      # MASTERCONTEXT_SOURCE=postgres is set here, with the other app settings, so the store the
+      # owner's master profile is read from is DECLARED IN THE REPO rather than living only as a
+      # hand-set value in the Azure portal that nobody can review or diff.
+      #
+      # Owner-instructed 2026-09-03: *"storage will just be a backup once copy to postgres is done"*.
+      # The copy has run (14 blocks, confirmed by pg-migrate's own row count and by a direct DB read),
+      # and the independent verifier confirmed masterBaseline parity, so this is the cut-over.
+      #
+      # ROLLBACK IS THIS ONE WORD. Change `postgres` to `storage` and redeploy; both code paths are
+      # live and neither is dead code (H:mastercontext-rollback-flag proves both branches reachable).
+      # NOTHING was deleted from Azure Storage -- the seed row and every raw-read code path are still
+      # there, which is what makes the rollback real rather than aspirational.
       - name: Sync secrets to Function App settings
         run: |
           az functionapp config appsettings set \
@@ -91,7 +103,8 @@ jobs:
               "SCRAPER_API_KEY=${{ secrets.SCRAPER_API_KEY }}" \
               "SCRAPE_DO_API_KEY=${{ secrets.scrape_do_api_key }}" \
               "FIRECRAWL_API_KEY=${{ secrets.firecrawl_scraper_api_key }}" \
-              "NODE_ENV=production"
+              "NODE_ENV=production" \
+              "MASTERCONTEXT_SOURCE=postgres"
 
       - name: Deploy to Azure Functions
         run: |

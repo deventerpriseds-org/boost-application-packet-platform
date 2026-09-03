@@ -595,10 +595,23 @@ already made once.
 > `4.8-2` renders coverage, and `4.8-11`'s "no surface where the ordering renders" is false --
 > `ATTENTION_ORDER` is applied by `bySeverity` and the QC findings list shows it.
 >
-> **The one remaining PARTIAL, `4.6-8`, is not UI work and should not be counted as though it were.**
-> It needs an upstream join that does not exist: 30 `swapped` rows and 35 `model_keyword`s with ZERO
-> rows whose `to_label` matches any keyword. Closing it by fuzzy-matching would assert "this keyword
-> displaced that phrase" -- an accusation -- which `CLAUDE.md` forbids.
+> ~~**The one remaining PARTIAL, `4.6-8`, is not UI work and should not be counted as though it
+> were.**~~ **SUPERSEDED 2026-09-03 — `4.6-8`'s own row now reads DELIBERATE, closed by `a8a4210`
+> ("its recorded blocker was wrong, and the real one was never written").** There is no remaining
+> PARTIAL anywhere in this document: counted from the ROWS, 216 verdict rows = 176 BUILT + 34
+> DELIBERATE + 6 NOT-IN-PROTOTYPE, **zero PARTIAL and zero ABSENT**.
+>
+> The paragraph is struck rather than deleted because its REASONING is still correct and still load
+> bearing: closing `4.6-8` by fuzzy-matching would assert "this keyword displaced that phrase" — an
+> accusation — which `CLAUDE.md` forbids. The measurement behind it stands too (30 `swapped` rows and
+> 35 `model_keyword`s, ZERO rows whose `to_label` matches any keyword). What changed is the VERDICT,
+> not the analysis: DELIBERATE is the honest label for a row that is deliberately not built, where
+> PARTIAL implied unfinished work.
+>
+> **Why this sat stale:** `H:coverage-tally-matches-rows` compares each section's TALLY against its
+> rows, and caught nothing here because the tally was right — the drift was in narrative prose, which
+> no guard reads. Flagged as the same class of defect this document exists to prevent, in its own
+> text.
 >
 > **+1 BUILT / -2 PARTIAL on 2026-09-03, closing the last two JD-analysis rows.** `4.1-10` was
 > TESTED rather than argued: the app's number is provenance, the prototype's is coverage, so the
@@ -1405,3 +1418,115 @@ The surface that had never been seen is not a catch-up of the prototype; it is a
 **`jd` step: zero confirmed prototype-side gaps, with the comparison surface now measured rather
 than assumed.** The `266% · 27 · 3` row in §1a is retracted in full: 11 of those panels were the
 instrument, and every one of the remaining 16 is a rename, a recorded decision, or a demo value.
+
+---
+
+## 19. WHAT `compare-ui` CAN AND CANNOT MEASURE — 2026-09-03
+
+Established while answering *"do we need one more render to find what is missing, not covered, or
+improved upon?"*. The short answer is **no, not for coverage** — and the reason is worth keeping,
+because the numbers it prints look exactly like a coverage figure and are not one.
+
+### The instrument is now clean, for the first time
+
+`compare-ui --all` **exits 0**: zero unmatched fixtures across all seven steps. Every previous run
+in this repo's history was blind to at least one route — including the baseline this was compared
+against (`gap-all-f57526d.json`, five unmatched on the `qc` step alone). Six endpoints are now
+captured rather than derived or absent: `/opportunity` (flat camelCase, not the wrapped raw row),
+`/requirements`, `/remediation` for all **five** artifacts, `/skill-bank`,
+`/packet/{id}/analysis`, `/config/templates`. Baseline: `gap-all-clean.json`.
+
+**Four of those six were found by RUNNING, not by inspection**, and two of them only appeared after
+the first capture landed and the run was repeated. No hand-kept endpoint list would have contained
+them. That is the argument for `compare-ui` exiting non-zero on an unmatched call rather than a
+checklist someone maintains.
+
+### It measures TEXT DIFFERENCE, not coverage
+
+| | |
+|---|---|
+| panels only in prototype | **147** |
+| panels only in app | **179** |
+
+**The app has MORE unmatched panels than the prototype.** Both numbers are inflated by the same
+cause: panels are matched by exact string, so a RENAME is a miss on both sides simultaneously.
+Confirmed pairs, read off the two renders:
+
+| prototype | app |
+|---|---|
+| `JD analysis` | `Posting analysis` |
+| `Extracted from this posting` | `Posting summary` |
+| `Posting vs your profile` | `This posting, against your profile` |
+
+Classifying the 147 mechanically: **38 are demo-data differences** — the prototype hardcodes
+`SafetyIQ · Head of Engineering` while the app renders real `eMoney Advisor` data, so
+`sixty-two engineers`, `eight figures`, `SOC 2 Type II` can never be "missing features". Of the 109
+remaining, **39 already exist verbatim in `app/src`** (rendered under a different condition, step,
+or disclosure). Of the last 70, the sampled majority are renames or re-worded labels — `M1-M5` /
+`D1-D4` / `N1-N3` against the app's `RESP #4` chips, check names against `check_key` labels.
+
+**So the honest reading is that `147` is an upper bound on an upper bound**, and the true count of
+absent ELEMENTS is small — consistent with the hand-classified rows above, which are at 175 of 175
+with every divergence carrying a recorded reason.
+
+### What it IS good for, and what is still genuinely uncovered
+
+- **Drift detection.** Now that the instrument answers every call, `gap-all-clean.json` is the first
+  admissible regression baseline this project has had. A future run that exits non-zero, or whose
+  panel counts move, is a real signal.
+- **NOT a substitute for the hand-verdicted rows.** A machine that cannot tell a rename from an
+  absence cannot produce a coverage number. Rows §1-§15 remain the coverage record.
+- **The "improved upon" direction is genuinely uncovered.** `controlsOnlyInApp` is thin (3 entries on
+  `send`) and the 179 app-only panels are unclassified. The DELIBERATE rows capture some of it as
+  prose, but there is no systematic inventory of what the app does that the prototype never had.
+  That is the real remaining gap in this document, and it is the half that would say what has been
+  GAINED rather than what is owed.
+
+---
+
+## 20. THE OTHER DIRECTION — what the app has that the prototype never did (2026-09-03)
+
+§19 established that `compare-ui` cannot answer *"what is missing"*. This section answers the half
+the owner actually asked about and that this document had never covered: **what was GAINED.** Same
+mechanical method, run in reverse on the 179 `panelsOnlyInApp` entries.
+
+| | count |
+|---|---|
+| app-only panels, raw | **179** |
+| after de-duplicating (one subtitle counted once per step) | 81 distinct |
+| minus renames of a prototype panel | 52 |
+| minus the app's own tenant data and row ids | **34 capabilities** |
+
+**Read the subtractions, not the headline.** `179` is inflated the same way `147` is: `your master
+profile (Settings > Facts)` is ONE subtitle counted on all seven steps, `RESP #0`-`RESP #19` and
+`RQ-MH #25/#29` are row ids, and `Enterprise Architecture` / `Risk Management` / `Predictive
+Analytics` are eMoney's own skill labels — the mirror image of the prototype's `sixty-two
+engineers`. None of those is a capability.
+
+### The 34, and they fall into three groups
+
+**Named QC checks the prototype does not have** — `Every change cites the posting`, `No empty
+blocks`, `No stray spacing`, `No machine-sounding phrases`, `Expertise phrases are the right
+length`, `Responsibilities addressed`, `Skill count and split`, `Section word counts`,
+`Fix before approval`.
+
+**Per-field granularity** — `2 / 3 / 7 merge fields`, `N open findings with no field of their own`,
+`Open on this field`, `Keywords for this line`, `Taken out of this list`, `Why it changed`,
+`14 items to fix across 5 assets`. The prototype reports at asset level; the app reports at field
+level and can say when a finding belongs to no field at all.
+
+**Provenance and refusal-to-fabricate states** — `model-written`, `From profile`,
+`not in this text`, `Posting analysis - the source`, `What the models found`, plus `Not checked`,
+`Not compared`, `Nothing found`, `not measured`. The prototype prints a confident number for every
+slot. The app says where each number came from, and prints a REASON instead of a number when it has
+no source. Several DELIBERATE rows above (`4.8-1`, `4.8-2`) are exactly this and were verdicted
+PARTIAL against the prototype for it — the divergence is the app declining to invent a composite.
+
+### An honesty note on this section's own method
+
+A first pass eyeballed the leading entries of each step and concluded the additions were
+*"overwhelmingly provenance"*. Classifying all 117 mechanically put provenance at 11 occurrences,
+so that reading came from a biased sample of what happened to sort first. The dominant real group is
+**named checks and per-field granularity**, with provenance third. The correction is recorded rather
+than quietly fixed, because reading a trend off the first screen is the same error as quoting a
+blind instrument.

@@ -779,10 +779,39 @@ export default function PacketBuilder({ id, step }) {
   // for navigation. `{ text, artifactId }`: the artifact travels WITH the sentence, because the
   // request is artifact-scoped and inferring it later from the active step would be a guess.
   const [assistantSeed, setAssistantSeed] = useState(null)
-  const seedAssistant = useCallback((text, artifactId) => {
+  // THE BINDING OUTLIVES THE SEED, and that separation is the whole fix. `assistantSeed` is a
+  // ONE-SHOT text slot: `applySeed` clears it the instant the panel reads it, which is correct for
+  // the sentence and was catastrophic for the artifact, because the artifact was read off the same
+  // slot. Measured live 2026-09-03 (ui-verify 33757880817): forwarding a field's sentence opened a
+  // panel carrying the text, headed "No asset open", with Send DISABLED -- defeating the seeder's
+  // own stated contract, "never open a panel that cannot send". Any step rendering two artifacts
+  // (resume + compact_resume) hit it, which is the step readers forward from most.
+  const [assistantBinding, setAssistantBinding] = useState(null)   // { artifactId, section }
+  // SPEC 4.11-4's field scope is only offered when a field is in focus, and until now the most
+  // NATURAL way into the assistant did not put one there: a reader clicking "Ask the assistant" ON A
+  // FIELD landed on the asset scope, because only `goToField` ever wrote `fieldFocus`. The seed
+  // carried the artifact and dropped the field, so the panel could not know what they were looking
+  // at. Measured live 2026-09-03 (ui-verify 33756770327): go-to-field then open-assistant both
+  // clicked `ok` and the picker still rendered 0 chips.
+  //
+  // `section` is OPTIONAL and the focus is only written when it is present -- a seeder with no field
+  // (a whole-asset ask) must not fabricate a focus, or the panel would offer to change "one field"
+  // the reader never chose.
+  const seedAssistant = useCallback((text, artifactId, section) => {
     if (!text || !artifactId) return                       // never open a panel that cannot send
+    const sec = typeof section === 'string' && section.trim() ? section.trim() : null
     setAssistantSeed({ text: String(text), artifactId })
+    // Survives the seed being consumed. Cleared when the panel closes, never by reading the text.
+    setAssistantBinding({ artifactId, section: sec })
+    if (sec) setFieldFocus({ artifactId, section: sec })
   }, [])
+  // LEAVING THE STEP DROPS THE BINDING. Without this it outlives the reader's context: forward from
+  // a field on the resume step, walk to the cover step, open the assistant cold, and it would still
+  // be bound to the resume artifact -- a panel silently pointed at a document the reader is not
+  // looking at, which is worse than the "No asset open" it replaces. `goToField` sets the step
+  // BEFORE any seeder runs, so the forward flow is unaffected.
+  useEffect(() => { setAssistantBinding(null) }, [activeStep])
+
   const goToField = useCallback((artifactId, section) => {
     const a = artifacts.find((x) => x.id === artifactId)
     if (!a) return                                        // unknown artifact: do nothing, never guess a step
@@ -991,7 +1020,7 @@ export default function PacketBuilder({ id, step }) {
                 /* SPEC 4.7-8 - the artifact travels WITH the sentence. Binding it at the call site,
                    where `a.id` is unambiguous, is what stops the panel inferring which asset a
                    request meant from whatever step happens to be active. */
-                onSeedAssistant={(text) => seedAssistant(text, a.id)} />
+                onSeedAssistant={(text, section) => seedAssistant(text, a.id, section)} />
             ))}
             {nextStep && (
               <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
@@ -1133,8 +1162,8 @@ export default function PacketBuilder({ id, step }) {
   // resume step renders `resume` and `compact_resume`) there is no non-guessing answer, so it stays
   // null and the panel says to open an asset first rather than picking one.
   const stepArtifacts = getArtifactsByStep(activeStep)
-  const assistantArtifact = assistantSeed
-    ? artifacts.find((a) => a.id === assistantSeed.artifactId) || null
+  const assistantArtifact = assistantBinding
+    ? artifacts.find((a) => a.id === assistantBinding.artifactId) || null
     : (stepArtifacts.length === 1 ? stepArtifacts[0] : null)
   const assistant = (
     <AssistantPanel
@@ -1143,7 +1172,11 @@ export default function PacketBuilder({ id, step }) {
          read - not a second copy of "which field is current". Null unless it belongs to the
          artifact the assistant is bound to, or the panel would offer a field scope for a document
          it is not editing. */
-      field={fieldFocus && assistantArtifact && fieldFocus.artifactId === assistantArtifact.id ? fieldFocus.section : null}
+      /* The BINDING's own section wins, because it records the field the reader forwarded FROM.
+         `fieldFocus` is the fallback for a panel opened cold on a step it happens to match. */
+      field={assistantBinding && assistantBinding.section && assistantArtifact && assistantBinding.artifactId === assistantArtifact.id
+        ? assistantBinding.section
+        : (fieldFocus && assistantArtifact && fieldFocus.artifactId === assistantArtifact.id ? fieldFocus.section : null)}
       seed={assistantSeed ? assistantSeed.text : null}
       onSeedConsumed={() => setAssistantSeed(null)}
       onSent={load}

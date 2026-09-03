@@ -8583,3 +8583,59 @@ Every restore verified against HEAD by the script itself.
 - `judge_outcome` does not exist in production until `diag/pg-migrate` runs; the write-time
   `ENSURE_SQL` covers that window and a parity guard holds the two declarations in step.
 - Not started: config stamp + bounded backfill, re-extraction trigger, swap-attribution judge.
+### ACT:mastercontext-to-postgres — DONE and VERIFIED LIVE (2026-09-03)
+Cut over at `0da39b2`. `entities` 1 -> 14 proves the source switched; all five fields byte-identical
+proves the data did not. Evidence: `docs/qc-evidence/RECORD-mastercontext-cutover.md`, api-test runs
+33756330116 (before) / 33756688130 (after). Storage deleted at no step — rollback is one word in
+`api-deploy.yml`.
+
+### ACT:master-profile-settings-editor — NEXT, and unblocked
+The owner confirmed they want it ("agreed it should be available for text editing in settings once
+moved to postgres"). `owner_master_block` is per-owner and writable, so the gap is closable. Today
+the owner cannot change their own master profile without hand-editing Azure Storage.
+---
+
+## ACT-68f — `ui-verify` click sequence, and the unreachable field scope it exposed (2026-09-03)
+
+**Asked:** *"go ahead and add click_sel for whenever we need it"*, then *"do it"* (the `fieldFocus` gap).
+
+**Status: DONE, on `main` `5b34b87`.**
+
+- `CLICK_SEL` is `;`-separated and clicked in order. Single-selector callers unchanged.
+- Fixed a race that only bites from step 2: `locator.count()` does not wait, so a not-yet-rendered
+  target read as `not found` — a harness race reported as an app gap.
+- Stops at the first failing step **and names it**; a partial sequence is a failure, never a pass.
+- **Found and fixed:** SPEC 4.11-4's field scope was unreachable from the one control a reader would
+  use. `ui-verify 33756770327` — both clicks `ok`, picker rendered 0 chips. Both seeders now pass
+  `row.merge_field`; the section is optional so a fieldless ask cannot invent a focus.
+
+**Guards:** `H:seeding-from-a-field-focuses-that-field`,
+`H:seeding-without-a-field-must-not-invent-a-focus` — both mutation-proved `FIRED`, the first only
+after `mutate.sh` reported `EQUIVALENT` and exposed that the guard matched a fallback string rather
+than the argument.
+
+**Evidence:** api 1060/0 · app 464/0 · margin 61/61 · browser 52/52 · deploy 33757482867.
+
+---
+
+## ACT-68g — Two live bugs the click sequence found (2026-09-03)
+
+**Status: FIXED, on `main` `2476087`.** Neither was findable by reading, a unit test, or the DOM probe.
+
+1. **Field scope unreachable.** Only `goToField` wrote `fieldFocus`, so "Ask the assistant" on a
+   field gave the asset scope. Both seeders now pass `row.merge_field`.
+2. **The panel could not send.** The artifact was read off the one-shot `assistantSeed`, which
+   `applySeed` clears on read; the fallback needs exactly one artifact on the step and the resume
+   step renders two. Live: text present, "No asset open", Send disabled — on the step readers
+   forward from most. Binding is now separate state, cleared on step change.
+
+**Guards (4, all mutation-proved FIRED):** `H:seeding-from-a-field-focuses-that-field`,
+`H:seeding-without-a-field-must-not-invent-a-focus`,
+`H:assistant-binding-outlives-the-consumed-seed`,
+`H:assistant-binding-does-not-outlive-the-step`.
+
+**Also:** two of those guards initially pinned a literal call shape and broke on a refactor of the
+same behaviour; re-anchored on the function body and the invariant.
+
+**Evidence:** ui-verify 33757880817 (the finding) · api 1071/0 · app 466/0 · margin 61/61 ·
+browser 52/52 · deploy 33758565832.
