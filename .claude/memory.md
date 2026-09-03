@@ -6237,3 +6237,23 @@ misreport worked for one suite in twelve). All three mutation-proved.
   stay for a full release cycle. **Owner confirmed 2026-09-03: the Storage row is a one-time seed
   with no writer, and becomes a cold backup once the copy lands.** Three open questions for the
   owner are recorded in §5 of that artifact.
+
+### MasterContext move — commits 1 and 2a are LANDED on the branch (not on main)
+- `5f4c0c9` one accessor (`api/src/functions/tests/masterContext.ts`), Storage backing unchanged.
+  Six product call sites behind it; MT-XX harness exempt (not the product). Guard
+  `H:mastercontext-one-accessor`, mutation-proved.
+- `d85934d` `owner_master_block` table, per-owner PK, `itemsToOmit` unstorable by CHECK. Executed
+  against a POPULATED local Postgres (main's schema, seeded rows, then this on top: psql exit 0)
+  and proven behaviourally. Guard `H:mastercontext-block-key-domain` compares the SQL CHECK to
+  `Object.keys(MC_KIND)`, mutation-proved.
+- 1065/1065 tests pass, api build clean.
+
+**NEXT AND IT NEEDS ONE DECISION.** The copy + reader-switch is blocked on the thing the AC pass
+called out as AC-8: `readMasterContextEntity()` takes no owner, and three of its six callers have no
+owner in scope (`pipeline.loadProfile`, `appFacts`, `diagSkillSources`) — the Storage row had no
+owner concept at all, so nothing ever needed one. Options recorded for the owner: (a) an optional
+owner argument with a settable single-owner default, threading real owners where they exist
+(reversible, additive), or (b) thread an owner through all six first.
+
+**Owner confirmed 2026-09-03:** the Settings text editor for the master profile IS wanted once the
+data is in Postgres — it is no longer an open question, it is the commit after the copy.

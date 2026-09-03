@@ -7898,3 +7898,9 @@ entry "2026-09-03 — I LAUNCHED TWO AC PASSES AND READ NEITHER ARTIFACT" plus i
 owner the one-time copy targets, (2) whether `answersFromQuestions` gets real owner resolution now,
 (3) whether a writer for the owner's master text is in scope here or a follow-on. Commit 1 (one
 accessor, Storage backing unchanged) does not depend on any of them.
+
+### ACT:mastercontext-to-postgres — commits 1 + 2a landed, 2b needs one decision
+Landed on `claude/incumbent-wins-swap`: `5f4c0c9` (accessor), `d85934d` (table). Both guards
+mutation-proved; schema executed against a populated local Postgres.
+OPEN: the accessor has no owner parameter and three callers have no owner in scope. Owner has
+already confirmed the Settings text editor is wanted after the copy.
