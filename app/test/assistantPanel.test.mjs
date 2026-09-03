@@ -389,7 +389,13 @@ test('H:the-header-never-says-no-asset-open-while-an-asset-is-bound', () => {
   // The consumer side of the same fact, asserted against the SOURCE the header reads, so a future
   // refactor that drops the label again fails here rather than on production.
   const PANEL = strip(src('../src/screens/AssistantPanel.jsx'))
-  assert.match(PANEL, /label: scopeLabel/,
+  // ANCHORED TO THE SCOPE OBJECT. A bare /label: scopeLabel/ is satisfied by the DESTRUCTURING two
+  // lines up, so deleting it from the object under test changed nothing and mutate.sh correctly
+  // reported EQUIVALENT. Third loose source-grep this session -- anchor on the construct, never on
+  // a token that also appears nearby.
+  const scopeObj = PANEL.slice(PANEL.indexOf('const scope = {'), PANEL.indexOf('const sendable'))
+  assert.ok(scopeObj.length > 20, 'could not isolate the scope object; the guard is not reading what it thinks')
+  assert.match(scopeObj, /label:/,
     'the scope object handed to the header has no label, so it will read "No asset open" always')
   const scopes = assistantScopes({ id: 'a1', type: 'cover' }, 'CoverLetterBody')
   assert.ok(scopes.label && scopes.options.length >= 1,
