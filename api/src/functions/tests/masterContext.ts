@@ -129,7 +129,7 @@ async function readFromPostgres(ownerEmail: string): Promise<{ entity: Record<st
  */
 export function entityFromBlocks(rows: Array<{ block_key: string; text: string }>): Record<string, any> {
   const entity: Record<string, any> = {}
-  for (const r of rows) entity[r.block_key + '_pg'] = r.text
+  for (const r of rows) entity[r.block_key] = r.text
   return entity
 }
 
