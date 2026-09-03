@@ -28,8 +28,13 @@ test('the whitelist is derived and covers every setting production reads', () =>
   assert.equal(cols.find(c => c.column === 'chk_evidence_escalate').type, 'boolean')
   assert.equal(cols.find(c => c.column === 'chk_evidence_threshold').type, 'numeric')
   assert.equal(cols.find(c => c.column === 'chk_evidence_bullet_run').type, 'int')
-  // ONLY chk_* — the writer must not be able to reach the rest of the table.
-  for (const c of cols) assert.match(c.column, /^chk_/, `${c.column} is not a check setting`)
+  // ONLY chk_* or srch_* — the writer must not be able to reach the rest of the table. Widened from
+  // chk_*-only for D:reextract-recheck-bound (srch_reextract_recheck_max_artifacts, routed from the
+  // re-extraction lane): a deliberate reuse of this SAME whitelist/coerce/build-SET-clause machinery
+  // for a second, narrower prefix, not a second ad-hoc writer.
+  for (const c of cols) assert.match(c.column, /^(chk|srch)_/, `${c.column} is not a check/search setting`)
+  assert.ok(cols.some(c => c.column === 'srch_reextract_recheck_max_artifacts'),
+    'the re-extraction bound must ride this same derived whitelist')
 })
 
 test('H:settings-writer-takes-names-from-the-whitelist-not-the-request', async () => {
@@ -37,7 +42,7 @@ test('H:settings-writer-takes-names-from-the-whitelist-not-the-request', async (
   // the only thing that makes that safe is that the interpolated string is the WHITELIST ENTRY that
   // matched, never the key the caller sent. Every one of these is a key an attacker would try.
   const c = spyClient()
-  const written = await writeCheckPrefs(c, 'owner@example.com', {
+  const { written } = await writeCheckPrefs(c, 'owner@example.com', {
     'chk_evidence_bullet_run': 1,
     'updated_at=now(), owner_email': 'x',
     'chk_evidence_bullet_run=1; drop table requirement--': 3,
@@ -58,7 +63,7 @@ test('values are coerced by the column\'s declared type, and junk is ignored rat
   // A settings writer that accepts anything is how a threshold becomes NaN and a gate stops meaning
   // anything. Each of these is dropped, so the previous value survives — the safe outcome.
   const c = spyClient()
-  const written = await writeCheckPrefs(c, 'o@e.com', {
+  const { written } = await writeCheckPrefs(c, 'o@e.com', {
     chk_evidence_escalate: 'yes',          // boolean column, string value
     chk_evidence_bullet_run: 'not a number',
     chk_evidence_threshold: NaN,
@@ -69,7 +74,7 @@ test('values are coerced by the column\'s declared type, and junk is ignored rat
 
   // The real ones are coerced, not passed through: an int column rounds.
   const c2 = spyClient()
-  const w2 = await writeCheckPrefs(c2, 'o@e.com', {
+  const { written: w2 } = await writeCheckPrefs(c2, 'o@e.com', {
     chk_evidence_escalate: false, chk_evidence_bullet_run: 3.7, chk_evidence_threshold: 0.65,
   })
   assert.deepEqual(w2.sort(), ['chk_evidence_bullet_run', 'chk_evidence_escalate', 'chk_evidence_threshold'])
@@ -82,7 +87,21 @@ test('values are coerced by the column\'s declared type, and junk is ignored rat
 test('a patch with nothing recognisable writes nothing at all', async () => {
   for (const patch of [null, undefined, {}, 'string', 42, [], { nope: 1 }]) {
     const c = spyClient()
-    assert.deepEqual(await writeCheckPrefs(c, 'o@e.com', patch), [], JSON.stringify(patch))
+    const { written, queued } = await writeCheckPrefs(c, 'o@e.com', patch)
+    assert.deepEqual(written, [], JSON.stringify(patch))
+    assert.deepEqual(queued, { coverageJudge: 0, reviewerAuto: 0 }, `${JSON.stringify(patch)} queued a backfill`)
     assert.equal(updateOf(c)[0], null, `${JSON.stringify(patch)} issued an update`)
   }
+})
+
+// D:config-staleness-backfill (AC 10-15) — writeCheckPrefs's OWN return shape now reports queued
+// counts, and this is the whitelist-writer's own regression guard for it: a patch that touches
+// neither judge setting must report zero queued regardless of what else it writes (the transition
+// detection only ever fires from `written.includes('chk_coverage_judge'/'chk_reviewer_auto')`).
+// The bounded-enqueue and off->on/on->off BEHAVIOR itself is proven against a real Postgres in
+// test/checkPrefsBackfillDb.test.mjs — a spyClient cannot exercise a real INSERT...SELECT...LIMIT.
+test('writeCheckPrefs reports zero queued when neither judge setting is touched', async () => {
+  const c = spyClient()
+  const { queued } = await writeCheckPrefs(c, 'o@e.com', { chk_evidence_bullet_run: 2 })
+  assert.deepEqual(queued, { coverageJudge: 0, reviewerAuto: 0 })
 })

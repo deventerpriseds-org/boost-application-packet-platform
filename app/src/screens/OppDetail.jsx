@@ -437,7 +437,7 @@ const AI_EFFORTS = [['low', 'Low'], ['medium', 'Medium'], ['high', 'High'], ['ma
 // One editable resume field: shows the text (or an explicit "no content" note so
 // missing sections are visible), an Edit textarea (Save → saveArtifactContent),
 // and an AI-edit row (instruction + effort → aiEditArtifact).
-function ResumeField({ artifactId, fieldKey, name, value, onPatch, toast }) {
+function ResumeField({ artifactId, fieldKey, name, value, onPatch, toast, onStaleSignal }) {
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(value || '')
   const [instruction, setInstruction] = useState('')
@@ -449,7 +449,15 @@ function ResumeField({ artifactId, fieldKey, name, value, onPatch, toast }) {
 
   const save = async () => {
     setSaving(true)
-    try { const r = await api.saveArtifactContent(artifactId, { pkg: { [fieldKey]: draft } }); if (r.error) throw new Error(r.error); onPatch(fieldKey, draft); setEditing(false); toast('Section saved') }
+    try {
+      const r = await api.saveArtifactContent(artifactId, { pkg: { [fieldKey]: draft } })
+      if (r.error) throw new Error(r.error)
+      // Frontend checks-wiring gap: the save can succeed while the server's own attempt to
+      // recompute the gate in the same request fails (`checksStale`). That is not a save failure -
+      // the text IS saved - so it does not throw; it is reported beside the success.
+      if (onStaleSignal) onStaleSignal(!!r.checksStale, r.checksError)
+      onPatch(fieldKey, draft); setEditing(false); toast('Section saved')
+    }
     catch (e) { toast(`Save failed: ${e.message || e}`) } finally { setSaving(false) }
   }
   const aiEdit = async () => {
@@ -458,6 +466,7 @@ function ResumeField({ artifactId, fieldKey, name, value, onPatch, toast }) {
     try {
       const r = await api.aiEditArtifact(artifactId, { instruction, effort, section: fieldKey })
       if (r.error) throw new Error(r.error)
+      if (onStaleSignal) onStaleSignal(!!r.checksStale, r.checksError)
       onPatch(fieldKey, r.revised); setDraft(r.revised); setInstruction(''); toast('AI edit applied')
     } catch (e) { toast(`AI edit failed: ${e.message || e}`) } finally { setAiBusy(false) }
   }
@@ -501,6 +510,12 @@ function ResumeTab({ o, toast }) {
   const [state, setState] = useState({ loading: true, error: null, arts: [], pkg: null })
   const [busy, setBusy] = useState(null)
   const [open, setOpen] = useState({})
+  // Frontend checks-wiring gap: this screen has no shared useQcEntries() (that state lives in the
+  // packet builder, QcRail.jsx) - it is a per-screen, per-artifact map keyed the same way that hook
+  // keys its own, so the two surfaces show the same FACT even though they do not share state.
+  const [staleById, setStaleById] = useState({})
+  const markStale = (artifactId, error) => setStaleById((m) => ({ ...m, [artifactId]: error || 'Checks could not be recomputed after the last change.' }))
+  const onStaleSignal = (artifactId) => (stale, error) => { if (stale) markStale(artifactId, error) }
 
   const load = useCallback(async (opts = {}) => {
     try {
@@ -534,7 +549,12 @@ function ResumeTab({ o, toast }) {
 
   const generate = async (a) => {
     setBusy(a.id)
-    try { const r = await api.generateArtifact(a.id); if (r.error) throw new Error(r.error); patch(a.id, { status: r.artifactStatus, content: r.content }); toast('Resume drafted'); load({ silent: true }) }
+    try {
+      const r = await api.generateArtifact(a.id)
+      if (r.error) throw new Error(r.error)
+      if (r.checksStale) markStale(a.id, r.checksError)
+      patch(a.id, { status: r.artifactStatus, content: r.content }); toast('Resume drafted'); load({ silent: true })
+    }
     catch (e) { toast(`Generate failed: ${e.message || e}`) } finally { setBusy(null) }
   }
   const setStatus = async (a, status) => {
@@ -595,6 +615,13 @@ function ResumeTab({ o, toast }) {
               <div className="px-small" style={{ marginTop: 2 }}>Keyword-tailored from your master resume</div>
             </div>
             <Pill tone={ART_STATUS_TONE[a.status] || 'panel'}>{a.status}</Pill>
+            {staleById[a.id] && (
+              // Pill (shell.jsx) does not forward extra props (only children/tone/style), so the
+              // tooltip and CSS hook sit on a wrapping span rather than being silently dropped.
+              <span data-qc="opp-detail-asset-stale" data-qc-artifact={a.id} title={staleById[a.id]}>
+                <Pill tone="warn">checks may be stale</Pill>
+              </span>
+            )}
           </div>
           {/* Fallback raw-content view only when there is no structured pkg. */}
           {!pkg && a.content && (
@@ -644,7 +671,7 @@ function ResumeTab({ o, toast }) {
             <div key={sec.label} className="px-box" style={{ padding: 14 }}>
               <div className="px-label">{sec.label}</div>
               {sec.fields.map((f) => (
-                <ResumeField key={f.key} artifactId={anchor.id} fieldKey={f.key} name={sec.fields.length > 1 ? f.name : ''} value={pkg[f.key]} onPatch={patchPkg} toast={toast} />
+                <ResumeField key={f.key} artifactId={anchor.id} fieldKey={f.key} name={sec.fields.length > 1 ? f.name : ''} value={pkg[f.key]} onPatch={patchPkg} toast={toast} onStaleSignal={onStaleSignal(anchor.id)} />
               ))}
             </div>
           ))}
@@ -652,7 +679,7 @@ function ResumeTab({ o, toast }) {
           <div className="px-box" style={{ padding: 14 }}>
             <div className="px-label">Education</div>
             {eduKey
-              ? <ResumeField artifactId={anchor.id} fieldKey={eduKey} name="" value={pkg[eduKey]} onPatch={patchPkg} toast={toast} />
+              ? <ResumeField artifactId={anchor.id} fieldKey={eduKey} name="" value={pkg[eduKey]} onPatch={patchPkg} toast={toast} onStaleSignal={onStaleSignal(anchor.id)} />
               : <div className="px-small" style={{ color: 'var(--proto-ink3)', marginTop: 6 }}>Education — from template (not generated per-opportunity).</div>}
           </div>
         </div>

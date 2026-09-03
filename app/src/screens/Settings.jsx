@@ -1702,6 +1702,76 @@ function ChecksSettings() {
   )
 }
 
+// ── Judge-outcome retention (frontend checks-wiring GAP 2) ─────────────────────────────────────
+//
+// `GET/PATCH /app/judge-outcome-prefs` (judgeOutcome.ts) has been live and un-owner-reachable: a
+// per-owner default seeded in code at DEFAULT_JUDGE_OUTCOME_RETENTION_DAYS with a real write route
+// and no control anywhere in app/src to reach it — the exact "constant wearing a setting's costume"
+// ChecksSettings' own comment names above. Extends that same "quality" settings tab rather than a
+// new screen, same Card/save/dirty pattern, its own small route rather than being forced into
+// ChecksSettings' dynamic chk_* column list (a different table, a different shape: one number, not
+// a list of columns the API publishes).
+
+function JudgeOutcomeRetentionSettings() {
+  const [data, setData] = useState(null)   // { retentionDays, seed } once loaded successfully; false on failure
+  const [days, setDays] = useState('')
+  const [saved, setSaved] = useState('')
+  const [note, setNote] = useState(null)
+  const [saving, setSaving] = useState(false)
+
+  useEffect(() => {
+    api.judgeOutcomePrefsGet().then((p) => {
+      if (!p || p.ok === false || p.retentionDays === undefined) { setNote({ ok: false, msg: p?.error || 'could not load retention setting' }); setData(false); return }
+      setData(p)
+      setDays(String(p.retentionDays))
+      setSaved(String(p.retentionDays))
+    }).catch((e) => { setNote({ ok: false, msg: String(e.message || e) }); setData(false) })
+  }, [])
+
+  if (data === null) return <Card style={{ color: 'var(--proto-ink2)' }}>Loading judge-outcome retention…</Card>
+  if (data === false) return <Card style={{ color: 'var(--proto-ink2)' }}>No retention setting is published by the API.{note ? ` (${note.msg})` : ''}</Card>
+
+  const raw = Number(days)
+  const validNumber = days.trim() !== '' && Number.isFinite(raw) && raw >= 0
+  const dirty = days !== saved
+  const save = async () => {
+    if (!sessionValid()) { setNote({ ok: false, msg: 'Sign-in expired — sign out and back in, then Save.' }); return }
+    if (!validNumber) { setNote({ ok: false, msg: 'Enter a whole number of days (0 keeps everything).' }); return }
+    setSaving(true); setNote(null)
+    try {
+      const r = await api.judgeOutcomePrefsSet(Math.trunc(raw))
+      if (!r || r.ok === false) throw new Error(r?.error || 'save failed')
+      setSaved(String(r.retentionDays)); setDays(String(r.retentionDays))
+      setNote({ ok: true, msg: 'Saved.' })
+    } catch (e) { setNote({ ok: false, msg: String(e.message || e) }) } finally { setSaving(false) }
+  }
+
+  return (
+    <Card>
+      <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 4 }}>Judge-outcome history</div>
+      <div className="px-small" style={{ color: 'var(--proto-ink2)', marginBottom: 14 }}>
+        How long a coverage-judge run's recorded outcomes are kept before older ones are pruned.
+        Seeded at {data.seed ?? '—'} days; yours to change. Enter 0 to keep everything.
+      </div>
+      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16 }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontSize: 13, fontWeight: 600 }}>Keep judge outcomes for</div>
+          <div className="px-small" style={{ color: 'var(--proto-ink2)', marginTop: 2 }}>days (0 = keep forever)</div>
+        </div>
+        <input className="px-input" type="number" min={0} step={1} value={days}
+          onChange={(e) => setDays(e.target.value)}
+          style={{ width: 84, textAlign: 'right', flexShrink: 0 }} />
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 16 }}>
+        <button className="px-btn px-btn-accent" disabled={!dirty || !validNumber || saving} onClick={save}>
+          {saving ? 'Saving…' : 'Save'}
+        </button>
+        {note ? <span className="px-small" style={{ color: note.ok ? 'var(--text-ok)' : 'var(--text-bad)' }}>{note.msg}</span> : null}
+      </div>
+    </Card>
+  )
+}
+
 // ── Comparison dimensions (D24) ─────────────────────────────────────────────────────────────────
 //
 // The API half has been live and UNCALLED. A run warning names this screen by name — "no dimension
@@ -2233,7 +2303,7 @@ export default function Settings({ tab = 'account' }) {
       {active === 'templates' && <TemplatesSettings />}
       {active === 'coach' && <CoachSettings />}
       {active === 'workspace' && <WorkspaceSettings />}
-      {active === 'quality' && <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}><ChecksSettings /><DimensionSettings /><SkillWordingSettings /><TemplateFocusSettings /><PipelineSettings /></div>}
+      {active === 'quality' && <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}><ChecksSettings /><JudgeOutcomeRetentionSettings /><DimensionSettings /><SkillWordingSettings /><TemplateFocusSettings /><PipelineSettings /></div>}
       {active === 'usage' && <UsageSettings />}
       {active === 'system' && <SystemSettings />}
     </div>

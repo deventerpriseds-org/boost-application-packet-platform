@@ -352,6 +352,11 @@ export const api = {
   skillRewordsSet: (rewords) => post(`/app/skill-rewords?owner=${encodeURIComponent(_owner)}`, { rewords }),
   dimensionPrefsGet: () => get(`/app/dimension-prefs?owner=${encodeURIComponent(_owner)}`),
   dimensionPrefsSet: ({ family, keys }) => post(`/app/dimension-prefs?owner=${encodeURIComponent(_owner)}`, { family, keys }),
+  // Judge-outcome retention window (D:chk-settings-have-no-writer's shape again — a per-owner
+  // default seeded in code with no UI path). GET returns { owner, retentionDays, seed }; the route
+  // is registered GET/PATCH only (judgeOutcome.ts) so the write uses patch_, not post.
+  judgeOutcomePrefsGet: () => get(`/app/judge-outcome-prefs?owner=${encodeURIComponent(_owner)}`),
+  judgeOutcomePrefsSet: (retentionDays) => patch_(`/app/judge-outcome-prefs?owner=${encodeURIComponent(_owner)}`, { retentionDays }),
   // LinkedIn role-sweep config + cursor + the exact built queries (preview before enabling).
   // GET returns { config:{enabled,titlesPerQuery,activeHoursEt}, cursor, totalQueries, totalTitles, queries }.
   searchSweepGet: (previewTpq) => get(`/app/search-sweep?owner=${encodeURIComponent(_owner)}${Number.isFinite(previewTpq) ? `&titlesPerQuery=${previewTpq}` : ''}`),

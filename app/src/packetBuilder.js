@@ -24,6 +24,9 @@ export const PACKET_HOOKS = {
   assetBody: 'asset-body',            // everything the header discloses
   postingBody: 'posting-body',
   postingBodyProvenance: 'posting-body-provenance',
+  // Frontend checks-wiring gap: a write can save an artifact's text and still fail to recompute the
+  // gate beside it in the same request (`checksStale`). This is the badge that says so on the card.
+  assetStale: 'asset-stale',
 }
 
 /**
