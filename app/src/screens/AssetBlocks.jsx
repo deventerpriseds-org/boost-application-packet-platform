@@ -37,6 +37,7 @@ import {
   ASSET_ANSWERS_DEFAULT_OPEN, correctionsForField,
   keywordActions, keywordSwapOptions, keywordPresence,
   omitListCaveat, restoreOptions, shortenAction, rewordAction,
+  keywordDisplacement, keywordDisplacementText,
   meterModel, originalState, PLACEHOLDER_NOTE, placeholderToken, proposedKeywordDetail,
   proposedKeywordsForRow, reqsForRow, scopeSwaps,
   shapeOf, sharedSourceNote, statPct, wordCount,
@@ -1153,15 +1154,31 @@ function AssetBlock({ row, reqs, swapsForList, wide, artifactId, listOwners, thr
               <div style={{ fontWeight: 700, marginBottom: 3 }}>
                 {openKeywordDetail.keyword} <span className="px-small">proposed</span>
               </div>
-              {/* No match grade, no approximately-equal marker, no "took the place of". SPEC 4.6
-                  asks for all three and NONE has a source: matchesEntry needs a published
-                  term_library_entry (the library is off by owner decision), and "reworded" is not
-                  merely unsourced but UNDECIDABLE - absent text is equally consistent with
-                  reworded and with never placed. Rendering them would be invention. */}
+              {/* SPEC 4.6 asks for three additions here. THE OLD COMMENT SAID NONE HAD A SOURCE
+                  AND THAT WAS WRONG ABOUT THE THIRD - it was written from the other two and swept
+                  this one along. `PULL-CANDIDATES.md` PC-3 names the source in its own text:
+                  "the honest fix is a real source for displacement (`swap_decision` already stores
+                  `from_label` -> `to_label`)". Measured on production 2026-09-02 (db-query run
+                  33687166561): 35 distinct swapped TO-labels, 11 of them joining a
+                  `requirement.model_keyword` exactly - so the line renders on real rows and
+                  `keywordDisplacement` returns null for the rest rather than guessing.
+
+                  STILL NOT RENDERED, and for a reason that survived the re-check: the match GRADE
+                  and the `~` marker. Not because a library is missing - the prototype never
+                  visualises one, `libTerms()` is a flag filter - but because every chip here is a
+                  `model_keyword`, declared NEVER SCOREABLE (`schema.ts:338`), so "Exact / Reworded
+                  / Loose" would grade something the panel says counts toward nothing. */}
               <div style={{ color: 'var(--proto-ink2)' }}>
                 A model reading this posting proposed this keyword for the line below. Nothing has
                 verified that this field contains it, and it counts toward nothing.
               </div>
+              {(() => {
+                const text = keywordDisplacementText(keywordDisplacement(swapsForList, openKeywordDetail.keyword))
+                if (!text) return null
+                return (
+                  <div data-qc={BLOCK_HOOKS.keywordDisplaced} style={{ marginTop: 4 }}>{text}</div>
+                )
+              })()}
               {openKeywordDetail.verbatim
                 ? <div style={{ marginTop: 4 }}><Verbatim text={openKeywordDetail.verbatim} /></div>
                 : <div className="px-small" style={{ textTransform: 'none', marginTop: 4 }}>

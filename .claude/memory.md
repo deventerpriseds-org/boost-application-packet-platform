@@ -520,6 +520,75 @@ Key tables (PostgreSQL):
 - iOS testing: requires macOS runner or BrowserStack; categorically unavailable in Linux CCR
 
 ## Active work
+**2026-09-02 — SPEC 4.6 DISPLACEMENT SHIPPED, and the row that called it unsourced was WRONG.**
+Commit `ac0f68d` + two test commits on `claude/boost-app-setup-approach-rjxhca`.
+
+The keyword panel now renders "Took the place of X in Skills 1." The old comment
+(`AssetBlocks.jsx:1156-1161`) said SPEC 4.6's three additions had NO source; `PULL-CANDIDATES.md`
+PC-3 names `swap_decision.from_label -> to_label` in its own text, two paragraphs below. The comment
+was written from the other two additions and swept the third along -- then read back as fact.
+**This is the SECOND instance of the failure `CLAUDE.md`'s feasibility table already logs once**
+("the term library blocks the keyword chips" -> wrong, `model_keyword` had been flowing for months).
+
+**FEASIBILITY MEASURED BEFORE BUILDING** (db-query run **33687166561**, the connector having lapsed):
+35 distinct swapped TO-labels, 7,220 distinct `model_keyword`s, **11 exact joins**. So the line
+renders on real rows and returns null for the rest. Not empty, not universal -- checked rather than
+assumed, which is the whole point of the table.
+
+**The owner's challenge was right on two of three §4.5 rows.** The grade is derivable from OUTPUT,
+not from a library: `term_library_entry` being empty is irrelevant because the prototype never
+visualises a library -- `libTerms()` is `ATS_TERMS.filter(t => t.source === 'library')`, a flag
+filter used as a denominator. Measured live: **5,396 EXACT vs 6,804 VARIANT** (posting verbatim
+contains the keyword or not). So `4.5-29`/`4.5-30` are REOPENED as buildable. What survives is
+narrower: every app chip is a `model_keyword`, declared never scoreable (`schema.ts:338`), so a
+grade would rank something the panel says counts toward nothing.
+
+`4.5-33` and `4.5-38` stay closed, now on evidence rather than argument: `N2` is the only
+`coverage: 'open'` requirement in the prototype fixture and it sits on a TERM, never on a field
+section, so the red `ReqChip` branch is unreachable in the §4.5 margin -- confirmed by rendering it
+(`/tmp/shots/proto-keychip.png`, every POSTING LINES ANSWERED chip green).
+
+## Hardening -- 2026-09-02: mutation-proving caught MY TESTS twice, not the guards
+Both new guards came back **INERT** first time, and both times the fault was the fixture:
+1. Every non-`swapped` row was ALSO excluded by a second condition (`dropped` had no TO, `added` no
+   FROM, `kept` had FROM === TO), so deleting the `action` check changed nothing. Fixed by adding a
+   `kept` row with a real from/to pair -- **not hypothetical: production carries 55 rows with both
+   labels against 35 `swapped`**, so ~20 rows would render a FALSE "took the place of".
+2. With a populated `to_label`, an empty keyword falls through the loop anyway, so deleting
+   `if (!k) return null` was equivalent. A BLANK `to_label` separates them -- `normLabel('')` matches
+   and the empty keyword walks off with a displacement claim.
+**Guardrail: an INERT result is a claim about the FIXTURE until you have found the input that makes
+the mutation non-equivalent.** The harness says this in its own output and it was right twice.
+All four guards now FIRED via `/workspace/eds-claude-skills/scripts/mutate.sh`.
+
+**2026-09-02 — §4.5 (Portfolio) IS 35/39, AND THE REMAINING 4 ARE NOT BUILDABLE HONESTLY.** Asked to
+"get us to 40". Ground-truthed against the LIVE DB now the connector is back, not against the docs:
+
+- `term_library_entry` = **0 rows** (`scoreable` = 0). So `4.5-29` (`~` reworded prefix) and `4.5-30`
+  (match grade Exact/Reworded/Loose) have NO SOURCE -- PC-3's premise verified against the primary
+  source rather than its own say-so. PC-3 additionally holds "reworded" is *undecidable*: absent text
+  is equally consistent with reworded and with never-placed.
+- `4.5-33` (chip colour split covered/open) -- the `open` state CANNOT OCCUR: a chip in a field's
+  margin *is* a line that field answers. Painting it is dead UI for an unreachable state.
+- `4.5-38` (rewording toggle) -- the prototype flips local state and nothing persists it; shipping it
+  is "a control that forgets" (`actions.md:3007-3011`). Substitute `Ask for a reword` already ships.
+- `4.5-16` is NOT-IN-PROTOTYPE and excluded from the denominator, so **the denominator is 39, not 40**.
+
+**40/40 is therefore not reachable without violating "no dead UI" or "no fake data".** The one
+genuinely buildable item PC-3 itself names is DISPLACEMENT TEXT ("took the place of X"), and it HAS a
+live source: `swap_decision` 79 rows, **55 with both `from_label` and `to_label`**, 35 `swapped`. Put
+to the owner rather than built unasked.
+
+**ACT-68 corrected the same day:** it listed 3 rows still open; two (`4.5-12`, `4.8-21`) had shipped.
+Only `4.11-4` (scope selector) is genuinely absent -- swept repo-wide, not single-file-grepped.
+
+## Hardening -- 2026-09-02: a summary that RESTATES another file's verdicts cannot stay true
+`ACT-68` copied `PROTOTYPE-COVERAGE.md`'s answers instead of citing its rows, so it went stale the
+moment the coverage doc moved -- and the stale half was what got read back as fact, prompting "so
+you saying the Portfolio section is already complete". Two of its three "still open" rows had
+shipped. **Guardrail: a tracker entry cites the coverage row id and lets that file own the verdict;
+it never restates it.** Same shape as the repo's existing "one core source, every consumer reads it"
+rule -- a second home for a verdict is a second home for a number.
 
 **ACT-73 VERIFIED 2026-09-02 -- 11/11 CONFIRMED, 0 REFUTED, and the verifier found a real hole.**
 
@@ -809,6 +878,23 @@ through **`boost-pg-mcp-write`** (`boost_resume_n_packet_builder`, 50 public tab
 one connector to use. Detail in `actions.md` ACT-2026-08-29-a.
 Because other sessions are on this same checkout, **D34 applies**: work in a `git worktree`, never
 `git stash` here.
+**SESSION SETUP, 2026-08-29 — eds guard stack re-applied at `_eds_version` 19; boost-pg-mcp-write proven live.**
+
+Ran `setup.sh` from the org skills repo in-session (the SessionStart hook had not fired — hooks were
+installed mid-session, so bootstrap ran by hand). Registered: **16 skills**, **1 agent** (`verifier`),
+**4 hook events** (SessionStart, UserPromptSubmit x2, PostToolUse, Stop x2), all stamped v19 in
+`/home/user/.claude/settings.json` — NOT `launcher-settings.json`, which the launcher regenerates
+every process start.
+
+`boost-pg-mcp-write` verified by query, not by assumption: `select current_database(), current_user`
+returned `boost_resume_n_packet_builder` / `mcp_readwrite_boost`, 50 public tables.
+`ListConnectors` shows it `connected: true, enabledInChat: true`. The other four connectors
+(`Azure_pg_mcp`, `Boost_DB_Connector`, `huddle-pg-mcp-write`, `nexus-pg-mcp-write`) are
+`enabledInChat: false` or point at a different database — per the standing rule, not queried.
+
+Parallel-session note: other sessions are working this same codebase. `origin/main` at `2c693d1`
+when this session started; local matched. Re-fetch before every answer about state, every commit,
+and every push.
 
 **HANDOFF STATE, 2026-08-28 ~03:00 — the Trinnex three-step repair is COMPLETE and measured live.**
 
@@ -6021,6 +6107,16 @@ be stale — the one there predated the `checkPrefs` key).
 
 ## Hardening
 
+**2026-09-02 — the phase tag must be BARE, never bolded.** `eds-phase-tag.py` matches
+`text.strip().startswith(TAG)` against literal `'Fact Finding:'` etc. (line 47). Writing
+`**Fact Finding:**` fails the check even though it reads correctly to a human — measured: 10 of 10
+text blocks in one turn rejected while every one of them opened with the words. It applies to
+EVERY text block in the turn, not just the first (the v15 fix), so a block emitted between two tool
+calls needs its own tag. Root cause: assumed the checker parsed markdown; it does a plain string
+compare. Guard: the checker itself already catches this — the lesson is to read the matcher before
+assuming a format is equivalent.
+
+
 - **A `--theirs` merge resolution on `.claude/actions.md` silently discarded a tracking append I had
   stated I would re-add.** Caught only because PR #66 showed `changed_files: 1`. Root cause: I
   resolved and committed in one step without diffing the result against my own commit.
@@ -6068,3 +6164,45 @@ The lesson is not "grep carefully". It is that **a number produced by a convenie
 claim, and claims get checked** — including, especially, the ones measuring my own reliability. The
 tool refuses to weight by severity for the same reason: that is the knob that makes a bad month look
 fine.
+### Citation resolution: measured, not guarded (2026-09-02)
+
+682 H-tests defined, 97 cited by name, **6 resolve to nothing** (see `actions.md` ACT-2026-09-02-k
+for the table). One of the six is a FALSE ALARM — `H:coverage-tally-matches-rows` exists but is built
+at runtime from a template, so it has no literal name to find.
+
+**A checker for this was deliberately NOT built.** Measured ~50% false positives, because an H-slug
+is open-ended prose that interpolates, wraps across comment lines, and gets named on purpose in
+history notes. The `D`-ledger equivalent works only because `D\d{1,2}[a-z]?` is a closed lexical
+form. Standing rule applied: *a guard people learn to ignore is worse than no guard.*
+
+**The generalisable lesson:** before building a guard, ask whether the thing it must recognise has a
+CLOSED form. Closed (an id like `D12b`, a status token, a column name) — a guard works. Open-ended
+prose — a guard cries wolf and gets muted, and the honest answer is a hand fix plus a note about what
+would justify automating it later.
+
+### The five hand fixes: two were FALSE CLAIMS, not misnamed (2026-09-02, closes the block above)
+
+Owner: *"fix by hand"*. Applied, and the outcome sharpens the block above rather than just closing it.
+
+**Only three of the five were re-pointable.** The other two named a guard that had never existed:
+nothing asserts `refused` increments through the `resolver` seam, and nothing pins judged-vs-proposed
+counting. **Re-pointing those would have invented a guard.** Both comments were rewritten to say the
+behaviour is UNPROVEN. This is the strongest argument yet against the checker that was declined: a
+pattern-matcher can only re-point, and here re-pointing makes the file *more* wrong, not less.
+
+**A later scan found two more, and one had gone OBSOLETE rather than merely dangling.**
+`matcher.test.mjs` argued the escalation toggle is safe ON because *"a proposed row can never reach
+the gate"* — a rule the owner INVERTED on 2026-09-01 (*"proposals can count until vetoed"*). The
+citation dying is what surfaced the sentence being false. **A dangling citation is a smoke detector
+for a stale ARGUMENT, not just a stale name** — which is a better reason to scan periodically than
+tidiness.
+
+**The count does not go to zero, and must not be driven there.** 13 → 12 distinct: 2 built at
+runtime, 3 illustrative examples in naming-convention comments, 7 deliberate prose naming a dead id
+in order to say it is dead. Zero live false claims. Those three shapes are exactly what defeats a
+pattern-matcher — the residual IS the evidence for the decision not to automate.
+
+**The ledger caught my own H26 rewrite.** `D:hslug-scan-one-file`'s `check: grep` stopped matching
+because the rewrite removed the single-file `readFileSync` the row names, so `deferredLedger.test.mjs`
+failed. A stale-row guard reporting its own row stale is the mechanism working exactly as designed —
+row CLOSED, not silenced. api 1063/1063, app 441/441, `tsc` clean.

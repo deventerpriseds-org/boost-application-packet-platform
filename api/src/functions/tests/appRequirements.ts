@@ -269,8 +269,12 @@ export async function writeEvidence(
       // quote by slicing, so on the resolve path the comparison is STILL a tautology — but this
       // function re-slices the records IT was handed, which are not necessarily the records the row
       // was resolved against, so the assertion is live for a caller that passes a mismatched pair.
-      // Exercised by `H:refusal-guard-fires`, which drives it through the `resolver` seam above and
-      // asserts `refused` increments and nothing is inserted. `refused` is now a real measurement.
+      // NOT CURRENTLY EXERCISED, corrected 2026-09-02. This line named a test
+      // (`H:refusal-guard-fires`) that exists nowhere in the suite -- a citation audit found it
+      // dangling. Nothing drives the mismatched-pair case through the `resolver` seam, so the branch
+      // below is UNPROVEN rather than proven, and `refused` is not yet a measured outcome. Saying so
+      // is the point: a comment naming a guard nobody wrote is worse than no comment, because a
+      // reader edits freely on the strength of it.
       const rec = byKey.get(e.source_key)
       if (!rec || rec.text.slice(e.char_start, e.char_end) !== e.quote) { refused++; continue }
       // DETERMINISTIC EVIDENCE EVICTS A STALE PROPOSAL FOR THE SAME REQUIREMENT, and this runs only

@@ -13,6 +13,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import {
+  keywordDisplacement, keywordDisplacementText,
   UNKNOWN_REQS_NOTE, UNKNOWN_TERMS_NOTE,
   countMismatchNote, deriveItems, draftSizeText, expectationFor, itemCountOf, joinLabels,
   latestRows, listBodyModel, listsOf, meterModel, normLabel, registerListOwners, reqsForRow,
@@ -1566,4 +1567,84 @@ test('H:pick-list-seeds-a-request-and-sets-nothing', () => {
     'path would be the parallel system, and it would be the one without the confirmation')
   assert.ok(!/pickList[\s\S]{0,400}api\.\w+\(/.test(BLOCKS),
     'the pick list calls an API directly - it seeds, it does not commit')
+})
+
+
+// ---------------------------------------------------------------------------------------------
+// SPEC 4.6 displacement line - "Took the place of X in Skills 1."
+//
+// EVIDENCE THIS ROW WAS REAL, not a prototype flourish: db-query run 33687166561 (2026-09-02) on
+// production returned 35 distinct swapped TO-labels and 11 joining a `requirement.model_keyword`
+// exactly. The row had been recorded as unsourced from a code comment; PC-3's own text names
+// `swap_decision.from_label -> to_label` as the source.
+
+test('H:displacement-names-only-a-recorded-swap', () => {
+  const swaps = [
+    { action: 'swapped', from_label: 'Digital Transformation', to_label: 'Cloud-native Services', list: 'Skills 1' },
+    { action: 'kept', from_label: 'Kept Thing', to_label: 'Kept Thing', list: 'Skills 1' },
+    // THE ROW THE FIRST VERSION OF THIS TEST LACKED, and mutation-proving is what found it. Every
+    // other non-swapped row here is ALSO excluded by a second condition (dropped has no TO, added
+    // has no FROM, the kept row above has FROM === TO), so deleting the `action` check changed
+    // nothing and the harness correctly reported INERT. This row is excluded by the action check
+    // and NOTHING ELSE: a real from/to pair on a row that is not a swap. It is not hypothetical --
+    // production carries 55 rows with both labels against only 35 `swapped` (db-query 33687166561),
+    // so ~20 rows would produce a FALSE "took the place of" without the action check.
+    { action: 'kept', from_label: 'Old Wording', to_label: 'Current Wording', list: 'Skills 1' },
+    { action: 'dropped', from_label: 'Dropped Thing', to_label: null, list: 'Skills 2' },
+    { action: 'added', from_label: null, to_label: 'Added Thing', list: 'Skills 2' },
+  ]
+  // The one swapped row resolves, with its predecessor and its list.
+  assert.deepEqual(keywordDisplacement(swaps, 'Cloud-native Services'),
+    { from: 'Digital Transformation', list: 'Skills 1' })
+  // A KEPT row displaced nothing. An ADDED row went into empty space. Neither may claim a
+  // predecessor - that sentence names an offender and must come from a recorded swap only.
+  assert.equal(keywordDisplacement(swaps, 'Kept Thing'), null)
+  assert.equal(keywordDisplacement(swaps, 'Current Wording'), null)
+  assert.equal(keywordDisplacement(swaps, 'Added Thing'), null)
+  assert.equal(keywordDisplacement(swaps, 'Dropped Thing'), null)
+  // A keyword nothing swapped for is null, not a guess.
+  assert.equal(keywordDisplacement(swaps, 'Never Mentioned'), null)
+})
+
+test('H:displacement-never-says-a-term-replaced-itself', () => {
+  // from === to records no displacement. Rendering "took the place of Kubernetes" on the chip
+  // Kubernetes reads as a bug, and it is one.
+  const same = [{ action: 'swapped', from_label: 'Kubernetes', to_label: 'Kubernetes', list: 'Skills 1' }]
+  assert.equal(keywordDisplacement(same, 'Kubernetes'), null)
+  // Differing only by case/punctuation is the SAME label under normLabel, so still no displacement.
+  const casey = [{ action: 'swapped', from_label: 'kubernetes.', to_label: 'Kubernetes', list: 'Skills 1' }]
+  assert.equal(keywordDisplacement(casey, 'Kubernetes'), null)
+  // A missing or blank from_label cannot name a predecessor either.
+  assert.equal(keywordDisplacement([{ action: 'swapped', from_label: '  ', to_label: 'X' }], 'X'), null)
+  assert.equal(keywordDisplacement([{ action: 'swapped', from_label: null, to_label: 'X' }], 'X'), null)
+})
+
+test('H:displacement-text-drops-the-list-clause-rather-than-printing-null', () => {
+  assert.equal(keywordDisplacementText({ from: 'Digital Transformation', list: 'Skills 1' }),
+    'Took the place of Digital Transformation in Skills 1.')
+  // This app has swap rows with no list; the prototype interpolates it unconditionally. "in null"
+  // on screen is worse than a sentence that stops.
+  assert.equal(keywordDisplacementText({ from: 'Digital Transformation', list: null }),
+    'Took the place of Digital Transformation.')
+  assert.equal(keywordDisplacementText(null), null)
+  const noList = [{ action: 'swapped', from_label: 'A', to_label: 'B', list: '   ' }]
+  assert.equal(keywordDisplacementText(keywordDisplacement(noList, 'B')), 'Took the place of A.')
+})
+
+test('H:displacement-tolerates-junk-input-without-throwing', () => {
+  for (const bad of [null, undefined, 'nope', 42, {}]) {
+    assert.equal(keywordDisplacement(bad, 'X'), null)
+  }
+  assert.equal(keywordDisplacement([null, undefined, {}], 'X'), null)
+  assert.equal(keywordDisplacement([{ action: 'swapped', from_label: 'A', to_label: 'B' }], ''), null)
+  assert.equal(keywordDisplacement([{ action: 'swapped', from_label: 'A', to_label: 'B' }], null), null)
+  // THE ROW THAT MAKES THE EMPTY-KEYWORD REFUSAL NON-EQUIVALENT, found by mutation-proving. With a
+  // populated to_label an empty keyword falls through the loop and returns null anyway, so deleting
+  // `if (!k) return null` changed nothing and the harness reported INERT. A BLANK to_label is the
+  // case that separates them: normLabel('') === normLabel(undefined) === '', so an empty keyword
+  // MATCHES the row and walks away with a displacement claim for a term that does not exist.
+  const blankTo = [{ action: 'swapped', from_label: 'Real Predecessor', to_label: '  ', list: 'Skills 1' }]
+  assert.equal(keywordDisplacement(blankTo, ''), null)
+  assert.equal(keywordDisplacement(blankTo, null), null)
+  assert.equal(keywordDisplacement([{ action: 'swapped', from_label: 'Real Predecessor' }], ''), null)
 })

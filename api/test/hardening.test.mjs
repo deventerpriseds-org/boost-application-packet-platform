@@ -801,34 +801,119 @@ test('H27: the check reports the scanner\'s not_applicable, it does not re-deriv
 //
 // The invariant: one ID one case, across every form, and no new number can be minted.
 const FROZEN_MAX = 44
+
+// ── THE SCAN, WIDENED — and the regex was the bigger hole, not the file list ─────────────────────
+//
+// H26 read ONE file with `/test\('(H(?:\d+b?|:[a-z0-9-]+)):/`. Two defects, and the second is worse:
+//
+//   1. SCOPE. 549 H-cases live outside this file; it saw 52 of them, i.e. none.
+//   2. RECOGNITION. That regex could not see 258 of the 689 cases that already exist, INCLUDING SIX
+//      IN THIS VERY FILE. `H5c`, `H39c` and `H39d` are here and were invisible to the guard that
+//      claims "one ID one case, across every form".
+//
+// The consequence of (2) is not cosmetic — it is the counter-retirement mechanism failing open.
+// Proven 2026-09-02: `test('H45: x')` and `test('H45b: x')` are caught by the mint ban;
+// **`test('H45c: x')` is INVISIBLE and mints a new number past the frozen range with the suite
+// green.** One keystroke wide. Widening the file glob while keeping the regex would have reproduced,
+// for the third time, the "STRUCTURALLY BLIND to the actual failure" verdict recorded above.
+//
+// So the recogniser captures the TITLE first and derives the id from it, which matches every
+// registration form the repo actually uses rather than the one shape the original author had in
+// mind: numeric, `b`-suffixed, ANY-letter-suffixed, slug-with-clause, slug-as-whole-title (no
+// trailing colon — the dominant form outside this file), UPPERCASE in a slug, and the aliased
+// registrar `t(` used in `dimensionsDb.test.mjs`.
+//
+// Criteria, written cold before this code and rejecting the framing it was given:
+// docs/qc-evidence/AC-h26-cross-file.md
+const H_TEST_DIRS = [new URL('../../api/test/', import.meta.url), new URL('../../app/test/', import.meta.url)]
+const TITLE_RE = /(?:^|[^.\w])(?:test|t)\(\s*(['"`])((?:\\.|(?!\1)[^\\])*)\1/g
+
+/** Every H-case the repo registers, from every form. `interpolated` marks a template-literal id. */
+function scanHCases() {
+  const files = []
+  const cases = []
+  for (const dir of H_TEST_DIRS) {
+    for (const name of readdirSync(dir).filter((f) => f.endsWith('.test.mjs')).sort()) {
+      const path = new URL(name, dir)
+      const text = readFileSync(path, 'utf8')
+      // AC-5: what the file LOOKS like it registers, independent of the recogniser, so a
+      // recogniser that stops matching a style is caught rather than reporting a quiet zero.
+      files.push({ name, claims: /(?:^|[^.\w])(?:test|t)\(\s*['"`]H(?:\d|:)/.test(stripComments(text)) })
+      // Comments stripped: this block and several others DISCUSS ids at length, and a scan that
+      // counted the prose would fire on the description of the bug rather than the bug.
+      stripComments(text).split('\n').forEach((line, i) => {
+        TITLE_RE.lastIndex = 0
+        let m
+        while ((m = TITLE_RE.exec(line)) !== null) {
+          const title = m[2]
+          if (!/^H(\d|:)/.test(title)) continue
+          const id = title.includes(': ') ? title.slice(0, title.indexOf(': ')) : title
+          cases.push({ id, title, file: name, line: i + 1, interpolated: title.includes('${') })
+        }
+      })
+    }
+  }
+  return { files: files.map((f) => f.name), claiming: files.filter((f) => f.claims).map((f) => f.name), cases }
+}
+
+// AC-7b: an id built at runtime (`test(`H:coverage-${name}`)`) is ONE registration with many real
+// ids. Judging its literal prefix would accuse correct code of a one-word slug and of duplication.
+// Excluded by construction, listed here so growth of this list is visible in review.
+const INTERPOLATED_OK = ['prototypeCoverage.test.mjs']
+
+const H = {
+  // AC-1/AC-5: a recogniser that stops matching a file's style reports ZERO and reads as success.
+  'sees-every-file-that-registers-one': ({ claiming, cases }) => {
+    const found = new Set(cases.map((c) => c.file))
+    return claiming.filter((f) => !found.has(f))
+      .map((f) => `${f} contains an H-case registration the recogniser did not capture - it would report a quiet zero`)
+  },
+  // AC-6: the adjudicated rule. Two lanes on branches that cannot see each other are the root cause
+  // H26 names; an id defined in two FILES is that collision made concrete. Intra-file repeats are
+  // legal (one guard, several assertions) and are handled by the next rule.
+  'one-id-one-file': ({ cases }) => {
+    const by = {}
+    for (const c of cases) { if (!c.interpolated) (by[c.id] ||= new Set()).add(c.file) }
+    return Object.entries(by).filter(([, f]) => f.size > 1)
+      .map(([id, f]) => `${id} is defined in ${[...f].join(' and ')} - a citation resolves to neither`)
+  },
+  // AC-7: a repeat inside one file must DISCRIMINATE, or the two are indistinguishable in a report.
+  'a-repeat-discriminates-itself': ({ cases }) => {
+    const by = {}
+    for (const c of cases) { if (!c.interpolated) (by[`${c.file}\u0000${c.title}`] ||= []).push(c) }
+    return Object.values(by).filter((g) => g.length > 1)
+      .map((g) => `${g[0].file}: two cases share the FULL title "${g[0].title.slice(0, 60)}" (lines ${g.map((c) => c.line).join(', ')})`)
+  },
+  // AC-8: the frozen numerics belong to this file. One appearing elsewhere re-opens the counter.
+  'frozen-numerics-stay-here': ({ cases }) =>
+    cases.filter((c) => /^H\d+[a-z]?$/.test(c.id) && c.file !== 'hardening.test.mjs')
+      .map((c) => `${c.id} is defined in ${c.file}; H1-H${FROZEN_MAX} are frozen to hardening.test.mjs`),
+  // AC-9: the mint ban, now suffix-proof. This is the assertion `H45c` walked past.
+  'no-new-number-is-minted': ({ cases }) =>
+    cases.filter((c) => /^H\d+[a-z]?$/.test(c.id) && Number(c.id.match(/\d+/)[0]) > FROZEN_MAX)
+      .map((c) => `${c.id} (${c.file}:${c.line}) mints a number past the frozen range - take a SLUG naming what it guards`),
+  // The frozen range must stay whole: a merge that drops a case leaves its pointer resolving to nothing.
+  'no-frozen-case-was-lost': ({ cases }) => {
+    const nums = cases.filter((c) => /^H\d+$/.test(c.id)).map((c) => Number(c.id.slice(1)))
+    const missing = []
+    for (let i = 1; i <= FROZEN_MAX; i++) if (!nums.includes(i)) missing.push(`H${i}`)
+    return missing.length ? [`frozen case(s) lost in a merge: ${missing.join(', ')}`] : []
+  },
+  // AC-10: two segments minimum, and deliberately NO upper bound - a cap would fire on 37 correct
+  // slugs and no harm can be named for a long one.
+  'a-slug-says-what-it-guards': ({ cases }) =>
+    cases.filter((c) => !c.interpolated && c.id.startsWith('H:') && c.id.slice(2).split('-').filter(Boolean).length < 2)
+      .map((c) => `${c.id} (${c.file}:${c.line}) is a single word - a counter with extra steps`),
+}
+
 test('H26: every hardening case has its own ID, and the counter stays retired', () => {
-  const self = readFileSync(new URL('./hardening.test.mjs', import.meta.url), 'utf8')
-  // Comments stripped first: this block lists six duplicate IDs, and a scan counting those would
-  // fire on the description of the bug rather than the bug.
-  const ids = [...stripComments(self).matchAll(/test\('(H(?:\d+b?|:[a-z0-9-]+)):/g)].map(m => m[1])
-  assert.ok(ids.length >= 52, `only ${ids.length} cases found — the scan has gone stale`)
-
-  const seen = new Set(); const dupes = []
-  for (const id of ids) { if (seen.has(id)) dupes.push(id); else seen.add(id) }
-  assert.deepEqual(dupes, [], 'two cases share an ID — actions.md now points at both and resolves to neither')
-
-  // THE MECHANISM. A new numeric ID cannot be minted, so two lanes cannot pick the same next number.
-  const minted = ids.filter(id => /^H\d+b?$/.test(id) && Number(id.match(/\d+/)[0]) > FROZEN_MAX)
-  assert.deepEqual(minted, [],
-    `H1-H${FROZEN_MAX} are frozen. A new case takes a SLUG naming what it guards — test('H:what-it-guards: ...') ` +
-    `— because a shared counter assigned on branches that cannot see each other collides by design, ` +
-    `and did so three times in one session.`)
-
-  // Gaps in the FROZEN range only: a merge that dropped a case leaves its number unused, and the
-  // pointer in actions.md then resolves to nothing.
-  const nums = ids.filter(id => /^H\d+$/.test(id)).map(id => Number(id.slice(1)))
-  const missing = []
-  for (let i = 1; i <= FROZEN_MAX; i++) if (!nums.includes(i)) missing.push(`H${i}`)
-  assert.deepEqual(missing, [], 'a frozen hardening case was lost in a merge — its ID is unused')
-
-  // Slugs must say what they guard, so the ID stays a pointer rather than becoming a new counter.
-  const badSlugs = ids.filter(id => id.startsWith('H:') && id.slice(2).split('-').length < 2)
-  assert.deepEqual(badSlugs, [], 'a slug that is a single word is a counter with extra steps')
+  const scan = scanHCases()
+  // AC-4: no hardcoded floor. The live `>= 52` had rotted to 2.5x stale against a real 131, and a
+  // literal that rots is how a widened scan silently narrows again. The file SET is the assertion.
+  const expected = H_TEST_DIRS.flatMap((d) => readdirSync(d).filter((f) => f.endsWith('.test.mjs'))).sort()
+  assert.deepEqual(scan.files.sort(), expected, 'the scan and the test directories disagree')
+  assert.ok(scan.cases.length > 600, `only ${scan.cases.length} cases found - the recogniser has gone stale`)
+  for (const [name, fn] of Object.entries(H)) assert.deepEqual(fn(scan), [], name)
 })
 
 // ---------------------------------------------------------------------------------------------

@@ -27,8 +27,12 @@ may be on this branch** — if a push is rejected, fetch and merge rather than f
 > steps/tabs to be able to execute exactly what the prototype does."*
 
 And on the shape, when a mirror was proposed: *"what would be the point of us having both?"* — so
-this is a MOVE, not a mirror. Two copies need a staleness digest and raise an unanswerable question
-the moment they disagree.
+Postgres becomes the READ path, not a second live copy.
+
+**Note the seed fact below sharpens this rather than contradicting it.** Because nothing writes the
+Storage row, keeping it after the cut is not a "mirror" in the sense the owner rejected — there is
+no second writer, so the two can never disagree. It is a cold backup of an unreproducible seed, and
+that is why §"THE WRITER QUESTION" requires the migration to delete nothing.
 
 ## WHAT IS WRONG TODAY — three costs, all measured, none theoretical
 
@@ -73,9 +77,8 @@ store. Swapping the store first means nine simultaneous edits with no way to bis
 | Dependency | Producer (who writes it) | Consumer (who reads it today) | Proof (command + result) | Verdict |
 |---|---|---|---|---|
 
-Cover at least: who WRITES `MasterContext` (the read sweep above is only readers — **find the
-writers, and say plainly if there are none in this repo**, because that changes the migration from
-a move to an import); the exact entity shape and field names; `masterBaseline`'s output contract and
+Cover at least: the exact entity shape and field names (the WRITER question is settled below — do
+not spend the pass re-deriving it); `masterBaseline`'s output contract and
 every consumer of it; `isPooledMasterField`; the proposed table's shape against the DEFERRED row's
 suggestion of `owner_master_block(owner_email, merge_field, text, seq)`; and whether `AppConfig`,
 `Prompts` or `JobApplications` share the accessor being introduced.
@@ -102,13 +105,33 @@ suggestion of `owner_master_block(owner_email, merge_field, text, seq)`; and whe
    ABSOLUTE `cd` in the test command, and the command must emit raw TAP (the harness greps
    `not ok .*<test name>`, so a pipe through `grep -q` makes every verdict meaningless).
 
-## ALSO ANSWER, PLAINLY
+## THE WRITER QUESTION IS ANSWERED — do not re-open it
 
-**Is a move actually possible, or is `MasterContext` still WRITTEN by something outside this repo?**
-The owner edits this data somewhere. If the writer is the Jotform/zap pipeline or a manual Storage
-edit, a "move" that Postgres owns would be overwritten or orphaned on their next edit, and the real
-first step is giving them a writer. **Do not assume a writer exists in this repo because readers
-do** — that is the exact absence-claim shape this repo's accuracy log is full of, in reverse.
+**The owner settled this 2026-09-03: *"it was a one time update that seeds the storage it never gets
+updated or overwritten."*** Corroborated in code the same day — ten Storage writers exist in this
+repo (`config.ts`, `apps.ts`, `processJob.ts`, the MT-XX harness), and **not one targets the
+`context` partition**:
+
+    grep -rnE "createEntity|upsertEntity|updateEntity" api/src   # 10 hits, none on 'context'
+
+**This makes the migration the EASY case, and the brief previously overstated it as a blocker.**
+There is no second writer, so there is no dual-write window, no staleness digest, and nothing to
+reconcile. It is a one-time copy: read the row, write the rows, switch the readers.
+
+### What the seed fact DOES change, and both belong in your ACs
+
+**1. THE MOVE IS THE PREREQUISITE FOR A WRITER THE OWNER DOES NOT HAVE.** If the text is seeded once
+and never updated, the owner cannot change their own master profile today without hand-editing Azure
+Storage. That is precisely what `CLAUDE.md`'s "no hardcoded config" rule forbids — *"every setting…
+a user would reasonably want to control MUST be exposed as a user-changeable setting"* — and their
+master text is the most owner-specific value in the product. **Say whether the writer belongs in this
+work or is a separate follow-on**, but do not treat "there is no writer" as merely a fact about
+today; it is an open gap in the product.
+
+**2. THE SEED IS THE ONLY COPY, so the migration must be NON-DESTRUCTIVE.** Nothing regenerates it.
+The Storage row must survive the cut as a cold backup, and the ACs must require: copy, prove
+`masterBaseline` returns byte-identical output for the owner's real data, switch readers, **delete
+nothing**. A migration that moves and then tidies up has no way back.
 
 ## BINDING RULES
 
