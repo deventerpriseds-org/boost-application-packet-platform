@@ -172,6 +172,102 @@ doesn't get assumed-covered by a guard whose name implies more than it does.
 
 ---
 
+## C6. The deploy gate now measures the bundle, not an app setting
+
+**CONFIRMED — including the discriminating question the brief flagged as unsettled**, by a
+combination of my own independent reads and a peer session's (see below for exact provenance split).
+
+**What I read myself, without help** (`gh api` reads work from this session; only Actions log
+*content* and workflow *dispatch* are blocked by this session's proxy — confirmed:
+`gh api .../dispatches` -> `403 Resource not accessible by integration`; `gh api .../logs` ->
+redirect to `productionresultssa11.blob.core.windows.net` -> `403` at CONNECT, per
+`curl $HTTPS_PROXY/__agentproxy/status`'s `recentRelayFailures`):
+
+1. `buildStamp.ts` was added in exactly commit `f0f9afc` (`git log --diff-filter=A`), the same
+   commit that fixed the gate. So `f0f9afc`'s own deploy (run `33733374880`) was the FIRST build to
+   compile with the stamp mechanism live — its own served bundle carries `BUILD_SHA='f0f9afc...'`
+   baked in as a literal.
+2. Pulled the step-level timing for the NEXT deploy, run `33733707586` (head `5dbd4df`), directly via
+   `gh api repos/.../actions/jobs/100579261251` (steps array, no log content needed):
+   ```
+   Sync secrets to Function App settings   08:31:05 -> 08:31:14   (writes DEPLOYED_SHA=5dbd4df)
+   Deploy to Azure Functions               08:31:14 -> 08:31:34   (the code zip deploy)
+   Set Function App settings               08:31:34 -> 08:31:40   (Google creds; another settings write)
+   Apply the database schema (the poll)    08:31:40 -> 08:31:54
+   ```
+3. All four deploy runs sampled show `conclusion: success` on `Build TypeScript`, which is the step
+   whose Python heredoc `assert`s the `BUILD_SHA` placeholder was actually found and replaced —
+   confirming the stamp mechanically applies on every green deploy, not merely that the code compiles.
+
+**What the peer session relayed** (raw job-log lines from run `33733707586`, which I cannot fetch
+myself): the poll took 2 attempts — attempt 1 at 08:31:41 reported `deployedSha=f0f9afc...` (the
+PREVIOUS commit), attempt 2 at 08:31:53 reported `5dbd4df...` (the new one). I did not independently
+read these two lines; I can only corroborate the timing skeleton they sit in, which I did read myself
+and which matches exactly.
+
+**Why this discriminates, verified by reasoning from facts I hold independently**: `DEPLOYED_SHA`
+(the app setting) was written at 08:31:14, 27 seconds before the first poll, with TWO further
+app-settings-triggered restarts in between (steps 1 and 3 above). If `servingSha()` were reading
+`process.env.DEPLOYED_SHA` live (evaluated per-request, not baked into the bundle), any worker
+restarted after 08:31:14 — and the app went through at least one, arguably two, restart triggers by
+08:31:40 — would read the ALREADY-UPDATED env value and report `5dbd4df` from attempt 1. It did not:
+it reported `f0f9afc`, the value that can only come from a **compiled-in literal** in the OLD
+bundle's `buildStamp.js` (per point 1, `f0f9afc`'s own build stamped exactly that value into its own
+`dist/`). That is only explicable if `servingSha()` genuinely prefers the bundle-compiled `BUILD_SHA`
+over the live env setting, exactly as the source shows (`BUILD_SHA || process.env.DEPLOYED_SHA`) —
+and attempt 2, 12 seconds later (well after "Deploy to Azure Functions" completed at 08:31:34),
+correctly picked up the NEW bundle's `BUILD_SHA='5dbd4df'`.
+
+**This also resolves why the FIRST post-fix deploy (`33733374880`, `f0f9afc` itself) still converged
+on attempt 1**: at that point the OUTGOING bundle (deployed by the prior commit) predated
+`buildStamp.ts` entirely, so its `BUILD_SHA` was `null` and `servingSha()` correctly fell through to
+`DEPLOYED_SHA` — which had already been updated. That is the documented fallback behaving exactly as
+designed for an unstamped predecessor, not a repeat of the defect. `33733707586` is the first deploy
+where BOTH the outgoing and incoming bundles carry a real stamp, and it is the one that actually
+waited — which is the single strongest piece of evidence available anywhere for this claim.
+
+**Net: CONFIRMED**, with the caveat that two specific raw log lines came from the peer and were not
+independently re-read by me — everything the argument's soundness depends on (which commit
+introduced the stamp, the step timings, the restart-trigger count, `servingSha()`'s actual
+precedence) I verified myself from source and from `gh api` metadata reads, and the two relayed
+lines are the only inputs that would need re-confirming to fully close the gap on their own.
+
+---
+
+## C7. Nothing in production behaves differently yet
+
+**CONFIRMED.**
+
+1. **`MASTERCONTEXT_SOURCE` default**: `grep -n MASTERCONTEXT_SOURCE api/src/functions/tests/*.ts`
+   shows exactly one read site — `masterContextSource()` — `process.env.MASTERCONTEXT_SOURCE ===
+   'postgres' ? 'postgres' : 'storage'`. Any unset, empty, or misspelled value defaults to
+   `'storage'`. `grep -rn MASTERCONTEXT_SOURCE .github/workflows/*.yml` returns nothing — it is not
+   set anywhere in CI, so it is not set on the Function App unless someone did it by hand, and
+   `.claude/actions.md` confirms nobody has ("Nothing reads Postgres yet"). No other path in the
+   repo reads Postgres for the master profile.
+
+2. **The copy route requires a verified session, correctly** — read `masterContextCopy` and its
+   dependencies directly:
+   - `requireWrite(req)` (`appSession.ts:72-76`): `if (verified || owner === DEMO_EMAIL) return null`
+     — blocks any unverified request whose resolved owner is NOT the demo account.
+   - `resolveOwner(req)` (`appSession.ts:46-63`): a valid `Authorization: Bearer` session ALWAYS
+     wins and returns `{owner: v.email, verified: true}`, ignoring `?owner=` entirely (line 51,
+     matched before the query-string fallback is ever reached). Only when there is no verified
+     session does it fall through to `{owner: req.query.get('owner') || DEMO_EMAIL, verified:
+     false}`.
+   - So the only two ways through `requireWrite` on this route are (a) a real verified session,
+     whose OWN email is used (not attacker-supplied), or (b) no session at all with owner defaulting
+     to the shared demo sandbox partition — safe, since `owner_master_block` is owner-scoped and the
+     demo partition holds no real data. An unverified caller CANNOT pass `?owner=von.ellis@...` to
+     seed a real owner's Postgres rows — `requireWrite` 401s before `resolveOwner` is called a
+     second time inside the handler.
+   - This is the correct pattern per this repo's own established distinction (`H19`): `requireWrite`
+     alone is unsafe for GLOBAL state with no demo partition (Prompts), but safe for OWNER-SCOPED
+     state where the demo carve-out only ever touches the demo owner's own rows — which is exactly
+     what `owner_master_block`'s `PRIMARY KEY (owner_email, block_key)` guarantees.
+
+---
+
 ## C1. The accessor is the only production read of MasterContext
 
 **CONFIRMED.**
@@ -219,3 +315,63 @@ This is the same distinction the pre-migration code drew (`entities.length` vs a
 `TableClient` error), preserved.
 
 ---
+
+## THE INTEGRATION TRACE
+
+**CONFIRMED**, including the specific attack the brief called out (`appBaseline.ts` /
+`diagMasterSource.ts` never edited by this work but claimed as consumers).
+
+```
+$ grep -n "loadMasterBaseline" api/src/functions/tests/*.ts
+appBaseline.ts:5:    import { loadMasterBaseline } from './appInsertions'
+appBaseline.ts:350:   const master = await loadMasterBaseline()
+appInsertions.ts:25:  export async function loadMasterBaseline(): Promise<Record<string, string>> {
+appInsertions.ts:80:   const prevPkg = loop === 0 ? await loadMasterBaseline() : {}
+appSwaps.ts:12:       import { loadMasterBaseline } from './appInsertions'
+appSwaps.ts:93:       const master = args.master ?? await loadMasterBaseline()
+diagMasterSource.ts:3: import { loadMasterBaseline } from './appInsertions'
+diagMasterSource.ts:88:      const master = await loadMasterBaseline()
+```
+`appBaseline.ts` and `diagMasterSource.ts` are genuinely, transitively covered:
+`loadMasterBaseline()` -> `readMasterContextEntity()` -> the accessor, with zero raw reads of their
+own (confirmed under C1's grep, which covers the whole `api/src` tree, both files included). Neither
+needed editing by this lane because neither ever read MasterContext directly — they always went
+through `appInsertions.loadMasterBaseline`, which is the one function this lane's Commit 1 actually
+migrated. `swaps.ts` does NOT call `loadMasterBaseline` itself (correctly — it stays pure per `H12`:
+no `@azure/functions`, no `pg`); it receives `master` as a parameter from `appSwaps.ts`, which is
+what makes it a "consumer" in the sense the AC doc means (reads the value) rather than a caller of
+the accessor.
+
+**Producer claim** (12 Storage writers, none targeting the `context` partition) — spot-checked
+rather than re-derived from scratch, since re-deriving a 12-file sweep independently would not add
+information beyond re-running the same grep: `grep -rn "createEntity\|upsertEntity\|updateEntity"
+api/src --include=*.ts | grep -i context` returns nothing, consistent with the claim.
+
+---
+
+## VERDICT SUMMARY
+
+| Claim | Verdict |
+|---|---|
+| C1 — sole production reader | **CONFIRMED** |
+| C2 — six call sites' error policies preserved exactly | **CONFIRMED** |
+| C3 — `masterBaseline` byte-identical across the cut | **CONFIRMED**, mutation-proved |
+| C4 — `owner_master_block` correct on production | **CONFIRMED**, local populated-DB test + live data (peer-relayed, independently summed) |
+| C5 — `H:every-declared-table-is-registered` closes H11's blind spot | **CONFIRMED** for the specific incident (mutation-proved); **REFUTED as a general claim** — 12 pre-existing tables created via `ensure*()` helpers outside `SCHEMA_SQL` remain invisible to every migration-completeness guard in the repo, the same shape as the D21 incident, left open |
+| C6 — deploy gate measures the bundle, not a label | **CONFIRMED**, including the previously-unsettled discriminator |
+| C7 — nothing behaves differently in production yet | **CONFIRMED** |
+| Integration trace | **CONFIRMED** |
+
+**One real, actionable finding survives independent adversarial review**: C5's wider blind spot
+(12 tables: `ats_source`, `bulk_job`, `coach_activity`, `coach_thread`, `folder_role_map`,
+`mail_alert_state`, `mail_watch_config`, `opportunity_stage_history`, `owner_search_prefs`,
+`seniority_routing`, `taxonomy_title`, `title_tier_draft`). Pre-existing, not introduced by this
+lane, and not blocking — but worth a follow-up ACT item so the next table created outside
+`SCHEMA_SQL` doesn't get assumed-covered by a guard whose name promises more than it delivers.
+
+**Process finding**: a mutation-test edit briefly leaked into a real pushed commit (`12b7da0`) via a
+shared working tree with a concurrent instance of this session. Caught within the same turn, fixed,
+pushed (`d646b9e`), and independently confirmed by the peer never to have reached `origin/main`.
+
+No live behavior changed as a result of this verification pass. `MASTERCONTEXT_SOURCE` is still
+`storage` in production; the switch remains the owner's decision per the peer's own statement.
