@@ -27,7 +27,7 @@ import {
   COMPARE_COLUMNS, COMPARE_SCOPE_NOTE, comparisonStaleNote,
   keywordGroupMeaning,
   evidencePresentation,
-  TALLY_SCORE_DEFER, tabEvidenceTone } from '../postingAnalysis.js'
+  TALLY_SCORE_DEFER, tabEvidenceTone, tabEvidenced } from '../postingAnalysis.js'
 import { HIGHLIGHT_CLASS } from '../highlight.js'
 // 4.3-11 is a RELOCATION, not a new component: GateBadge is the badge the packet screen, the
 // packets list and the drawer already render, and <ScoreParts> is the one score-bar renderer the
@@ -759,9 +759,12 @@ export function PostingAnalysisCard({ req, reqError, reloadReq, coveredKw, missi
   // packet actually has - the link must not appear where it cannot go.
   const usageOf = (r) => (swaps && listOwners ? requirementUsage(swaps, r && r.id, listOwners) : null)
 
+  // SPEC 4.1-10. `evidenced` rides beside `count` from the SAME rows tabEvidenceTone reads, so the
+  // ratio and the colour cannot disagree about the same tab -- the divergence this file already
+  // records for the card-vs-row "2 of 3" is exactly what two independent counts produce.
   const TABS = [
-    { key: 'responsibilities', label: 'Responsibilities', count: responsibilities.length, tone: tabEvidenceTone(responsibilities), hint: `${responsibilities.length} lines extracted from the posting` },
-    { key: 'requirements', label: 'Requirements', count: requirements.length, tone: tabEvidenceTone(requirements), hint: `${requirements.length} lines extracted from the posting` },
+    { key: 'responsibilities', label: 'Responsibilities', count: responsibilities.length, evidenced: tabEvidenced(responsibilities), tone: tabEvidenceTone(responsibilities), hint: `${responsibilities.length} lines extracted from the posting` },
+    { key: 'requirements', label: 'Requirements', count: requirements.length, evidenced: tabEvidenced(requirements), tone: tabEvidenceTone(requirements), hint: `${requirements.length} lines extracted from the posting` },
     // NO TONE ON THIS TAB, EVER, and it is a deliberate divergence from the prototype rather than an
     // omission. These are MODEL-SUGGESTED words: `model_keyword` is explicitly never scoreable, and
     // this file already records that attaching a count to them "made a suggestion look like a
@@ -876,9 +879,14 @@ export function PostingAnalysisCard({ req, reqError, reloadReq, coveredKw, missi
                 data-qc={POSTING_HOOKS.tab} data-qc-tab={t.key} data-qc-active={tab === t.key ? '1' : '0'}
                 className={`px-tab ${tab === t.key ? 'px-tab-active' : 'px-tab-idle'}`} onClick={() => setTab(t.key)}>
                 {t.label}{' '}
+                {/* SPEC 4.1-10. `n of m evidenced` where the rows carry a state, the bare total
+                    where they do not. The two forms are not interchangeable: `0 of 21` over
+                    unmeasured rows would be a coverage claim the data cannot support, so
+                    tabEvidenced returns null and this falls back to the count. */}
                 <span data-qc-tone={t.tone || undefined}
+                  data-qc-evidenced={t.evidenced ? `${t.evidenced.evidenced}/${t.evidenced.total}` : undefined}
                   style={t.tone ? { color: toneColor(t.tone), fontWeight: 700 } : { opacity: 0.75 }}>
-                  ({t.count})
+                  {t.evidenced ? `${t.evidenced.evidenced} of ${t.evidenced.total} evidenced` : `(${t.count})`}
                 </span>
               </div>
             ))}

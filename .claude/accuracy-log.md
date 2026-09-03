@@ -742,3 +742,36 @@ screen.
 **Cost:** roughly ten turns of design debate about how to build a sentence that ships today, plus
 two `verify.sh` runs (~$2.78 each) briefed on the wrong premise. The independent AC pass found it in
 one read — which is the argument for the pass, not against it.
+
+### A green deploy over a missing table, and the guard that was blind by construction
+
+| | |
+|---|---|
+| **Claim** | "Deployed" — api-deploy run 33731929584 succeeded for `036620a`, pg-migrate returned `ok: true`, detail *"Schema applied to boost_resume_n_packet_builder: 32/32 tables present"*. |
+| **Ground truth** | **REFUTED.** `owner_master_block` did not exist in the live database. Confirmed through `boost-pg-mcp-write`: right database (`boost_resume_n_packet_builder`, 51 tables, `correction` and `swap_decision` present), table absent. |
+| **The single source that would have settled it** | The live database — one `information_schema.tables` query, which is what I ran. **I nearly didn't.** The deploy was green and I had already written "Deployed" in my own report. What made me check was that the repo's own session-start hook names this exact class: *"Work was written to change production and the change did not happen."* |
+| **Root cause** | `pgMigrate` verifies against `EXPECTED_TABLES`, a hand-maintained list. My table was declared in `SCHEMA_SQL` and never added to that list, so "32/32" counted 32 names that all existed and never looked at the 33rd. **The number was true and meaningless.** |
+
+**The guard that should have caught it was blind by construction, and that is the finding worth
+keeping.** `H11` — *"every table this layer added is registered for migration"* — iterates a
+hardcoded array of table names. It can only check a table someone remembered to add to it, so the
+guard against *"you forgot to register your new table"* itself requires you to remember your new
+table, in a **third** place. It was green the entire time. Replaced by
+`H:every-declared-table-is-registered`, which derives the list from `SCHEMA_SQL` and therefore
+cannot be blind to a new table; mutation-proved FIRED.
+
+**Why the table was missing at all is a SEPARATE and still-open question.** A manual pg-migrate
+re-run created it immediately, so the deployed bundle did contain the statement. The workflow's
+converge check reported *"worker is serving 036620a after 1 attempt(s)"* — first attempt, unusually
+fast for a fresh deploy — and its own comment says it exists so that *"pg-migrate would not run
+whichever bundle IS serving"*. **Leading hypothesis, stated as inference not fact:** Azure Functions
+runs several worker instances; the health probe hit a converged one and the pg-migrate POST landed
+on another still serving the old bundle. I have no instance-level evidence, so this is not proven —
+it is the next thing to measure, and it is recorded rather than fixed on a guess.
+
+**Calibration note on my own reporting.** I wrote "Deployed" and "api-deploy → success" before
+querying the database. That sentence was true about the workflow and false about the world. A
+deploy's exit code describes the deploy; only the database describes the schema.
+
+For the trend table: `self-caught`, but only just, and after the claim had already been made to the
+owner in this session.

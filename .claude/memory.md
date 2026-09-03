@@ -6485,3 +6485,109 @@ Not fixed here, deliberately: the rows belong to other lanes and repairing them 
 tracking-docs PR into someone else's history. The guard itself — a `one-act-id-one-row` assertion
 mirroring `one-id-one-row` — is the right fix and is a change to a file that decides a gate, so it
 is TIER 1 and needs its own AC pass. Left as the owner's call rather than bolted on here.
+
+### MasterContext move — LANDED ON main `036620a` (2026-09-03), and it is INERT there by design
+Commits `5f4c0c9` (accessor), `d85934d` (`owner_master_block`), `79d843f` (Postgres backing + copy
+route + rollback switch). api 1069/1069, app 454/454, four guards mutation-proved, schema executed
+against a POPULATED local Postgres.
+
+**Nothing observable changed in production.** `MASTERCONTEXT_SOURCE` defaults to `storage`, so every
+build still reads Azure Storage. The table is created by pg-migrate and nothing reads it; the copy
+route exists and must be called deliberately. The move becomes real only when the copy runs and the
+switch is flipped — and AC-5 (byte-identical `masterBaseline` output on the owner's real data) must
+be confirmed live BEFORE that flip.
+
+**TWO MERGE HAZARDS MET IN ONE LANDING — both worth remembering.**
+1. `git diff origin/main..HEAD` showed `-56/-26/-51` on `app/src/assetBlocks.js`, `AssetBlocks.jsx`
+   and its test, plus FIVE whole evidence docs at `-381/-165/-115/-101/-68`. None of it was mine to
+   delete: `main` had moved 22 commits (the swap-attribution-judge lane) and this branch was behind.
+   **Reading the diff BEFORE the merge is what caught it** — a `--ff-only` the other way round would
+   have reverted another lane's work. The rule earns its keep: check the diff, not just the rc.
+2. The merge itself lost a `})`: git treated the trailing closer as a shared suffix and kept ONE
+   copy, so this branch's last test lost its closer at the seam. **`tsc` passed.** The file failed
+   to PARSE, and node reported it as one failing test file while **145 tests inside it silently did
+   not run** — the suite went 1067 -> 924 and still printed `fail 1`. **The COUNT exposed it, not
+   the verdict.** After any merge that touches a test file, compare the test COUNT to before.
+
+Also landed to `eds-claude-skills` main (`4442e36`, PR #33): the `verify.sh` clobber fix,
+`scripts/artifact_shape.py`, and the `mutate.sh` matcher fix.
+## 2026-09-03 — TRINNEX ONLY (owner-scoped): coverage 71% -> 86% by judging the other artifacts
+
+**Owner: *"I only want us counting trinnex right now stop looking at anything else."*** Everything
+measured earlier this session was eMoney, because that is what the committed fixture holds. Trinnex
+is packet `85cee965-f435-4b8e-910f-c806232092ce`.
+
+**Landed as commit `8a8ddab`, PR
+[#81](https://github.com/deventerpriseds-org/boost-application-packet-platform/pull/81)** — docs
+only (`memory.md`, `actions.md`), no code path touched, so nothing deploys from it. Subscribed to
+its activity.
+
+**Before:** only the resume had ever been judged (Sep 2). `cover`, `portfolio`, `compact_resume`,
+`video` had zero verdicts.
+
+**After running `POST /app/artifact/{id}/checks` on cover, portfolio and compact_resume:**
+
+| | |
+|---|---|
+| live requirements | **21** |
+| judged | **21** |
+| **covered by at least one artifact** | **18 (86%)** — was 15 (71%) resume-only |
+| covered by more than one | 11 |
+
+**Judging the other artifacts found 3 requirements the resume alone missed.** That is the whole
+argument for judging every artifact rather than only the resume.
+
+**`compact_resume` produced 0 new verdicts, and that is CORRECT — not a defect.**
+`requirement_coverage` is unique on **`(opp_id, verdict_key)`**, per OPPORTUNITY not per artifact,
+and the schema comment on `artifact_id` says it outright: *"Provenance only, NEVER identity: the
+verdict is a function of the text."* `compact_resume` judges the same seven fields with the same
+text as the resume, so every key already existed and `on conflict do nothing` wrote nothing.
+
+**CONSEQUENCE FOR ANY FUTURE MEASUREMENT: never group `requirement_coverage` by `artifact_id` to
+ask "which artifact covers what".** It answers "which artifact paid for the verdict first". The
+per-artifact split I reported (resume 15 / portfolio 10 / cover 9) is provenance, and only means
+what it looks like where the fields are genuinely distinct (`@CoverLetterBody` vs `ResumeSummary`).
+
+## Hardening
+
+- **A schema comment I had already read told me the answer.** `artifact_id` is documented as
+  "Provenance only, NEVER identity" and I still grouped by it to attribute coverage. **Guardrail:
+  before grouping by a foreign key to attribute anything, read that column's comment in
+  `schema.ts`.** This was the eighth scope/denominator error of the session and the only one the
+  codebase had pre-emptively warned about.
+- **Scope creep in measurement is its own failure mode.** Seven of those eight errors were mixing
+  populations — packets, artifact types, opportunities with and without packets. The owner had to
+  say "count Trinnex only" to stop it. **Guardrail: state the scope in the query itself (a `where`
+  on packet or opp id), not in the prose around the result.**
+
+### The deploy gate was vacuous, and `owner_master_block` is now LIVE (2026-09-03)
+
+**What was broken.** `api-deploy.yml` polls `/api/health` for the sha it just deployed before letting
+pg-migrate run. It read `process.env.DEPLOYED_SHA` -- an APP SETTING written by a step that runs
+BEFORE the code deploy -- so the label flipped while the old bundle served, the poll cleared on
+attempt 1, and the migration ran the PREVIOUS bundle's SCHEMA_SQL. Measured twice: 2026-08-28 at
+"31/31 tables present" (the JD rename never happened) and 2026-09-03 at "32/32". The second is proof
+rather than a symptom: that deploy's SOURCE carried a 33-entry EXPECTED_TABLES and the RUNNING code
+still answered 32.
+
+**Fixed by changing WHAT is measured.** The sha is stamped into `src/functions/buildStamp.ts` before
+`npm run build`, compiled into `dist/`, and ships inside the zip. `DEPLOYED_SHA` survives only as a
+fallback, in one place. The stamp step asserts its own edit applied, and the step was verified by
+EXTRACTING it from the YAML and RUNNING it, not by reading the indented heredoc.
+
+**Result, verified in the deploy log and the live database:** run 33733374880 reported
+`33/33 tables present` with `"owner_master_block":0` in the list, and the table exists with 4
+columns, `PRIMARY KEY (owner_email, block_key)` and the 14-value CHECK intact.
+
+**HONEST LIMIT ON THE FIX'S PROOF.** I predicted the poll would now take real time instead of one
+attempt. It still says `after 1 attempt(s)`. That is CONSISTENT with the fix (the app has
+`WEBSITE_RUN_FROM_PACKAGE`, so a restart can mount the new bundle near-instantly) but it is NOT
+proof of it -- a deploy where BUILD_SHA and DEPLOYED_SHA differ would discriminate, and none has run.
+What IS proven: the stamp applied (its assertion would have failed the step), and the running code
+executed the new schema. Do not upgrade "consistent with" to "proven" without that test.
+
+**Two guards earned here, both mutation-proved:**
+- `H:every-declared-table-is-registered` -- H11 walked a HAND-MAINTAINED list and was therefore
+  blind to any genuinely new table; the new one derives the list from SCHEMA_SQL.
+- `H:deploy-sha-comes-from-the-bundle` -- health must report the compiled sha, and must not name
+  `DEPLOYED_SHA` at all so the fallback cannot be reintroduced at the call site.
