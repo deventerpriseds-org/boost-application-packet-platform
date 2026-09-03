@@ -595,10 +595,23 @@ already made once.
 > `4.8-2` renders coverage, and `4.8-11`'s "no surface where the ordering renders" is false --
 > `ATTENTION_ORDER` is applied by `bySeverity` and the QC findings list shows it.
 >
-> **The one remaining PARTIAL, `4.6-8`, is not UI work and should not be counted as though it were.**
-> It needs an upstream join that does not exist: 30 `swapped` rows and 35 `model_keyword`s with ZERO
-> rows whose `to_label` matches any keyword. Closing it by fuzzy-matching would assert "this keyword
-> displaced that phrase" -- an accusation -- which `CLAUDE.md` forbids.
+> ~~**The one remaining PARTIAL, `4.6-8`, is not UI work and should not be counted as though it
+> were.**~~ **SUPERSEDED 2026-09-03 — `4.6-8`'s own row now reads DELIBERATE, closed by `a8a4210`
+> ("its recorded blocker was wrong, and the real one was never written").** There is no remaining
+> PARTIAL anywhere in this document: counted from the ROWS, 216 verdict rows = 176 BUILT + 34
+> DELIBERATE + 6 NOT-IN-PROTOTYPE, **zero PARTIAL and zero ABSENT**.
+>
+> The paragraph is struck rather than deleted because its REASONING is still correct and still load
+> bearing: closing `4.6-8` by fuzzy-matching would assert "this keyword displaced that phrase" — an
+> accusation — which `CLAUDE.md` forbids. The measurement behind it stands too (30 `swapped` rows and
+> 35 `model_keyword`s, ZERO rows whose `to_label` matches any keyword). What changed is the VERDICT,
+> not the analysis: DELIBERATE is the honest label for a row that is deliberately not built, where
+> PARTIAL implied unfinished work.
+>
+> **Why this sat stale:** `H:coverage-tally-matches-rows` compares each section's TALLY against its
+> rows, and caught nothing here because the tally was right — the drift was in narrative prose, which
+> no guard reads. Flagged as the same class of defect this document exists to prevent, in its own
+> text.
 >
 > **+1 BUILT / -2 PARTIAL on 2026-09-03, closing the last two JD-analysis rows.** `4.1-10` was
 > TESTED rather than argued: the app's number is provenance, the prototype's is coverage, so the
