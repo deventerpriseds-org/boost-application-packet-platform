@@ -519,6 +519,30 @@ Key tables (PostgreSQL):
 - Android native testing: requires BrowserStack App Automate; CCR cannot run AVD (no KVM)
 - iOS testing: requires macOS runner or BrowserStack; categorically unavailable in Linux CCR
 
+## Hardening -- 2026-09-03: I asserted SELECTORS AND STRINGS FROM MEMORY, three times in one session
+Every `ui-verify` failure this session was MY INPUT, never the app. The app was correct all three
+times and the harness was right to refuse:
+
+| run | I passed | reality |
+|---|---|---|
+| 33735198012 | `expect "Keywords for this line"` | `innerText` returns RENDERED text; CSS uppercases it |
+| 33756564557 | `[data-qc="qc-go-to-field"]` on the RESUME route | that hook lives in `QcRail.jsx`, the QC step |
+| 33757673248 | `[data-qc="blocks-ask-assistant"]` | the hook is `blocks-forward-assistant` |
+
+Each cost a full dispatch-and-poll cycle, and each would have been settled by one grep taking
+seconds. The third is the worst: I had already read `BLOCK_HOOKS` earlier in the same session.
+
+**Guardrail: NEVER pass a selector or an expect string you have not just read out of the source.**
+Before dispatching `ui-verify`:
+
+    grep -n "<hook>:" app/src/*.js            # the hook's VALUE, not the name you remember
+    grep -rn "<hook name>" app/src/screens/   # and WHICH screen renders it
+
+And for `expect`: assert a `data-qc` COUNT rather than visible copy wherever possible. Copy is
+styled (`text-transform`), translated and edited; a hook is a contract. The one run that passed
+(33735472071, count 18) asserted a hook. Every run that failed asserted my memory.
+
+
 ## Active work
 **2026-09-03 - `ui-verify` CLICK_SEL IS A SEQUENCE, and it immediately found a real gap.** `main`
 `5b34b87`.
