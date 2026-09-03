@@ -7941,3 +7941,42 @@ fuzzy `requirement_id` — is explicitly REFUSED (`CLAUDE.md:432`).
 
 **Owner decision required before any code.** Option A is Tier 1 and needs an independent AC pass
 first; Option B is Tier 2 and can start on a go-ahead.
+
+### ACT-68f — 4.6-8 DECIDED: exact PROPOSES, judge CONFIRMS everything (2026-09-02)
+
+**Owner's decision**, after rejecting my three-option menu as the wrong menu: *"I thought that's when
+the judge llm was supposed to come into play? we know keyword is insufficient"*, then
+*"I want a hybrid ... the keyword can try and land x% and the judge can cleanup and confirm/settle
+the rest"*, sharpened to **confirm what exact containment tried to settle AS WELL AS the remainder**.
+
+**The design.** Two passes. (1) Exact containment of `requirement.model_keyword` in `to_label`
+PROPOSES a candidate link — free, deterministic. (2) **The judge CONFIRMS every claim, the exact ones
+included.** The owner's sharpening is the correct one and I had it wrong: containment proves the
+keyword is PRESENT in the replacement, never that the swap was made FOR it. **Presence is not
+causation.** So nothing reaches the screen unconfirmed.
+
+**MY MISS, and it is the reason this took four turns.** I proposed three NEW mechanisms (change the
+generation contract / exact-only / posting-line-anchored) without grepping for the system that
+already does exactly this. **Three judges ship on one contract** — `coverageJudge`, `supportJudge`,
+`stuffingJudge` — each built because an exact rule was too blunt, each leaving that exact rule in
+place as the cheap half, each requiring the model to CITE and code to VERIFY the citation byte-exact.
+`coverageJudge.ts:18-24` even records that the owner already moved the house rule
+(*"a model may PROPOSE, only an exact rule may ACCUSE"*) for precisely this case. **"Extend, don't
+duplicate" names this failure and I walked past it.** Logged in `.claude/accuracy-log.md`.
+
+**Also corrected: I over-priced the judge.** I told the owner Option A meant a generation-contract
+change with no backfill and "never on today's packets". That is true of A and FALSE of the judge:
+a judge runs after the fact on stored rows, so generation is untouched and **existing packets can be
+re-judged**.
+
+**Measured inputs the ACs must reckon with:** 30 `swapped` rows; 17 carry `requirement_id`;
+**8 of those 17 share ZERO tokens** between keyword and replacement (`AI governance` vs
+`Risk Management`, at confidence **1.000** — because confidence scores the replacement against the
+POSTING LINE, never the keyword); only **2 of 17** contain the keyword verbatim.
+
+**TIER 1** — a stored verdict is a claim. Independent AC pass launched via
+`eds-claude-skills/scripts/verify.sh --kind AC swap-attribution-judge`; artifact
+`AC-swap-attribution-judge.md`. **No implementation until those ACs land.**
+
+**The 0.34 fuzzy link is DEMOTED**, not deleted: it becomes a shortlist handed to the judge to narrow
+which requirements to ask about, and must never reach the screen as a claim.
