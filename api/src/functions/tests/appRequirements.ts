@@ -27,6 +27,13 @@ import { MIN_QUOTE_CHARS } from './reviewer'
 // INSTRUMENTATION ONLY, and it cannot throw. Nothing in this file reads back what it writes; see
 // judgeOutcome.ts and H:judge-outcome-not-gating.
 import { recordAndPrune } from './judgeOutcome'
+// The ONE shared "an artifact's text changed, re-run its checks" helper (see appRecheck.ts's own
+// header for why it lives apart from appChecks.ts/appPackets.ts: a static cycle either home would
+// create for appCorrections.ts). Safe to import here STATICALLY: appRecheck.ts resolves
+// `evaluateArtifact` through a DYNAMIC import inside its function body, so it carries no static edge
+// back to appChecks.ts (which already imports THIS file) — importing it here does not create the
+// cycle appRecheck.ts exists to avoid.
+import { recheckAfterTextWrite, type ArtifactEvaluator } from './appRecheck'
 
 const HEADERS = { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': '*', 'Access-Control-Allow-Methods': 'GET,POST,OPTIONS' }
 
@@ -540,8 +547,25 @@ export async function writeEvidence(
 export async function writeRequirements(client: any, opp: any): Promise<{
   opp_id: string; rows: number; located: number; located_rate: number
   jd_source: string | null; truncated: boolean
+  /**
+   * True when this write actually replaced the posting the requirement spine was built from — i.e.
+   * `jd_posting_snapshot_sha256` moved. Read BEFORE the transaction (never derived from the rows
+   * this call just wrote), so it answers "did re-extraction change anything" rather than "does a
+   * spine exist". `buildRequirements` is a deterministic function of the posting text, so an
+   * unchanged snapshot hash means an unchanged requirement set — the same "compare the stored hash"
+   * shape `rebuildComparison`/`requirementsGet` already use for staleness (lines 738, 875 below),
+   * extended here rather than re-derived, per this repo's "extend, don't duplicate" rule. Callers use
+   * this to decide whether already-built artifacts need re-checking (AC-judge-trigger-points.md
+   * Group 2, AC 9: a byte-identical re-parse must trigger no re-check work at all, not merely cost
+   * nothing once triggered).
+   */
+  changed: boolean
 }> {
   const built = buildRequirements(opp)
+  const prior = (await client.query(
+    `select jd_posting_snapshot_sha256 from opportunity where id=$1`, [opp.id])).rows[0]
+  const priorHash: string | null = prior?.jd_posting_snapshot_sha256 ?? null
+  const newHash: string | null = built.jd_posting_snapshot ? built.jd_posting_snapshot_sha256 : null
   await client.query('begin')
   try {
     await client.query(
@@ -568,6 +592,7 @@ export async function writeRequirements(client: any, opp: any): Promise<{
     opp_id: opp.id, rows: built.rows.length, located: built.located,
     located_rate: Math.round(built.located_rate * 1000) / 1000,
     jd_source: built.jd_source, truncated: built.posting_truncated,
+    changed: priorHash !== newHash,
   }
 }
 
@@ -576,9 +601,89 @@ export async function writeRequirements(client: any, opp: any): Promise<{
  * `applyAnchorTruth` nulls jd_table/jd_requirements when no single-job source exists; leaving the
  * rows behind would keep serving quotes attributed to a posting the row no longer has.
  */
-export async function clearRequirements(client: any, oppId: string) {
+export async function clearRequirements(client: any, oppId: string): Promise<{ changed: boolean }> {
+  const prior = (await client.query(
+    `select jd_posting_snapshot_sha256 from opportunity where id=$1`, [oppId])).rows[0]
+  const priorHash: string | null = prior?.jd_posting_snapshot_sha256 ?? null
   await client.query(`delete from requirement where opp_id=$1`, [oppId])
   await client.query(`update opportunity set jd_posting_snapshot=null, jd_posting_snapshot_sha256=null, jd_posting_snapshot_truncated=null where id=$1`, [oppId])
+  // Same "did the hash move" answer writeRequirements gives — priorHash was non-null (a real spine
+  // existed) and is now unconditionally nulled, so this is a real requirement-set change (to empty)
+  // exactly when there was something to lose.
+  return { changed: priorHash !== null }
+}
+
+/**
+ * Re-evaluate every already-built artifact of a packet after its requirement set changed underneath
+ * it — a re-extraction (`writeRequirements`) or a clear-to-anchor-truth (`clearRequirements`). Both
+ * callers pass their own `changed` result through so this never runs on an unchanged spine (AC 9:
+ * a byte-identical re-parse costs nothing, not even the listing query).
+ *
+ * NEVER THROWS. `recheckAfterTextWrite` already swallows a per-artifact evaluation failure (see its
+ * own header and `H:recheck-is-non-fatal`); this wrapper additionally swallows the ARTIFACT-LISTING
+ * query itself failing, because a re-parse succeeding is the property that matters here, not whether
+ * stale gates got refreshed. AC-judge-trigger-points.md Group 2's own wording: "NON-FATAL. A
+ * re-parse must still succeed if re-checking fails."
+ *
+ * "Already built" = `packet.pkg_json is not null` — the same predicate
+ * AC-judge-trigger-points.md's feasibility table uses to count "built" packets (`select count(*)
+ * filter (where pkg_json is not null) ... from packet`). A fresh opp's placeholder `todo` artifact
+ * rows (created the instant the packet screen is opened, by `loadPacket` in appPackets.ts — read,
+ * not edited, to confirm this) exist long before any content does; rechecking them would be a wasted
+ * transaction against nothing, and is exactly AC 7's "no artifact evaluation is attempted" case.
+ *
+ * BOUNDED AT THE QUERY (`limit $2`), not by breaking out of a loop after fetching more than that —
+ * the ceiling is a property of what gets fetched, matching AC-judge-trigger-points.md's explicit
+ * concern that the unattended `jdParseTick` timer (up to 10 opps/run, no owner toggle) is the one
+ * most likely to silently fan out model calls at scale. See this file's own module comment / the
+ * IMPL progress doc for the owner-setting this cap SHOULD become — `owner_search_prefs` does not yet
+ * have a column for it, and this lane does not own schema.ts, so the bound below is a literal
+ * default until that column is routed and read here instead.
+ */
+const DEFAULT_REEXTRACT_RECHECK_MAX_ARTIFACTS = 5
+
+export interface RequirementsRecheckSummary { attempted: number; ok: number; failed: number }
+
+export async function recheckArtifactsAfterRequirementsChange(
+  client: any,
+  oppId: string,
+  opts?: { owner?: string; maxArtifacts?: number; evaluate?: ArtifactEvaluator },
+): Promise<RequirementsRecheckSummary> {
+  // A non-finite/absurd override (or an absent one) must never remove the bound — it is what makes
+  // this "BOUNDED", not "bounded unless a caller passes something odd". Coerced and clamped here, in
+  // JS, rather than trusted to the SQL LIMIT alone: the LIMIT is still sent (cheaper — fewer rows
+  // fetched from a real database), but the ceiling this function GUARANTEES is enforced independent
+  // of what the query driver hands back, so it is provable with a fake client in a unit test and not
+  // only against a real Postgres LIMIT clause.
+  const max = Number.isFinite(opts?.maxArtifacts) && (opts!.maxArtifacts as number) > 0
+    ? Math.floor(opts!.maxArtifacts as number)
+    : DEFAULT_REEXTRACT_RECHECK_MAX_ARTIFACTS
+  let ids: string[] = []
+  try {
+    const { rows } = await client.query(
+      `select a.id from artifact a join packet p on p.id = a.packet_id
+        where p.opp_id = $1 and p.pkg_json is not null
+        order by a.type limit $2`,
+      [oppId, max],
+    )
+    ids = (rows || []).map((r: any) => r.id).slice(0, max)
+  } catch {
+    // The listing query itself failed. A re-parse must still succeed — return the empty summary
+    // rather than throw, exactly the posture `recheckAfterTextWrite` already holds per-artifact.
+    return { attempted: 0, ok: 0, failed: 0 }
+  }
+  let ok = 0, failed = 0
+  for (const id of ids) {
+    // owner left '' when unknown: evaluateArtifact resolves `owner || art.owner_email` from the
+    // artifact/packet/opportunity join it already performs (appChecks.ts:99), so this call site
+    // needs no extra query to look the owner up itself.
+    const out = await recheckAfterTextWrite(client, id, opts?.owner || '', {
+      evaluate: opts?.evaluate,
+      label: 'requirements re-extraction',
+    })
+    if (out.ok) ok++; else failed++
+  }
+  return { attempted: ids.length, ok, failed }
 }
 
 /**

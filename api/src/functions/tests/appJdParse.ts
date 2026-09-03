@@ -2,7 +2,9 @@ import { app, HttpRequest, HttpResponseInit, InvocationContext, Timer } from '@a
 import { resolveOwner, requireWrite, serverError } from './appSession'
 import { getPgClient } from './pgClient'
 import { normalizePostingText, resolvePostingSource, isAlertDigest } from './jdText'
-import { writeRequirements, clearRequirements, ensureRequirementCols } from './appRequirements'
+import {
+  writeRequirements, clearRequirements, ensureRequirementCols, recheckArtifactsAfterRequirementsChange,
+} from './appRequirements'
 import { logUsage } from './usageMeter'
 import { openaiFetch } from './mailWatch'
 
@@ -73,7 +75,17 @@ async function applyAnchorTruth(client: any, opp: any): Promise<{ jdTitle: strin
   )
   // jd_table is now null, so the requirement rows quote a posting this opportunity no longer has.
   // Stale evidence is worse than none — drop it in the same call that drops the posting.
-  await clearRequirements(client, opp.id).catch(() => {})
+  //
+  // AC-judge-trigger-points.md Group 2 (re-extraction): losing the spine is as much a requirements
+  // CHANGE as gaining a new one — any already-built artifact's `artifact_gate`/`check_result` was
+  // computed against requirements that no longer exist. `clearRequirements` reports `changed: true`
+  // only when there was a real spine to lose (see its own comment), so a call on an opp that never
+  // had one (the common case — most anchor-truth calls fire on opps that were never groundable in
+  // the first place) never even runs the artifact-listing query below.
+  try {
+    const cleared = await clearRequirements(client, opp.id)
+    if (cleared.changed) await recheckArtifactsAfterRequirementsChange(client, opp.id)
+  } catch {}
   return { jdTitle: opp.role || '', jdCompany: opp.company || '' }
 }
 
@@ -82,12 +94,32 @@ async function applyAnchorTruth(client: any, opp: any): Promise<{ jdTitle: strin
 // the HTTP handler, the backfill, and the 5-minute timer that actually works the production
 // backlog — so a posting can never be parsed without gaining a spine. Never throws: this is
 // deterministic structuring of text already stored, and a failure here must not lose the parse.
+// AC-judge-trigger-points.md Group 2 (re-extraction). Re-extracting a posting rewrites `requirement`
+// rows underneath every artifact that was already built and graded against the OLD set — nothing
+// re-checked them (feasibility table row: "ABSENT — real gap ... already runs unattended every 5
+// minutes via jdParseTick with no owner toggle"). `writeRequirements` reports whether this write
+// actually changed anything (its own `changed` field, keyed off the posting snapshot hash — the
+// same staleness signal `rebuildComparison`/`requirementsGet` already read), so a byte-identical
+// re-parse (AC 9) never even queries which artifacts exist. NON-FATAL end to end: a re-parse must
+// still succeed if re-checking fails (AC-judge-trigger-points.md Group 2's own wording), which is
+// why this whole function keeps its original try/catch shape unchanged rather than letting a
+// recheck failure propagate past `structureRequirements` the way a parse failure would.
 async function structureRequirements(client: any, oppId: string, ctx?: any) {
   try {
     await ensureRequirementCols(client)
     const opp = (await client.query(
       `select id, jd_html, jd_posting_raw, why_surfaced, jd_table from opportunity where id=$1`, [oppId])).rows[0]
-    if (opp) await writeRequirements(client, opp)
+    if (opp) {
+      const result = await writeRequirements(client, opp)
+      if (result.changed) {
+        const summary = await recheckArtifactsAfterRequirementsChange(client, oppId)
+        if (summary.attempted) {
+          ctx?.log?.(
+            `requirements: re-checked ${summary.ok}/${summary.attempted} artifacts for ${oppId} `
+            + `after requirements changed (${summary.failed} failed)`)
+        }
+      }
+    }
   } catch (e) { ctx?.log?.(`requirements: skipped for ${oppId}: ${e}`) }
 }
 
