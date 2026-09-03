@@ -10,6 +10,13 @@
 
 # VERIFIER BRIEF — MasterContext move + the two gate defects (loop 1)
 
+## VERIFY LOOP
+work: mastercontext-and-deploy-gate
+loop: 1
+
+This is loop 1, so there is no PRIOR STATE block to carry forward — nothing has been verified yet.
+Coverage is TOTAL: every claim below gets a verdict, none is skipped.
+
 Repo: `/home/user/boost-application-packet-platform`, branch `claude/incumbent-wins-swap`
 (= `origin/main` at `5dbd4df`).
 
