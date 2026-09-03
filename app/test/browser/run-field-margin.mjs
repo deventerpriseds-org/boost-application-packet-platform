@@ -354,9 +354,26 @@ const panel = await page.evaluate(() => {
 ok('clicking a chip opens the detail panel', !!panel, JSON.stringify(panel && panel.slice(0, 70)))
 ok('the panel quotes the postings own line',
   !!panel && /own the product roadmap end to end/.test(panel), JSON.stringify(panel))
-ok('the panel repeats "proposed" and shows no match grade or approx marker',
-  !!panel && /\bproposed\b/.test(panel) && !/≈/.test(panel)
-    && !/Exact term|Reworded|Loose|took the place of/i.test(panel), JSON.stringify(panel))
+// SPEC 4.5-30. THIS ASSERTION WAS INVERTED ON 2026-09-03, and the reason matters more than the
+// change: it used to require that NO grade appear, encoding a recorded finding that the grade "has
+// no source: matchesEntry needs a published term_library_entry". That finding was wrong. The
+// prototype never visualises a library -- `libTerms()` (qc/data.js:559) is a FLAG filter used as a
+// denominator -- and the grade is an OUTPUT comparison: does the posting say the term the way the
+// draft says it. Verified against the prototype's own fixture (all 6 `variant` rows have a
+// postingSays that does not contain the term) and on production (5,396 exact / 6,804 reworded).
+//
+// So the test now asserts the OPPOSITE, and asserts it HARDER than the old one did. It is not
+// enough that a grade appears: it must be the RIGHT grade for this row. `hiring technology` against
+// "own the product roadmap end to end" is reworded, because the posting line does not contain the
+// term -- if the derivation ever inverts, this fails rather than shrugging.
+ok('the panel keeps "proposed" AND states the grade the posting actually implies',
+  !!panel && /\bproposed\b/.test(panel)
+    && /\bReworded\b/.test(panel) && !/Exact term/.test(panel), JSON.stringify(panel))
+// `loose` must never reach the screen. It is decided by NOT being in the scoreable library, and
+// every chip here is a model_keyword declared never scoreable -- so it would be the constant answer
+// on every chip, and would read as a scoring verdict two lines below "it counts toward nothing".
+ok('and never prints the third grade, which would be constant and would read as credit',
+  !!panel && !/Loose|not scored/i.test(panel), JSON.stringify(panel))
 
 await page.evaluate(() => {
   const c = document.querySelector('[data-qc="blocks-keyword-chip"][data-qc-keyword="coaching"]')
@@ -370,6 +387,12 @@ const unloc = await page.evaluate(() => {
 })
 ok('a keyword whose posting line is UNLOCATABLE says so instead of quoting the paraphrase',
   !!unloc && /could not be located/i.test(unloc) && !/coach PMs/.test(unloc), JSON.stringify(unloc))
+// AND IT CARRIES NO GRADE AT ALL. This is the half a source-level test cannot prove, and the one
+// most likely to rot: with no posting line there is nothing to compare against, so grading it
+// `reworded` would report absent evidence as a finding. The marker must be absent too -- a chip
+// with no grade renders exactly as it did before this feature existed.
+ok('and an unlocatable line is graded NOTHING - not reworded, and no marker',
+  !!unloc && !/Exact term|Reworded|Loose/i.test(unloc) && !/≈/.test(unloc), JSON.stringify(unloc))
 
 // ---------- SPEC 4.6-10 / 4.6-11: the drop request, from the rendered DOM ----------
 // Proved here rather than by a source grep for the reason this whole probe exists: the Node guards
