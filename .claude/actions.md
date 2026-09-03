@@ -7882,3 +7882,19 @@ the custom connectors i added in claude"*.
 
 **Evidence:** setup output "Skills registered: 16 / Agents registered: 1 / … eds hooks installed
 (version 19)"; `execute_sql` result above; `ListConnectors` output.
+
+### ACT:verify-sh-clobber — CLOSED 2026-09-03
+`verify.sh` overwrote the artifact its own pass had written. Fixed + mutation-proved in
+`eds-claude-skills` `184560f`; the shape guard that surfaced it is `fe097dd`, and the `mutate.sh`
+matcher that could not prove it is `d7a9b54`. Evidence: this repo's `.claude/accuracy-log.md`
+entry "2026-09-03 — I LAUNCHED TWO AC PASSES AND READ NEITHER ARTIFACT" plus its two corrections.
+
+### ACT:reword-carries-the-link — ACs LANDED, implementation OPEN
+`docs/qc-evidence/AC-reword-criteria.md` (24 criteria, commit `058ee4d`). First commit is defined in
+§11 and is the schema half only. TIER 1: needs an independent verifier after implementation.
+
+### ACT:mastercontext-to-postgres — ACs LANDED, BLOCKED on three owner questions
+`docs/qc-evidence/AC-mastercontext-to-postgres.md` (9 criteria, commit `ccc28c6`). §5 asks: (1) which
+owner the one-time copy targets, (2) whether `answersFromQuestions` gets real owner resolution now,
+(3) whether a writer for the owner's master text is in scope here or a follow-on. Commit 1 (one
+accessor, Storage backing unchanged) does not depend on any of them.

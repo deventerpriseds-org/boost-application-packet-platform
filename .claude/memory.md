@@ -6206,3 +6206,34 @@ pattern-matcher — the residual IS the evidence for the decision not to automat
 because the rewrite removed the single-file `readFileSync` the row names, so `deferredLedger.test.mjs`
 failed. A stale-row guard reporting its own row stale is the mechanism working exactly as designed —
 row CLOSED, not silenced. api 1063/1063, app 441/441, `tsc` clean.
+
+## 2026-09-03 — verify.sh was destroying the artifacts its own passes wrote
+
+**The root cause behind every "hollow AC artifact" in this repo.** Every AC/verifier brief tells the
+pass to write into `docs/qc-evidence/<the artifact>` AS IT GOES and commit per section (the standing
+defence against a container restore). `verify.sh` then wrote `header + the model's closing reply` to
+that SAME path at the end of the run. The reply wins. Measured: `AC-reword-criteria.md` was 40,222
+bytes / 24 criteria at 04:25 and a 2,833-byte summary at 04:28, replaced by its own run. Recovered
+from HEAD only because per-section commits existed.
+
+Fixed in `eds-claude-skills` `184560f`: `$OUT` is fingerprinted before the run; if the pass wrote it,
+that content is kept and the reply becomes a `## Run reply` appendix. Also `fe097dd` (`artifact_shape.py`
+— one predicate for "does this artifact hold its deliverable", wired into verify.sh at production
+time and test_verdict_contract at gate time) and `d7a9b54` (`mutate.sh` matched `FAIL  <name>` with
+TWO spaces; ten of twelve checkers here print one — a matcher whose comment claimed it had ended the
+misreport worked for one suite in twelve). All three mutation-proved.
+
+**Feature status — two TIER 1 AC passes landed with real criteria, implementation NOT started:**
+- `AC-reword-criteria.md` (24 criteria) — the ResumeSummary reword + paraphrase→requirement link.
+  Settles the `figureEcho.ts:422-445` refusal tension with three code-enforced narrowings, keeps
+  `ResumeSummary` OUT of `ATS_SHIPPED_FIELDS` (AC-5a) and adds a SEPARATE labelled count for
+  reword-linked coverage (AC-5b) so link-coverage never silently merges with phrase-match coverage.
+  Smallest first commit is the SCHEMA HALF ONLY — `source` 4th value `'reworded'` in all three DDL
+  homes, `requirement_text` by ALTER, the `H:reword-requirement-text-required` CHECK, and
+  `H:correction-ensure-table-widens-source-too` (a real gap: `ensureCorrectionTable()` has no
+  `source`-widening ALTER, so the deploy window would reject reword rows).
+- `AC-mastercontext-to-postgres.md` (9 criteria) — sequencing confirmed (one accessor first, store
+  swap second). AC-9 requires a NON-DESTRUCTIVE migration: the Storage row and the raw-read code
+  stay for a full release cycle. **Owner confirmed 2026-09-03: the Storage row is a one-time seed
+  with no writer, and becomes a cold backup once the copy lands.** Three open questions for the
+  owner are recorded in §5 of that artifact.
