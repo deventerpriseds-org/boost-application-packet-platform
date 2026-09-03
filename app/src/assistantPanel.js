@@ -36,7 +36,9 @@ export const ASSISTANT_HOOKS = {
   panel: 'assistant-panel',       // the body root, in every mode (carries the REAL data-qc-mode)
   dock: 'assistant-dock',         // the docked column wrapper -- present only when mode is 'dock',
                                   // so its absence is how a verifier proves the app FLOATED
-  scope: 'assistant-scope',       // what this request will touch, stated rather than selected
+  scope: 'assistant-scope',       // what this request will touch
+  scopePick: 'assistant-scope-pick',   // 4.11-4 the selector
+  scopeChip: 'assistant-scope-chip',   // one option (carries data-qc-scope)
   box: 'assistant-box',           // the request textarea
   send: 'assistant-send',
   sent: 'assistant-sent',         // the confirmation, which outlives the box that sent it
@@ -60,6 +62,71 @@ export const ASSISTANT_HOOKS = {
  * @param {{type?: string}|null} artifact
  * @returns {{artifactId: string|null, label: string, text: string}}
  */
+/**
+ * SPEC 4.11-4 - the scope selector, built from the scopes that ACTUALLY ROUTE.
+ *
+ * WHY THIS IS TWO OPTIONS AND NOT THE PROTOTYPE'S THREE. `qc/assist.jsx:69` offers
+ * "This packet" / "This asset" / "My profile", and its own `send()` NEVER READS `scope` -- the
+ * chips set local state that reaches nothing. That is the same defect this repo already refused in
+ * the `Reword it` toggle (4.5-38): a control that forgets. Copying it would ship dead UI three
+ * times over.
+ *
+ * So the options are derived from the write routes that exist, swept rather than assumed. Every
+ * write in the API is `app/artifact/{artifactId}/...`; there is NO packet-level edit route, so
+ * "This packet" has nowhere to send. `POST app/qc/facts/set` does write the owner's profile, but it
+ * takes a STRUCTURED FACT, not a free-text instruction, so "My profile" cannot carry an assistant
+ * ask either. Both are omitted rather than rendered inert -- "if a feature isn't ready, hide the
+ * control, don't fake it".
+ *
+ * THE TWO THAT REMAIN ARE A REAL CHOICE, one parameter apart on the route that already ships.
+ * `artifactAiEdit` (appPackets.ts) reads an optional `section`:
+ *   section set  -> `pkg[section]`   - that one merge field
+ *   section null -> `art.content`    - the whole asset
+ * So the selector changes what the model is handed, not just a label. `field` is only offered when
+ * the caller actually has one; with no field in hand the asset scope is the only honest option and
+ * the selector collapses to it rather than offering a choice that would silently do the same thing.
+ *
+ * @returns {{options: Array<{id:string,label:string,text:string}>, artifactId: string|null}}
+ */
+export function assistantScopes(artifact, field) {
+  const a = artifact || null
+  const label = a && a.type ? String(a.type).replace(/_/g, ' ') : null
+  const f = typeof field === 'string' && field.trim() ? field.trim() : null
+  if (!label) {
+    return { artifactId: a && a.id ? a.id : null, options: [] }
+  }
+  const options = []
+  if (f) {
+    options.push({
+      id: 'field',
+      label: 'This field',
+      text: `This request changes ${f} on your ${label}, and nothing else in the packet.`,
+    })
+  }
+  options.push({
+    id: 'asset',
+    label: 'This asset',
+    text: `This request may change any part of your ${label}, and nothing else in the packet.`,
+  })
+  return { artifactId: a && a.id ? a.id : null, options }
+}
+
+/**
+ * The body the send builds for a chosen scope. Named here so the component cannot compose its own,
+ * and so the ONE place that decides "field or whole asset" is unit-testable.
+ *
+ * `section` is OMITTED, never sent as null, when the scope is the whole asset: the handler tests
+ * `typeof body?.section === 'string' && body.section`, so null and absent behave identically today
+ * -- but sending a null reads as "I meant a field and could not name it", which is a different
+ * claim from "I meant the asset".
+ */
+export function assistantSendBody({ instruction, scopeId, field }) {
+  const body = { instruction: String(instruction || '').trim() }
+  const f = typeof field === 'string' && field.trim() ? field.trim() : null
+  if (scopeId === 'field' && f) body.section = f
+  return body
+}
+
 export function assistantScope(artifact) {
   const a = artifact || null
   const label = a && a.type ? String(a.type).replace(/_/g, ' ') : null

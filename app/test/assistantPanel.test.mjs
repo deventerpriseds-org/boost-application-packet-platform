@@ -10,7 +10,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import {
-  ASSISTANT_HOOKS, ASSISTANT_LIMITS, applySeed, assistantScope, canSend,
+  ASSISTANT_HOOKS, ASSISTANT_LIMITS, applySeed, assistantScope, assistantScopes, assistantSendBody, canSend,
   assistantMode, dockedContentWidth, DOCK_MIN_VIEWPORT, DOCK_WIDTH, MIN_CONTENT,
   NAV_WIDTH, GUTTER, SHELL_CAP,
 } from '../src/assistantPanel.js'
@@ -229,4 +229,60 @@ test('H:forward-prop-is-threaded-not-just-referenced: a prop used in a component
   const mount = (BLOCKS.match(/<AssetBlock\b[\s\S]*?\/>/) || [''])[0]
   assert.match(mount, /onSeedAssistant=\{onSeedAssistant\}/,
     'AssetBlock is mounted without the prop - the forward control can never render')
+})
+
+
+// ---------------------------------------------------------------------------------------------
+// SPEC 4.11-4 - the scope selector. TWO options, not the prototype's three, because two of its
+// chips route nowhere: every write in the API is `app/artifact/{artifactId}/...` (no packet-level
+// edit exists) and `app/qc/facts/set` takes a structured fact, not an instruction. The prototype's
+// own send() never reads `scope` at all (qc/assist.jsx), so copying it ships three dead controls.
+
+test('H:scope-offers-only-what-actually-routes', () => {
+  const withField = assistantScopes({ id: 'a1', type: 'compact_resume' }, 'ResumeSummary')
+  assert.deepEqual(withField.options.map((o) => o.id), ['field', 'asset'])
+  // The prototype's unrouted chips must never appear.
+  const labels = withField.options.map((o) => o.label).join(' ')
+  assert.doesNotMatch(labels, /This packet|My profile/i)
+})
+
+test('H:scope-collapses-to-one-option-when-there-is-no-field', () => {
+  // A picker with a single choice is furniture, and offering "This field" with no field would send
+  // a section that is not there.
+  const noField = assistantScopes({ id: 'a1', type: 'resume' }, null)
+  assert.deepEqual(noField.options.map((o) => o.id), ['asset'])
+  assert.equal(noField.artifactId, 'a1')
+  for (const bad of ['', '   ', undefined]) {
+    assert.deepEqual(assistantScopes({ id: 'a1', type: 'resume' }, bad).options.map((o) => o.id), ['asset'])
+  }
+  // Nothing open: no options at all, and the caller renders the open-an-asset sentence.
+  assert.deepEqual(assistantScopes(null, 'ResumeSummary').options, [])
+})
+
+test('H:scope-sentence-states-what-that-scope-will-touch', () => {
+  const { options } = assistantScopes({ id: 'a1', type: 'compact_resume' }, 'ResumeSummary')
+  const field = options.find((o) => o.id === 'field')
+  const asset = options.find((o) => o.id === 'asset')
+  // Each option names the document, and the two sentences must DIFFER - one scope selected and the
+  // other described identically is how a reader learns the picker does nothing.
+  assert.match(field.text, /compact resume/)
+  assert.match(asset.text, /compact resume/)
+  assert.match(field.text, /ResumeSummary/)
+  assert.notEqual(field.text, asset.text)
+  // Neither may claim it reaches beyond the asset - no route does.
+  for (const o of options) assert.match(o.text, /nothing else in the packet/)
+})
+
+test('H:scope-decides-the-section-the-handler-reads', () => {
+  // This is the whole point: the selection changes what is SENT, not just a label.
+  // artifactAiEdit reads `section` -> pkg[section] (one field), absent -> art.content (the asset).
+  assert.deepEqual(assistantSendBody({ instruction: 'tighten it', scopeId: 'field', field: 'ResumeSummary' }),
+    { instruction: 'tighten it', section: 'ResumeSummary' })
+  const asset = assistantSendBody({ instruction: 'tighten it', scopeId: 'asset', field: 'ResumeSummary' })
+  assert.deepEqual(asset, { instruction: 'tighten it' })
+  // OMITTED, never null: the handler treats null and absent alike today, but a null reads as
+  // "I meant a field and could not name it", which is a different claim from "I meant the asset".
+  assert.ok(!('section' in asset))
+  // A field scope with no field cannot fabricate one.
+  assert.deepEqual(assistantSendBody({ instruction: 'x', scopeId: 'field', field: null }), { instruction: 'x' })
 })
