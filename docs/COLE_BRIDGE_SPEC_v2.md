@@ -196,7 +196,11 @@ whole of the original observation.
 PROGRESS.** Tier 1 by this repo's tiering — it decides whether a request is authorised — so ACs are
 being written by an independent pass (`AC-phase0-auth.md`) BEFORE any code. Landing it on `main`
 deploys live auth and is a separate confirmation.
-- **S1** Guard `/api/app/voice/chat`: shared-secret header, ElevenLabs-side. Prove anonymous ⇒ 401.
+- ~~**S1** Guard `/api/app/voice/chat`~~ — **DROPPED from Phase 0** by owner decision 2026-09-03.
+  The route is Boost's ConvAI custom-LLM endpoint, which the owner reports *worked and was
+  authenticated*, and it is being kept as an OPTION with Cole as the default path. Guarding it only
+  becomes urgent if something reading real owner data is pointed at it — today `VOICE_OWNER` is a
+  placeholder. Parked in `.claude/actions.md` as `ACT:convai-voice-option`, not deleted.
 - **S2** Close the body-`owner` bypass: `requireWrite` and the handler must read identity from
   one function. Prove body-only `owner` ⇒ 401 on a non-demo account.
 - **S3** Set a dedicated `SESSION_SIGNING_SECRET` (today it defaults to the Graph app secret, so

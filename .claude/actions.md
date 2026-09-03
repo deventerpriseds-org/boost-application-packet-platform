@@ -27,6 +27,43 @@ Status values: `open` | `in-progress` | `blocked` | `done`
 - **Status:** OPEN — research in progress. **S1 is PAUSED** until this settles what it would guard.
   S2 and S3 are unaffected and remain committed.
 
+### ACT:convai-voice-option — Boost's ConvAI voice path is a WORKING OPTION, not dead (owner-corrected 2026-09-03)
+- **Owner's observation, which is ground truth here:** *"I do remember now it worked and was
+  authenticated. it worked well in fact so leave it as an option but of course Cole is default."*
+  Recorded as a fact to be explained, never contradicted.
+- **Do not read the Huddle research as saying ConvAI never worked.** Two different systems were
+  conflated once already this session and the note is what stops it happening again:
+  - **HUDDLE's** ConvAI code IS unreachable — `MeetingBar.tsx:131` hardcodes
+    `VOICE_1ON1_BACKEND = "openai"` and nothing reassigns it. That finding stands and is about
+    Huddle only.
+  - **BOOST's** ConvAI path is a different, real integration: a provisioned agent
+    (`ELEVENLABS_AGENT_ID=agent_1901kx3w6qd0f1yrr74gevbyhj1k`, hardcoded in `api-deploy.yml:98`)
+    pointed at `/api/app/voice/chat` as its custom LLM by `convaiAgentPoint`. **This is the one the
+    owner used and it worked well.**
+- **The one thing to check IF it is revived, stated as a question and not a contradiction.**
+  `convaiAgentPoint` as committed sends only `custom_llm: { url }` — no `api_key`, no
+  `request_headers` — and `voiceChat` performs no server-side check. So any authentication in that
+  setup was configured **ElevenLabs-side** (dashboard or a direct API call), outside this code path,
+  and the Function does not verify it. Both facts are compatible: the caller can present a
+  credential the callee never inspects. Worth confirming what the EL agent actually sends before
+  relying on it as a control.
+- **Status:** OPTION, kept. **Cole (the Huddle agent) is the DEFAULT path** for the bridge — that is
+  the owner's decision, and Phase 2 targets it. ConvAI stays available as an alternative voice route
+  into the same coach brain.
+- **S1 is DROPPED from Phase 0** by owner decision (*"agreed drop it from phase 0"*). The guard idea
+  is not deleted — it is parked here, because guarding this endpoint only matters once something
+  that reads real owner data is pointed at it.
+
+### ACT:model-policy-not-configurable — the difficulty ladder is a code constant (DEFERRED)
+- **Found while mapping Huddle's architecture.** `setModelPolicy` exists on the store with **zero UI
+  callers**, so the task-type→tier table and the 1-4 difficulty ladder
+  (`model-policy.ts:187-192`: luna/low, luna/high, o3/high, o3/high) cannot be changed by the owner.
+  That is the repo's own "no hardcoded config" rule being violated by the setting most likely to
+  need tuning.
+- **Owner decision 2026-09-03: DEFERRED** — *"defer the hardcoded config item until up and
+  running."* Not a bug to fix now; revisit once the bridge is working.
+- **Status:** DEFERRED by owner. Do not open this as work until the bridge is live.
+
 ### ACT:capture-anonymous-write — `/api/app/capture` accepts an anonymous body-asserted owner (2026-09-03)
 - **Origin:** found by the Phase 0 AC pass while auditing the coach routes; **outside** that brief's
   named scope. Owner decision 2026-09-03: *"2- track it separately"* — so it is tracked here and
