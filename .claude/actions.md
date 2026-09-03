@@ -8482,3 +8482,27 @@ after `mutate.sh` reported `EQUIVALENT` and exposed that the guard matched a fal
 than the argument.
 
 **Evidence:** api 1060/0 · app 464/0 · margin 61/61 · browser 52/52 · deploy 33757482867.
+
+---
+
+## ACT-68g — Two live bugs the click sequence found (2026-09-03)
+
+**Status: FIXED, on `main` `2476087`.** Neither was findable by reading, a unit test, or the DOM probe.
+
+1. **Field scope unreachable.** Only `goToField` wrote `fieldFocus`, so "Ask the assistant" on a
+   field gave the asset scope. Both seeders now pass `row.merge_field`.
+2. **The panel could not send.** The artifact was read off the one-shot `assistantSeed`, which
+   `applySeed` clears on read; the fallback needs exactly one artifact on the step and the resume
+   step renders two. Live: text present, "No asset open", Send disabled — on the step readers
+   forward from most. Binding is now separate state, cleared on step change.
+
+**Guards (4, all mutation-proved FIRED):** `H:seeding-from-a-field-focuses-that-field`,
+`H:seeding-without-a-field-must-not-invent-a-focus`,
+`H:assistant-binding-outlives-the-consumed-seed`,
+`H:assistant-binding-does-not-outlive-the-step`.
+
+**Also:** two of those guards initially pinned a literal call shape and broke on a refactor of the
+same behaviour; re-anchored on the function body and the invariant.
+
+**Evidence:** ui-verify 33757880817 (the finding) · api 1071/0 · app 466/0 · margin 61/61 ·
+browser 52/52 · deploy 33758565832.

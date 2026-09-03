@@ -543,6 +543,35 @@ styled (`text-transform`), translated and edited; a hook is a contract. The one 
 (33735472071, count 18) asserted a hook. Every run that failed asserted my memory.
 
 
+## Hardening -- 2026-09-03: a ONE-SHOT slot was carrying a binding that had to persist
+`assistantSeed` is a one-shot text slot -- `applySeed` clears it the instant the panel reads it,
+which is correct for the SENTENCE. The artifact was read off the SAME slot, so consuming the text
+unbound the panel. The fallback then required exactly one artifact on the step, and the resume step
+renders two (`resume` + `compact_resume`) -- **the step readers forward from most**. Live result
+(ui-verify **33757880817**): panel open, seeded text present, header "No asset open", Send DISABLED,
+defeating the seeder's own comment, *"never open a panel that cannot send"*.
+
+**The general shape, worth recognising elsewhere: a value with a SHORT lifetime and a value with a
+LONG lifetime sharing one slot.** The seed is consumed on read; the binding must survive until the
+reader moves on. Two lifetimes, two states. The fix also clears the binding on `activeStep` change,
+because the opposite failure -- a binding that outlives the step -- silently points the panel at a
+document the reader is not looking at, which is worse than refusing to send.
+
+**Neither bug was findable by reading, a unit test, or the DOM probe.** The probe mounts
+`AssistantPanel` directly with props, so it never exercises PacketBuilder's binding logic at all.
+Both needed the real app, on production, driven through two clicks. That is what `CLICK_SEL` as a
+sequence bought, and it paid for itself on its first two uses.
+
+## Hardening -- 2026-09-03: my own guards pinned a LITERAL, and broke on a rename
+Two guards written earlier the same session matched
+`setFieldFocus({ artifactId, section: section.trim() })` exactly. Refactoring the SAME behaviour to
+hoist `sec` broke both -- a guard that fails on a rename is noise, and the next person deletes it.
+Re-anchored: slice `seedAssistant`'s BODY out of the source, then assert the INVARIANT (a focus is
+written, and the write is conditional on a validated section). Any spelling passes; the defect does
+not. `H2` already says this -- *assert the invariant, not the incident* -- and I still wrote the
+incident twice.
+
+
 ## Active work
 **2026-09-03 - `ui-verify` CLICK_SEL IS A SEQUENCE, and it immediately found a real gap.** `main`
 `5b34b87`.
