@@ -19,6 +19,7 @@ const ARTIFACT = { id: 'art-1', type: 'compact_resume' }
 
 function Probe() {
   const [seed, setSeed] = useState(null)
+  const [field, setField] = useState('ResumeSummary')
   const [artifact, setArtifact] = useState(ARTIFACT)
   const [reloads, setReloads] = useState(0)
 
@@ -39,14 +40,26 @@ function Probe() {
           Close the asset
         </button>
 
+        {/* Claim 8 runs AFTER claim 6 has closed the asset, so it needs a way back. Restoring the
+            same ARTIFACT constant rather than a fresh object keeps the scope options stable. */}
+        <button type="button" id="restore-artifact" className="px-btn" style={{ marginLeft: 8 }}
+          onClick={() => setArtifact(ARTIFACT)}>
+          Reopen the asset
+        </button>
+
         {/* The parent's view of the seed slot, rendered so the probe can assert the CLEAR happened
             rather than inferring it. */}
+        <button id="drop-field" onClick={() => setField(null)}>drop field</button>
+        <button id="set-field" onClick={() => setField('ResumeSummary')}>set field</button>
         <div id="seed-state" style={{ marginTop: 10, fontSize: 12 }}>
           seed={seed === null ? 'null' : 'set'} reloads={reloads}
         </div>
 
         <AssistantPanel
           artifact={artifact}
+          /* 4.11-4: the probe drives the field prop so the SELECTOR can be exercised. With no field
+             there is one scope and no picker, which is itself a case worth proving. */
+          field={field}
           seed={seed}
           onSeedConsumed={() => setSeed(null)}
           onSent={() => setReloads((n) => n + 1)} />

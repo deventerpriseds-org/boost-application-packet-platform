@@ -52,7 +52,11 @@ page.on('console', (m) => {
 // the only thing that can prove it.
 const apiCalls = []
 await page.route('**/api/**', async (route) => {
-  apiCalls.push(`${route.request().method()} ${route.request().url().replace(/^https?:\/\/[^/]+/, '')}`)
+  // THE BODY IS RECORDED, not just the verb and path. Claim 8 asserts that the chosen scope decides
+  // `section`, and `section` travels in the body -- a recorder that keeps only the URL cannot see
+  // the thing under test, so the assertion would pass or fail for the wrong reason. Found exactly
+  // that way: the field-scope check failed against a URL-only record while the product was correct.
+  apiCalls.push(`${route.request().method()} ${route.request().url().replace(/^https?:\/\/[^/]+/, '')} ${route.request().postData() || ''}`.trim())
   return route.fulfill({ status: 200, contentType: 'application/json', body: '{}' })
 })
 
@@ -120,6 +124,64 @@ ok('6 the scope line says to open an asset', /Open an asset first/i.test(scopeTe
 await page.fill('[data-qc="assistant-box"]', 'do something')
 ok('6 Send is refused with no asset', await page.locator('[data-qc="assistant-send"]').isDisabled())
 ok('6 still nothing sent', apiCalls.length === 0, apiCalls.join(' | '))
+
+// ---------- claim 8 (SPEC 4.11-4): the scope selector, from the rendered DOM ----------
+// The probe's own scaffolding buttons (#ids) are driven with $eval(el => el.click()), NOT
+// page.click. Claim 6 leaves the drawer open and its aria-hidden backdrop covers the harness
+// controls behind it; `force: true` does NOT help, because it still dispatches at coordinates and
+// so lands on the backdrop. Every control UNDER TEST ([data-qc=...]) is clicked normally through
+// the real hit-testing path, so an interception on the actual UI still fails as it should.
+// Proved HERE rather than by a unit test because the thing that can rot is the WIRING: a picker
+// that renders but whose selection never reaches the send body is exactly the prototype's own
+// defect (qc/assist.jsx sets `scope` and its send() never reads it). The unit guards hold the
+// model; only the DOM can show the click changing what is sent.
+await page.$eval('#restore-artifact', (el) => el.click())
+await page.$eval('#set-field', (el) => el.click())
+await page.waitForTimeout(150)
+await page.click('[data-qc="assistant-open"]').catch(() => {})
+await page.waitForSelector('[data-qc="assistant-panel"]')
+const chips = await page.evaluate(() => [...document.querySelectorAll('[data-qc="assistant-scope-chip"]')]
+  .map((c) => ({ id: c.getAttribute('data-qc-scope'), on: c.getAttribute('data-qc-on'), text: c.innerText })))
+ok('8 the selector offers exactly the two scopes that route',
+  chips.length === 2 && chips[0].id === 'field' && chips[1].id === 'asset', JSON.stringify(chips))
+ok('8 and never offers the prototype chips that have no route',
+  !chips.some((c) => /This packet|My profile/i.test(c.text)), JSON.stringify(chips.map((c) => c.text)))
+ok('8 the field scope is preselected, because that is what the reader was looking at',
+  chips[0] && chips[0].on === '1' && chips[1] && chips[1].on === '0', JSON.stringify(chips))
+
+const fieldSentence = await page.locator('[data-qc="assistant-scope"]').innerText()
+await page.click('[data-qc="assistant-scope-chip"][data-qc-scope="asset"]')
+const assetSentence = await page.locator('[data-qc="assistant-scope"]').innerText()
+ok('8 choosing a scope CHANGES the stated sentence, so the picker is visibly doing something',
+  fieldSentence !== assetSentence && /any part/i.test(assetSentence),
+  JSON.stringify({ fieldSentence, assetSentence }))
+
+// THE ONE THAT MATTERS: the click must reach the request body.
+apiCalls.length = 0
+await page.fill('[data-qc="assistant-box"]', 'tighten the wording')
+await page.click('[data-qc="assistant-send"]')
+await page.waitForTimeout(250)
+ok('8 sending under the ASSET scope omits `section`, so the handler edits the whole asset',
+  apiCalls.length === 1 && !/\bsection\b/.test(apiCalls[0]), apiCalls.join(' | '))
+
+apiCalls.length = 0
+await page.click('[data-qc="assistant-open"]').catch(() => {})
+await page.waitForSelector('[data-qc="assistant-panel"]')
+await page.click('[data-qc="assistant-scope-chip"][data-qc-scope="field"]')
+await page.fill('[data-qc="assistant-box"]', 'tighten the wording')
+await page.click('[data-qc="assistant-send"]')
+await page.waitForTimeout(250)
+ok('8 sending under the FIELD scope sends that section, so the handler edits one merge field',
+  apiCalls.length === 1 && /ResumeSummary/.test(apiCalls[0]), apiCalls.join(' | '))
+
+// With no field there is nothing to choose between, and a one-option picker is furniture.
+await page.$eval('#drop-field', (el) => el.click())
+await page.click('[data-qc="assistant-open"]').catch(() => {})
+await page.waitForSelector('[data-qc="assistant-panel"]')
+const noPicker = await page.evaluate(() => document.querySelectorAll('[data-qc="assistant-scope-pick"]').length)
+const soloSentence = await page.locator('[data-qc="assistant-scope"]').innerText()
+ok('8 with no field the picker does not render at all', noPicker === 0, String(noPicker))
+ok('8 and the asset scope is still stated in words', /any part/i.test(soloSentence), soloSentence)
 
 // ---------- claim 7: the drawer survives a phone ----------
 await page.setViewportSize({ width: 390, height: 780 })
