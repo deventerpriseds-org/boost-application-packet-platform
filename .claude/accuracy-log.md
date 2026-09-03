@@ -568,3 +568,33 @@ SCHEMA, and it is never settled by comparing A's and B's rendered values. Read t
 key first. A guard cannot be written for this without crying wolf; the reflex is the deliverable, and
 the cost of not having it was telling the owner "upstream pipeline change required" twice for work
 that needed no such thing.
+
+---
+
+## 2026-09-03 — "the keyword panel does not carry the causal sentence" (said across ~10 turns; the AC pass found it)
+
+| | |
+|---|---|
+| **Claimed** | 4.6-8's *"Took the place of X"* is not built; the panel "does not carry a `Put back`"; the whole A/B/C/judge menu was framed as what to BUILD. |
+| **Ground truth** | `keywordDisplacementText` (`app/src/assetBlocks.js:601-609`) emits **`Took the place of ${from} in ${list}.`** verbatim, and `AssetBlocks.jsx:1201-1207` renders it in the open keyword panel today, hook `BLOCK_HOOKS.keywordDisplaced`. Tests pin it at `app/test/assetBlocks.test.mjs:1585-1652`. |
+| **Why I never saw it** | Its gate is `normLabel(s.to_label) === normLabel(keyword)` — the WHOLE replacement label must equal the keyword. Measured on the packet I rendered: **it fires on 0 of 30 swapped rows** (containment would fire on 2). **A live feature that is dormant on your data is invisible to a render**, and I had made rendering my primary instrument. |
+| **Single source that would have settled it** | `grep -rn "Took the place" app/src` — one command, from the prototype's own wording, at any point in the thread. I grepped for `Put back` and for `4.6-8`, never for the sentence itself. |
+
+**Two compounding errors, and the second is the instructive one.**
+1. I searched for the CONTROL (`Put back`) and the SPEC ID, never for the COPY the prototype shows.
+   The prototype's sentence is the most searchable string in the whole feature.
+2. **I over-trusted the render after it had just been vindicated.** Earlier the same session, rendering
+   corrected four rows that reading had wrong, so I promoted it to primary instrument — and then used
+   it to conclude an ABSENCE. A render proves what IS on screen for THIS data; it cannot prove a
+   feature is unbuilt, because a live branch with no matching rows draws nothing. That is the same
+   class as the fixture canary's rule (*"an instrument that cannot see has no standing to report an
+   absence"*), applied to the app's own data rather than to the fixture.
+
+**Guard this earns — a reflex with a command attached.** Before calling any UI element absent, grep
+`app/src` for the PROTOTYPE'S OWN COPY, not for the control name or the spec id. And never let a
+render alone carry an absence verdict: a zero-row branch and a missing branch look identical on
+screen.
+
+**Cost:** roughly ten turns of design debate about how to build a sentence that ships today, plus
+two `verify.sh` runs (~$2.78 each) briefed on the wrong premise. The independent AC pass found it in
+one read — which is the argument for the pass, not against it.
