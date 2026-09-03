@@ -313,13 +313,91 @@ test('H:seeding-from-a-field-focuses-that-field', () => {
       `a field seeder drops the merge field ARGUMENT, so the field scope cannot be offered: onSeedAssistant(${c.slice(0, 120)}`)
   }
   // And the receiver must WRITE the focus, not just accept the argument.
-  assert.match(BUILDER, /setFieldFocus\(\{ artifactId, section: section\.trim\(\) \}\)/,
-    'seedAssistant takes a section and never writes it, so the field scope stays unreachable')
+  //
+  // ANCHORED ON THE FUNCTION BODY, not on a literal call shape. The first version matched
+  // `setFieldFocus({ artifactId, section: section.trim() })` exactly and broke the moment the SAME
+  // behaviour was refactored to hoist `sec`. A guard that fails on a rename is noise; `H2` says
+  // assert the invariant, not the incident.
+  const seedBody = BUILDER.slice(BUILDER.indexOf('const seedAssistant'), BUILDER.indexOf('const goToField'))
+  assert.ok(seedBody.length > 50, 'could not isolate seedAssistant; the guard is not reading what it thinks')
+  assert.match(seedBody, /setFieldFocus\(/,
+    'seedAssistant takes a section and never writes a focus, so the field scope stays unreachable')
 })
 
 test('H:seeding-without-a-field-must-not-invent-a-focus', () => {
   // A whole-asset ask has no field. Writing a focus anyway would offer to change "one field" the
   // reader never chose -- the same class of invention as grading an unlocatable posting line.
-  assert.match(BUILDER, /if \(typeof section === 'string' && section\.trim\(\)\) setFieldFocus/,
-    'the focus is written unconditionally, so a fieldless seed fabricates a field scope')
+  // Anchored on the body and on the INVARIANT: the write is CONDITIONAL on a section being present,
+  // and the section is validated as a real string. Any spelling passes; an unconditional write does
+  // not.
+  const body = BUILDER.slice(BUILDER.indexOf('const seedAssistant'), BUILDER.indexOf('const goToField'))
+  const focusAt = body.indexOf('setFieldFocus(')
+  assert.ok(focusAt > 0, 'seedAssistant never writes a focus at all')
+  const focusLine = body.slice(body.lastIndexOf('\n', focusAt) + 1, body.indexOf('\n', focusAt))
+  assert.match(focusLine, /\bif\s*\(/,
+    `the focus is written unconditionally, so a fieldless seed fabricates a field scope: ${focusLine.trim()}`)
+  assert.match(body, /section === 'string'/,
+    'nothing checks the section is a real string before it becomes a field scope')
+})
+
+
+// ---------------------------------------------------------------------------------------------
+// The binding must OUTLIVE the one-shot seed. Found live, not by reading: ui-verify 33757880817
+// forwarded a field's sentence and the panel opened carrying the text, headed "No asset open", with
+// Send DISABLED -- because the artifact was read off `assistantSeed`, which `applySeed` clears the
+// instant the panel consumes it. Any step rendering two artifacts (resume + compact_resume) hit it,
+// and that is the step readers forward from most.
+
+test('H:assistant-binding-outlives-the-consumed-seed', () => {
+  // The artifact must NOT be resolved from the seed slot -- that slot is emptied by design.
+  assert.doesNotMatch(BUILDER, /assistantArtifact\s*=\s*assistantSeed/,
+    'the artifact is read off the one-shot seed again, so consuming the text unbinds the panel')
+  assert.match(BUILDER, /const assistantArtifact = assistantBinding/,
+    'the artifact must come from the binding, which survives the seed being consumed')
+  // And the seeder must actually write it, or the binding is never populated.
+  assert.match(BUILDER, /setAssistantBinding\(\{ artifactId, section: sec \}\)/,
+    'seedAssistant does not record the binding, so the panel has nothing to fall back on')
+})
+
+test('H:assistant-binding-does-not-outlive-the-step', () => {
+  // The opposite failure, and the more dangerous one: a stale binding points the panel at a document
+  // the reader is no longer looking at, which is worse than refusing to send.
+  assert.match(BUILDER, /useEffect\(\(\) => \{ setAssistantBinding\(null\) \}, \[activeStep\]\)/,
+    'the binding is never cleared, so it follows the reader onto a step it does not belong to')
+})
+
+
+// ---------------------------------------------------------------------------------------------
+// The panel header reads `Working on your ${scope.label}` and falls back to "No asset open" without
+// it. The 4.11-4 refactor replaced assistantScope() -- which returned a label -- with a locally
+// built object that did not, so the header read "No asset open" PERMANENTLY, with an asset open and
+// both scope chips rendering below it. Shipped to production and caught there by ui-verify
+// 33758768784, which asserted the ABSENCE of that string. A unit test never saw it because every
+// test asserted options and sentences; nothing asserted the label the header consumes.
+
+test('H:scope-carries-the-label-the-header-renders', () => {
+  const withField = assistantScopes({ id: 'a1', type: 'compact_resume' }, 'ResumeSummary')
+  assert.equal(withField.label, 'compact resume',
+    'the header renders `Working on your ${label}` and shows "No asset open" without it')
+  const noField = assistantScopes({ id: 'a1', type: 'resume' }, null)
+  assert.equal(noField.label, 'resume')
+  // Nothing open really has no label -- that is the ONE case the fallback is for.
+  assert.equal(assistantScopes(null, 'ResumeSummary').label, null)
+})
+
+test('H:the-header-never-says-no-asset-open-while-an-asset-is-bound', () => {
+  // The consumer side of the same fact, asserted against the SOURCE the header reads, so a future
+  // refactor that drops the label again fails here rather than on production.
+  const PANEL = strip(src('../src/screens/AssistantPanel.jsx'))
+  // ANCHORED TO THE SCOPE OBJECT. A bare /label: scopeLabel/ is satisfied by the DESTRUCTURING two
+  // lines up, so deleting it from the object under test changed nothing and mutate.sh correctly
+  // reported EQUIVALENT. Third loose source-grep this session -- anchor on the construct, never on
+  // a token that also appears nearby.
+  const scopeObj = PANEL.slice(PANEL.indexOf('const scope = {'), PANEL.indexOf('const sendable'))
+  assert.ok(scopeObj.length > 20, 'could not isolate the scope object; the guard is not reading what it thinks')
+  assert.match(scopeObj, /label:/,
+    'the scope object handed to the header has no label, so it will read "No asset open" always')
+  const scopes = assistantScopes({ id: 'a1', type: 'cover' }, 'CoverLetterBody')
+  assert.ok(scopes.label && scopes.options.length >= 1,
+    'a bound artifact must yield BOTH a label for the header and at least one scope')
 })

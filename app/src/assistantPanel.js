@@ -93,7 +93,7 @@ export function assistantScopes(artifact, field) {
   const label = a && a.type ? String(a.type).replace(/_/g, ' ') : null
   const f = typeof field === 'string' && field.trim() ? field.trim() : null
   if (!label) {
-    return { artifactId: a && a.id ? a.id : null, options: [] }
+    return { artifactId: a && a.id ? a.id : null, label: null, options: [] }
   }
   const options = []
   if (f) {
@@ -108,7 +108,13 @@ export function assistantScopes(artifact, field) {
     label: 'This asset',
     text: `This request may change any part of your ${label}, and nothing else in the packet.`,
   })
-  return { artifactId: a && a.id ? a.id : null, options }
+  // `label` IS PART OF THE CONTRACT, not an internal. The panel header reads
+  // `Working on your ${label}` and falls back to "No asset open" without it -- so dropping it
+  // silently tells the reader nothing is open while the scope chips sit right below, rendering.
+  // That is exactly what happened: the 4.11-4 refactor replaced assistantScope() (which returned a
+  // label) with a locally built object that did not, and the header went permanently wrong. Caught
+  // on production by ui-verify 33758768784 asserting the ABSENCE of "No asset open".
+  return { artifactId: a && a.id ? a.id : null, label, options }
 }
 
 /**

@@ -6,6 +6,38 @@ exists to stop repeating.
 
 ---
 
+## 2026-09-03 — "nothing in the product authors a video script" (owner caught it, from memory)
+
+**Claim:** told the owner *"nothing in the product ever writes a video script"* and *"there is no
+producer for one."* Repeated it as a structural finding and opened two ledger rows on it.
+
+**Ground truth:** FALSE. `artifactGenerate` (`appPackets.ts:271`) authors it, from
+`ARTIFACT_BRIEF.video`. `runPacketBuild` merely SKIPS the type:
+`if (!metaFor(a.type)) continue // skip video (HeyGen) + non-templated`. The owner, without looking:
+*"im sure there are a set of functions to happen in series to get to the video output."*
+
+**The source that would have settled it:** `grep -n "ARTIFACT_TYPES\|ARTIFACT_BRIEF"
+api/src/functions/tests/appPackets.ts` — the per-type map, read once.
+
+**Root cause — a NEW mode, not a repeat of the single-file-grep one.** I swept broadly (two source
+trees, the DB, `packet.pkg_json`, `asset_event`, all 40 artifact rows), so the existing *"never claim
+ABSENT from a single-file grep"* rule was satisfied in letter. It still failed because **every probe
+was keyed on the same NAME** (`video`/`heygen`), and the producer has no video-specific code to name —
+the feature is DATA inside a shared generator. **Breadth does not help when the axis is wrong.**
+
+**Guard:** when the thing sought is ONE TYPE AMONG SEVERAL, find the enumeration (`ARTIFACT_TYPES`, a
+`Record`, a switch) and read the SHARED consumer BEFORE concluding the type is unhandled. The
+disconfirming evidence was already in my own query output — four of five sibling artifacts had
+content — and I never asked why those four worked. **Asymmetry between siblings is the tell that a
+shared producer exists.** Written into `CLAUDE.md` (always-loaded), not only here.
+
+**Second failure, same day, worse:** I then wrote this lesson to the END of this file (line 806).
+The SessionStart hook reads `sed -n '1,45p'`. **It was unreachable — documented in name only** — and
+the owner had to point that out too. Hence this entry sits at the TOP. See CLAUDE.md
+*"WRITE INTO THE RETRIEVAL WINDOW"*.
+
+---
+
 ## 2026-08-25 — "the term library blocks Row 11" (SELF-BLOCK, owner caught it)
 
 **Claim:** the keyword chips, the keyword-yellow highlight and the SPEC 4.6 detail panel could not be
@@ -802,19 +834,3 @@ and `git show origin/main:...masterContext.ts` still reads `entity[r.block_key]`
 
 For the trend table: `peer-caught`. Not self-caught, not instrument-caught. That is the worst category
 in this log and the first entry in it.
-
-## 2026-09-03 — "nothing authors a video script" — wrong, and the owner had to correct me
-
-| | |
-|---|---|
-| **Claim** | "Nothing in the product ever writes a video script" / "there is no Trinnex video script and no producer for one." |
-| **Ground truth** | `artifactGenerate` (`api/src/functions/tests/appPackets.ts:271`) authors it, from `ARTIFACT_BRIEF.video` = *"a 90-second intro video script (spoken, first person)"*. `runPacketBuild` simply skips the type: `if (!metaFor(a.type)) continue // skip video (HeyGen) + non-templated`. |
-| **The single source that would have settled it up front** | `grep -n "ARTIFACT_TYPES\|ARTIFACT_BRIEF" api/src/functions/tests/appPackets.ts` — the per-type map, read once. |
-| **Root-cause pattern** | **I grepped for the FEATURE NAME instead of reading the SHARED abstraction it is a case of.** My sweep was `heygen|video` in the write path. The video producer has no video-specific code: it is one string in a `Record<string,string>` consumed by a generic generator. A feature implemented as *data inside a shared function* is invisible to a name-based grep, by construction. |
-| **Guard it implies** | The existing rule *"never claim a capability is ABSENT from a single-file / single-name grep"* was followed in letter — I swept two trees, the DB, the packet blob and `asset_event` — and still failed, because every probe was keyed on the same NAME. **The missing step is structural, not more breadth: when the thing sought is one TYPE among several, find the enumeration of those types (`ARTIFACT_TYPES`, a `Record`, a switch) and read the shared consumer, before concluding the type is unhandled.** Four of five sibling types were visibly generated; that asymmetry was the disconfirming evidence sitting in my own query output, and I did not ask why the other four worked. |
-| **What it cost** | One wrong answer to the owner, and two ledger rows written on a false premise that had to be rewritten. Caught in one turn because the owner said so. |
-
-**The rule that actually saved this:** *the user's stated observation IS ground truth.* The owner said
-*"im sure there are a set of functions to happen in series"* — treating that as the fact to explain
-rather than something to argue with pointed straight at the enumeration. **A confident sweep that
-contradicts the owner's recollection of their own product is evidence about the sweep.**

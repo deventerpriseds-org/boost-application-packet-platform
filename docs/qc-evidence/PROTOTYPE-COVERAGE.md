@@ -1418,3 +1418,66 @@ The surface that had never been seen is not a catch-up of the prototype; it is a
 **`jd` step: zero confirmed prototype-side gaps, with the comparison surface now measured rather
 than assumed.** The `266% · 27 · 3` row in §1a is retracted in full: 11 of those panels were the
 instrument, and every one of the remaining 16 is a rename, a recorded decision, or a demo value.
+
+---
+
+## 19. WHAT `compare-ui` CAN AND CANNOT MEASURE — 2026-09-03
+
+Established while answering *"do we need one more render to find what is missing, not covered, or
+improved upon?"*. The short answer is **no, not for coverage** — and the reason is worth keeping,
+because the numbers it prints look exactly like a coverage figure and are not one.
+
+### The instrument is now clean, for the first time
+
+`compare-ui --all` **exits 0**: zero unmatched fixtures across all seven steps. Every previous run
+in this repo's history was blind to at least one route — including the baseline this was compared
+against (`gap-all-f57526d.json`, five unmatched on the `qc` step alone). Six endpoints are now
+captured rather than derived or absent: `/opportunity` (flat camelCase, not the wrapped raw row),
+`/requirements`, `/remediation` for all **five** artifacts, `/skill-bank`,
+`/packet/{id}/analysis`, `/config/templates`. Baseline: `gap-all-clean.json`.
+
+**Four of those six were found by RUNNING, not by inspection**, and two of them only appeared after
+the first capture landed and the run was repeated. No hand-kept endpoint list would have contained
+them. That is the argument for `compare-ui` exiting non-zero on an unmatched call rather than a
+checklist someone maintains.
+
+### It measures TEXT DIFFERENCE, not coverage
+
+| | |
+|---|---|
+| panels only in prototype | **147** |
+| panels only in app | **179** |
+
+**The app has MORE unmatched panels than the prototype.** Both numbers are inflated by the same
+cause: panels are matched by exact string, so a RENAME is a miss on both sides simultaneously.
+Confirmed pairs, read off the two renders:
+
+| prototype | app |
+|---|---|
+| `JD analysis` | `Posting analysis` |
+| `Extracted from this posting` | `Posting summary` |
+| `Posting vs your profile` | `This posting, against your profile` |
+
+Classifying the 147 mechanically: **38 are demo-data differences** — the prototype hardcodes
+`SafetyIQ · Head of Engineering` while the app renders real `eMoney Advisor` data, so
+`sixty-two engineers`, `eight figures`, `SOC 2 Type II` can never be "missing features". Of the 109
+remaining, **39 already exist verbatim in `app/src`** (rendered under a different condition, step,
+or disclosure). Of the last 70, the sampled majority are renames or re-worded labels — `M1-M5` /
+`D1-D4` / `N1-N3` against the app's `RESP #4` chips, check names against `check_key` labels.
+
+**So the honest reading is that `147` is an upper bound on an upper bound**, and the true count of
+absent ELEMENTS is small — consistent with the hand-classified rows above, which are at 175 of 175
+with every divergence carrying a recorded reason.
+
+### What it IS good for, and what is still genuinely uncovered
+
+- **Drift detection.** Now that the instrument answers every call, `gap-all-clean.json` is the first
+  admissible regression baseline this project has had. A future run that exits non-zero, or whose
+  panel counts move, is a real signal.
+- **NOT a substitute for the hand-verdicted rows.** A machine that cannot tell a rename from an
+  absence cannot produce a coverage number. Rows §1-§15 remain the coverage record.
+- **The "improved upon" direction is genuinely uncovered.** `controlsOnlyInApp` is thin (3 entries on
+  `send`) and the 179 app-only panels are unclassified. The DELIBERATE rows capture some of it as
+  prose, but there is no systematic inventory of what the app does that the prototype never had.
+  That is the real remaining gap in this document, and it is the half that would say what has been
+  GAINED rather than what is owed.

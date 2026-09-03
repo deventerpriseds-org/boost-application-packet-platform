@@ -755,6 +755,69 @@ the vehicle: measured across one real reclaim, a one-pass run died at 9,122 byte
 durable, while a chunked run that committed AND PUSHED per chunk survived with 56,374 bytes and 2 of
 5 chunks resumable. A commit that is not pushed is still inside the container.
 
+## THE VIDEO CHAIN — five functions in series, and step 2 is never reached by the build
+
+Recorded here, in the ALWAYS-LOADED file, because it was worked out from scratch on 2026-09-03 after
+a sweep of two source trees, the DB, `packet.pkg_json` and `asset_event` wrongly concluded *"nothing
+authors a video script."* The owner corrected it from memory. It is written here rather than only in
+`memory.md` because `memory.md` is 6,700+ lines and the SessionStart hook reads roughly 60 of them.
+
+| # | Function | File | Effect |
+|---|---|---|---|
+| 1 | `runPacketBuild` → `ensureArtifacts` | `appPackets.ts:60,83` | creates 5 rows from `ARTIFACT_TYPES` incl. `video`, status `todo` |
+| 2 | **`artifactGenerate`** | `appPackets.ts:271` | `POST /api/app/artifact/{id}/generate` → OpenAI `gpt-4o-mini`, brief from `ARTIFACT_BRIEF[type]` → **writes `artifact.content` = THE SCRIPT** |
+| 3 | `artifactVideoGenerate` | `appVideo.ts:35` | `POST .../video` → reads `content`, POSTs to HeyGen |
+| 4 | `artifactVideoStatus` | `appVideo.ts:74` | `GET .../video` → polls, persists `doc_url` |
+| 5 | archive | `appVideoArchive.ts` | copies to Drive |
+
+**Why a grep cannot find step 2.** There is NO video-specific write path. The video case is one
+string in a shared `Record<string,string>`:
+`video: 'a 90-second intro video script (spoken, first person) opening tailored to this company'`.
+**When you are looking for ONE TYPE AMONG SEVERAL, find the enumeration (`ARTIFACT_TYPES`, a
+`Record`, a switch) and read the SHARED consumer — do not grep the feature name.** Sibling asymmetry
+(four of five types had content) is the tell that a shared producer exists.
+
+**`runPacketBuild` deliberately skips it:** `if (!metaFor(a.type)) continue // skip video (HeyGen) +
+non-templated`. So a script exists only from an explicit per-artifact generate call.
+
+**The sharp edge — step 3 does not fail on an empty script.**
+`const script = (art.content || '').trim() || 'Hi, this is my Executive Engine intro...'` — an empty
+artifact returns HTTP 200 and a real HeyGen video that never names the employer.
+
+**The prompt is the real defect (measured live, run 33758667340).** `artifactGenerate`'s user message
+carries ONLY opportunity fields. For Trinnex the entire input was:
+`ROLE: ... at Trinnex / Comp: n/a / Persona: null / Why surfaced: Saved from a web page / Company
+signals: n/a / Pain hypotheses: n/a`. No profile, no master context, **no raw JD**. With zero facts
+available the model FABRICATED them — *"reducing operational costs by 30%"*, *"implemented machine
+learning algorithms"* — rather than emitting the `[X%]` placeholders it produced for Cloudflare.
+**Fabrication is the worse failure of the two: brackets look unfinished, invented metrics read true.**
+This is ACT-22's fabricated-JD problem in a new surface. Ledger:
+`D:video-script-is-never-authored-by-the-build`, `D:video-script-prompt-omits-the-candidate`.
+
+## WRITE INTO THE RETRIEVAL WINDOW, NOT THE END OF THE FILE (strict rule, 2026-09-03)
+
+The SessionStart hook does not load the tracking files. It loads BOUNDED SLICES:
+
+| File | What the next session actually sees |
+|---|---|
+| `memory.md` | `sed -n '/## Active work/,$p' \| head -60` — ~60 lines after the FIRST `## Active work` |
+| `accuracy-log.md` | `sed -n '1,45p'` — the first 45 lines ONLY |
+| `actions.md` | only between `## Open` and `## Closed` |
+| `CLAUDE.md` | loaded in full — the ONLY guaranteed-read file |
+
+**Appending to EOF is writing to /dev/null with extra steps.** Measured 2026-09-03: three correct,
+detailed entries were appended at `memory.md:6659`, `accuracy-log.md:806`, `actions.md:8453` — and
+**none is inside any window**. Other lanes PREPEND into the window and theirs are visible; the
+convention existed and was not followed.
+
+1. **PREPEND** new entries at the top of the section the hook reads, never append to EOF.
+2. **A durable, cross-session FACT about how the system works belongs in `CLAUDE.md`** — that is the
+   only file read in full. `memory.md` is for the narrative of what happened.
+3. **`memory.md` has TWO `## Active work` headings** (~522 and ~6402). `sed` stops at the first, so
+   anything written under the second is unreachable by construction. Do not add a third.
+4. **The Stop gate checks the files were TOUCHED, not that the content is RETRIEVABLE.** An
+   unreadable append passes it cleanly — the same shape as an inert guard: believed because it ran.
+
 ## No dead UI (standing rule)
 
 Every button, link, and selector must be wired before committing.

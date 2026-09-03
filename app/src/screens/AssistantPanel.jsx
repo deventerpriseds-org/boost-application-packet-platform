@@ -29,14 +29,14 @@ export default function AssistantPanel({ artifact = null, field = null, seed = n
   // SPEC 4.11-4. The options are whatever ROUTES, never the prototype's three -- see
   // assistantScopes(). With no field in hand there is one option and the selector does not render:
   // a picker with a single choice is furniture.
-  const { options: scopeOptions, artifactId: scopeArtifactId } = assistantScopes(artifact, field)
+  const { options: scopeOptions, artifactId: scopeArtifactId, label: scopeLabel } = assistantScopes(artifact, field)
   const [scopeId, setScopeId] = useState(null)
   // The default follows the READER: opened from a field, the field is preselected, because that is
   // what they were looking at. `scopeId` is reset rather than remembered when the options change --
   // a stale 'field' selection on an artifact with no field would send a section that is not there.
   const chosen = scopeOptions.find((o) => o.id === scopeId) || scopeOptions[0] || null
   useEffect(() => { setScopeId(null) }, [artifact && artifact.id, field])
-  const scope = { artifactId: scopeArtifactId, text: chosen ? chosen.text : 'Open an asset first - a request has to name the document it changes.' }
+  const scope = { artifactId: scopeArtifactId, label: scopeLabel, text: chosen ? chosen.text : 'Open an asset first - a request has to name the document it changes.' }
 
   // THE SEED CONTRACT, applied through the pure reducer so the clear cannot be forgotten: set the
   // text, open, and tell the parent the slot is spent. Without that last step the same sentence
