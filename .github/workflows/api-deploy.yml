@@ -80,6 +80,8 @@ jobs:
               "MICROSOFT_CLIENT_ID=${{ secrets.AZURE_CLIENT_ID }}" \
               "MICROSOFT_CLIENT_SECRET=${{ secrets.AZURE_CLIENT_SECRET }}" \
               "SESSION_SIGNING_SECRET=${{ secrets.SESSION_SIGNING_SECRET }}" \
+              "VOICE_SHARED_SECRET=${{ secrets.VOICE_SHARED_SECRET }}" \
+              "ELEVENLABS_VOICE_SECRET_ID=${{ secrets.ELEVENLABS_VOICE_SECRET_ID }}" \
               "MICROSOFT_TENANT_ID=ee633423-c321-413c-a191-ace8b07e4196" \
               "AZURE_CLIENT_ID=${{ secrets.AZURE_CLIENT_ID }}" \
               "AZURE_CLIENT_SECRET=${{ secrets.AZURE_CLIENT_SECRET }}" \
