@@ -8323,3 +8323,11 @@ silently absorbed:
 3. **The open-item count moved with the merge.** `.claude/DEFERRED.md` was 90 rows / 43 `OPEN` at
    `2c693d1`; at the merged tree it is **95 rows / 45 `OPEN` / 50 `CLOSED`**, counted with the
    ledger's own parser, not by eye.
+
+### ACT:mastercontext-to-postgres — LANDED on main `036620a`, INERT until the copy runs
+Accessor + table + Postgres backing + copy route + rollback switch are on `main`. Reader still uses
+Storage (`MASTERCONTEXT_SOURCE` defaults to `storage`), so nothing changed in production.
+OPEN, in order: (1) run `POST /api/app/master-context/copy` on the deployed Function via
+api-test.yml; (2) confirm AC-5 byte-identical `masterBaseline` output on the owner's real data;
+(3) flip `MASTERCONTEXT_SOURCE=postgres`; (4) build the Settings text editor the owner confirmed
+they want. Storage is NOT deleted at any step (AC-9).

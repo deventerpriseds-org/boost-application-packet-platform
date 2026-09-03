@@ -6445,3 +6445,29 @@ Not fixed here, deliberately: the rows belong to other lanes and repairing them 
 tracking-docs PR into someone else's history. The guard itself — a `one-act-id-one-row` assertion
 mirroring `one-id-one-row` — is the right fix and is a change to a file that decides a gate, so it
 is TIER 1 and needs its own AC pass. Left as the owner's call rather than bolted on here.
+
+### MasterContext move — LANDED ON main `036620a` (2026-09-03), and it is INERT there by design
+Commits `5f4c0c9` (accessor), `d85934d` (`owner_master_block`), `79d843f` (Postgres backing + copy
+route + rollback switch). api 1069/1069, app 454/454, four guards mutation-proved, schema executed
+against a POPULATED local Postgres.
+
+**Nothing observable changed in production.** `MASTERCONTEXT_SOURCE` defaults to `storage`, so every
+build still reads Azure Storage. The table is created by pg-migrate and nothing reads it; the copy
+route exists and must be called deliberately. The move becomes real only when the copy runs and the
+switch is flipped — and AC-5 (byte-identical `masterBaseline` output on the owner's real data) must
+be confirmed live BEFORE that flip.
+
+**TWO MERGE HAZARDS MET IN ONE LANDING — both worth remembering.**
+1. `git diff origin/main..HEAD` showed `-56/-26/-51` on `app/src/assetBlocks.js`, `AssetBlocks.jsx`
+   and its test, plus FIVE whole evidence docs at `-381/-165/-115/-101/-68`. None of it was mine to
+   delete: `main` had moved 22 commits (the swap-attribution-judge lane) and this branch was behind.
+   **Reading the diff BEFORE the merge is what caught it** — a `--ff-only` the other way round would
+   have reverted another lane's work. The rule earns its keep: check the diff, not just the rc.
+2. The merge itself lost a `})`: git treated the trailing closer as a shared suffix and kept ONE
+   copy, so this branch's last test lost its closer at the seam. **`tsc` passed.** The file failed
+   to PARSE, and node reported it as one failing test file while **145 tests inside it silently did
+   not run** — the suite went 1067 -> 924 and still printed `fail 1`. **The COUNT exposed it, not
+   the verdict.** After any merge that touches a test file, compare the test COUNT to before.
+
+Also landed to `eds-claude-skills` main (`4442e36`, PR #33): the `verify.sh` clobber fix,
+`scripts/artifact_shape.py`, and the `mutate.sh` matcher fix.
