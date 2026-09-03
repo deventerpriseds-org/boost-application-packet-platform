@@ -21,3 +21,18 @@ local.settings.json
 /package.json
 /package-lock.json
 /node_modules/
+
+# verify.sh RUN RECEIPTS, not evidence. Each pass writes three sidecars next to its artifact:
+#   .ac-<slug>.json / .verify-<slug>-<loop>.json   the raw claude -p result envelope
+#   .<same>.out                                    the child's progress line (the liveness signal --
+#                                                  a pass is alive iff this file is growing)
+#   .<same>.err                                    the child's stderr
+# The DELIVERABLE is the AC-<slug>.md / VERIFY-<slug>-<loop>.md beside them, and that IS committed.
+# Committing the receipts adds per-run noise to every branch and was already ruled out once in
+# eds-claude-skills (dcb9ecc, "Do not commit run receipts for a pass that targeted another repo").
+docs/qc-evidence/.ac-*.json
+docs/qc-evidence/.ac-*.out
+docs/qc-evidence/.ac-*.err
+docs/qc-evidence/.verify-*.json
+docs/qc-evidence/.verify-*.out
+docs/qc-evidence/.verify-*.err
