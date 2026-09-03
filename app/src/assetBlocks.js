@@ -77,6 +77,8 @@ export const BLOCK_HOOKS = {
   keywordChip: 'blocks-keyword-chip',         // one of them (carries data-qc-keyword)
   keywordDetail: 'blocks-keyword-detail',
   keywordDisplaced: 'blocks-keyword-detail-displaced', // SPEC 4.6 "Took the place of X"
+  keywordMark: 'blocks-keyword-mark',         // 4.5-29 the reworded marker
+  keywordGrade: 'blocks-keyword-grade',       // 4.5-30 Exact term / Reworded
   keywordActions: 'blocks-keyword-actions',   // 4.6-10/11 - "Not comfortable claiming this?"
   keywordDrop: 'blocks-keyword-drop',         // seeds the field's ask box with a drop REQUEST
   keywordSwap: 'blocks-keyword-swap',         // 4.6-9 - the picker of the owner's OWN banked skills
@@ -532,6 +534,60 @@ export function keywordActions({ keyword, present, canEdit } = {}) {
  *
  * @returns {{from: string, list: string|null}|null} null when nothing displaced this keyword
  */
+/**
+ * SPEC 4.6 - the match grade, and the marker the prototype puts on a REWORDED chip.
+ *
+ * THE ROW WAS RECORDED AS UNSOURCED BECAUSE THE WRONG SOURCE WAS LOOKED FOR. The old note said the
+ * grade "needs a published `term_library_entry` and the library is off by owner decision". The
+ * prototype never visualises a library: `libTerms()` (`qc/data.js:559`) is
+ * `ATS_TERMS.filter(t => t.source === 'library')` -- a FLAG on each term, used as a denominator.
+ * The grade itself is decided by whether the POSTING says the term the way the draft says it, which
+ * is an output comparison, and both sides are already on the requirement row.
+ *
+ * Verified against the prototype's own fixture, not inferred: of its 12 library terms, all 6 marked
+ * `variant` have a `postingSays` that does NOT contain the term, and 5 of 6 marked `exact` DO. (T1
+ * `Platform Modernization` / "Lead modernization of our core safety platform" is the lone
+ * exception, and its note calls it a standard industry term rather than a posting echo.)
+ * Measured on production the same way, 2026-09-02: 5,396 requirements whose `verbatim` contains
+ * their `model_keyword`, 6,804 where it does not, 2,221 with no `verbatim` at all.
+ *
+ * ONLY TWO GRADES ARE RETURNED, AND THE THIRD IS DELIBERATELY ABSENT. The prototype's `loose` means
+ * "adjacent concept, weaker credit, flagged for a look" and is decided by `source === 'model'` --
+ * i.e. by NOT being in the scoreable library. Every chip in this app IS a `model_keyword`, declared
+ * never scoreable (`schema.ts:338`), so `loose` would be the constant answer for all of them and
+ * would tell the reader nothing that the panel's "counts toward nothing" sentence does not already
+ * say. A grade that is the same on every chip is decoration.
+ *
+ * ABSENT `verbatim` IS `null`, NEVER A GRADE. A requirement the miner could not locate has no
+ * posting text to compare against; guessing `reworded` there would report absent evidence as a
+ * finding, which is the one thing this codebase refuses to do. The caller renders no marker and no
+ * word for null -- the chip simply looks as it does today.
+ *
+ * The comparison is whole-word and exact via `markRuns`, the SAME derivation the highlight and the
+ * chip's present/absent state already use, so the three cannot disagree. No similarity score: the
+ * grade is shown to the reader as a fact about their document.
+ *
+ * @returns {'exact'|'reworded'|null}
+ */
+export function keywordGrade(keyword, verbatim) {
+  const k = typeof keyword === 'string' ? keyword.trim() : ''
+  const v = typeof verbatim === 'string' ? verbatim.trim() : ''
+  if (!k || !v) return null
+  const { present } = keywordPresence(v, [k])
+  return present.length ? 'exact' : 'reworded'
+}
+
+/**
+ * The two words the panel prints, and the marker the chip carries. Named here so the component
+ * cannot compose its own, and so the copy is one edit rather than two.
+ *
+ * "Exact term" is the prototype's own wording (`qc/assets.jsx:32` MATCH_WORD). "Reworded" likewise.
+ * The prototype's third entry, "Loose - not scored", is intentionally not reachable -- see
+ * `keywordGrade`.
+ */
+export const GRADE_WORD = { exact: 'Exact term', reworded: 'Reworded' }
+export const GRADE_MARK = { exact: '', reworded: '≈' }
+
 export function keywordDisplacement(swapsForList, keyword) {
   const k = normLabel(keyword)
   if (!k) return null

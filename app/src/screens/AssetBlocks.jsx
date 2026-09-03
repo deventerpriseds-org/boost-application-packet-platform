@@ -38,6 +38,7 @@ import {
   keywordActions, keywordSwapOptions, keywordPresence,
   omitListCaveat, restoreOptions, shortenAction, rewordAction,
   keywordDisplacement, keywordDisplacementText,
+  keywordGrade, GRADE_WORD, GRADE_MARK,
   meterModel, originalState, PLACEHOLDER_NOTE, placeholderToken, proposedKeywordDetail,
   proposedKeywordsForRow, reqsForRow, scopeSwaps,
   shapeOf, sharedSourceNote, statPct, wordCount,
@@ -706,6 +707,14 @@ function AssetBlock({ row, reqs, swapsForList, wide, artifactId, listOwners, thr
   // come to tell the reader different things about one field.
   const kwPresence = keywordPresence(row.after_text, proposedKeywords)
   const kwPresent = new Set(kwPresence.present)
+  // ONE derivation for the grade, beside the one for presence, for the same reason: the chip's
+  // marker and the panel's word are two renderings of a single fact, and two computations of it
+  // are how they end up disagreeing. Null for a requirement with no locatable posting line -- see
+  // keywordGrade; that chip renders exactly as it does today.
+  const kwGrade = new Map(proposedKeywords.map((k) => {
+    const d = proposedKeywordDetail(reqs, k)
+    return [k, keywordGrade(k, d && d.verbatim)]
+  }))
   const skillBank = useSkillBank()
   // Both treatments go through markRuns in ONE pass, so a posting echo and a keyword can never
   // claim the same characters. `mark` rides per phrase; see highlight.js.
@@ -1130,7 +1139,16 @@ function AssetBlock({ row, reqs, swapsForList, wide, artifactId, listOwners, thr
                 onMouseLeave={() => setActiveWording(null)}
                 onFocus={() => setActiveWording(k)}
                 onBlur={() => setActiveWording(null)}
+                data-qc-grade={kwGrade.get(k) || ''}
                 style={{ cursor: 'pointer', opacity: kwPresent.has(k) ? 1 : 0.72 }}>
+                {/* SPEC 4.5-29 - the marker rides on a REWORDED chip only, and is decorative: the
+                    grade word in the panel is what states it in words, and the title carries it for
+                    a reader who never opens the panel. An empty string for `exact` and for null
+                    means no node renders at all. */}
+                {GRADE_MARK[kwGrade.get(k)] ? (
+                  <span aria-hidden="true" data-qc={BLOCK_HOOKS.keywordMark}
+                    style={{ fontSize: 9, opacity: 0.75, marginRight: 2 }}>{GRADE_MARK[kwGrade.get(k)]}</span>
+                ) : null}
                 {/* The word rides on EVERY chip, not on the group heading. A reader who sees one
                     chip must still see that it is a proposal - the owner's constraint is that it
                     can never be mistaken for a validated placement, and a heading scrolls away. */}
@@ -1153,6 +1171,14 @@ function AssetBlock({ row, reqs, swapsForList, wide, artifactId, listOwners, thr
               style={{ marginTop: 6, padding: 8, fontSize: 11.5, lineHeight: 1.5 }}>
               <div style={{ fontWeight: 700, marginBottom: 3 }}>
                 {openKeywordDetail.keyword} <span className="px-small">proposed</span>
+                {/* SPEC 4.5-30. `proposed` stays: the grade says how the posting words it, NOT that
+                    anything scored it, and dropping `proposed` would let the grade read as credit. */}
+                {GRADE_WORD[kwGrade.get(openKeywordDetail.keyword)] && (
+                  <span className="px-small" data-qc={BLOCK_HOOKS.keywordGrade}
+                    style={{ float: 'right', fontWeight: 700 }}>
+                    {GRADE_WORD[kwGrade.get(openKeywordDetail.keyword)]}
+                  </span>
+                )}
               </div>
               {/* SPEC 4.6 asks for three additions here. THE OLD COMMENT SAID NONE HAD A SOURCE
                   AND THAT WAS WRONG ABOUT THE THIRD - it was written from the other two and swept
