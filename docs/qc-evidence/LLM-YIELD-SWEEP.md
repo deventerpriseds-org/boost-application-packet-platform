@@ -41,7 +41,55 @@ judge them.
 denominator I had not checked. The counts above are the counts; the cause above is the cause I can
 evidence.
 
-## What is genuinely OPEN
+## RESOLVED — the query was run, and it inverted the finding
+
+**The 86% absent rate was a counting artifact, not a defect.** The judge asks **9.6 fields about
+each requirement**, so most `absent` answers are structurally inevitable — a skills bullet is not
+going to answer most responsibilities.
+
+| metric | value | reads as |
+|---|---|---|
+| absent / all field-question pairs | 173 of 201 = **86% absent** | broken |
+| requirements covered by AT LEAST ONE field | **15 of 21 = 71% covered** | working well |
+
+Grouping `absent` by field showed it **spread across all seven fields**, not clustered — so it was
+never a `judgeableFields` selection bug. `RelevantBullets2` sat at 100% absent over 41 rows and is a
+mild outlier worth watching, but its content is populated and comparable in length to its siblings.
+
+## THE REAL FINDING — four of five artifact types had never been judged
+
+| type | artifacts | coverage rows BEFORE | last check run |
+|---|---:|---:|---|
+| resume | 40 | 201 | Sep 2 15:50 |
+| compact_resume | 40 | **0** | Aug 30 12:10 |
+| **cover** | 40 | **0** | Aug 30 12:10 |
+| portfolio | 40 | **0** | Aug 30 12:10 |
+| video | 40 | 0 | never checked |
+
+**And it was NOT a judge defect.** `chk_coverage_judge` was enabled **2026-09-01 16:45**. Only
+`resume` artifacts had been check-run since (2 runs). The other types were last checked **before the
+judge existed**, so it never had the chance to skip them.
+
+**Fixed with no code change** — re-running `POST /app/artifact/{id}/checks` on one artifact of each
+type. The cover letter went from **0 to 102 verdicts** across `@Company`, `@CoverLetterBody`,
+`@CoverLetterDate` on the first run.
+
+### After the fix
+
+| type | requirements judged | covered | % |
+|---|---:|---:|---:|
+| resume | 21 | 15 | **71%** |
+| compact_resume | 34 | 20 | 59% |
+| cover | 34 | 12 | 35% |
+| portfolio | 34 | 10 | 29% |
+
+> ## Across the packet: **37 of 55 requirements (67%) are covered by at least one artifact**, and 13 by more than one.
+
+**The resume's 21 is now visibly STALE** — judged on 2026-09-02 against an older requirement set,
+while every type re-run today sees 34. A re-check of the resume would refresh it, and that staleness
+is invisible in the product today.
+
+## What remains OPEN
 
 **86% of the judge's verdicts are `absent`** — 173 of 201, against 24 `synonym`, 2 `direct`,
 2 `near_phrasing`. Only 28 of 201 verdicts say covered.
@@ -56,7 +104,8 @@ Two explanations fit, and they have opposite implications:
 two fields, it is (2) — a field-selection problem in `judgeableFields`, not a coverage problem.
 If they are spread evenly across fields, it is (1).
 
-**Not run yet.** Recorded as the next measurement rather than guessed at.
+**Answered above.** The clustering test said "spread", which ruled out field selection and pointed
+at the metric instead.
 
 ## The pattern worth carrying to the other model paths
 

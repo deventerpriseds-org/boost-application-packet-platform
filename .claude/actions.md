@@ -8145,3 +8145,51 @@ swapped-only. It needs a live re-grounding pass before implementation, and the A
 
 **Lineage published** — every table, column and transform, with the live counts and both defects:
 `https://claude.ai/code/artifact/cba98e9b-a9e4-4f5a-9165-29b3abe78f9c`
+
+### ACT-68k — the judge was never run on 4 of 5 artifact types; fixed, no code (2026-09-03)
+
+**Owner:** *"merge 79.. run the query then run it again after fixing the instrument gap. go
+continuously until all done ...the connection is refreshed."* #79 merged to `main` at `6d0bb80`.
+Connector live again — every query below is ~1s direct, no workflow.
+
+**ROUND 1 — the query inverted the finding.** Grouping `absent` by field showed it SPREAD across all
+seven fields, not clustered, so it was never a `judgeableFields` selection bug. The cause is the
+metric: the judge asks **9.6 fields per requirement**, so most `absent` answers are structurally
+inevitable.
+
+| metric | value | reads as |
+|---|---|---|
+| absent / field-question pairs | 173 of 201 = **86% absent** | broken |
+| requirements covered by >=1 field | **15 of 21 = 71%** | working well |
+
+**My fourth wrong denominator of the day**, and the same shape as the other three.
+
+**ROUND 2 — the real finding, and the owner's heuristic paying off.** Four of five artifact types had
+**ZERO** coverage verdicts: `cover`, `compact_resume`, `portfolio`, `video`. 160 of 200 artifacts,
+including the cover letter this whole session has been about.
+
+**NOT a judge defect — and I nearly called it one.** `chk_coverage_judge` was enabled
+**2026-09-01 16:45**; only `resume` had been check-run since (2 runs). The others were last checked
+**Aug 30 12:10, before the judge existed.** It never had the chance to skip them.
+
+**FIXED WITH NO CODE CHANGE.** `POST /app/artifact/{id}/checks` on one artifact of each type. The
+cover letter went **0 -> 102 verdicts** on the first run (`@Company`, `@CoverLetterBody`,
+`@CoverLetterDate`).
+
+| type | requirements judged | covered | % |
+|---|---:|---:|---:|
+| resume | 21 | 15 | 71% |
+| compact_resume | 34 | 20 | 59% |
+| cover | 34 | 12 | 35% |
+| portfolio | 34 | 10 | 29% |
+
+**ACROSS THE PACKET: 37 of 55 requirements (67%) covered by at least one artifact; 13 by more than
+one.** That is the number `must_have_coverage` should be reflecting.
+
+**NEW ISSUE FOUND: the resume's verdicts are STALE.** It judged 21 requirements on Sep 2; every type
+re-run today sees 34. The requirement set grew and nothing re-judged the resume. **That staleness is
+invisible in the product** — a verdict carries `judge_version`/`prompt_version` but nothing surfaces
+"this was judged against an older requirement set."
+
+**STILL OPEN:** `stuffingJudge` and `supportJudge` have no output table, so this sweep cannot see
+their yield at all. That instrument gap is unfixed.
