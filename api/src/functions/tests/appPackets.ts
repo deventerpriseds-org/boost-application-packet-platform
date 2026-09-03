@@ -17,6 +17,10 @@ import { applyCorrectionPass } from './appCorrections'
 import { sourceText } from './appFacts'
 import { summariseBuild, skillLineage, collectAnalysis } from './packetBuild'
 import { approvalBlock, evaluateArtifact } from './appChecks'
+// The ONE shared "text was written, so re-run this artifact's checks" helper. Its own module, not
+// appChecks/appPackets, because `appCorrections` is the second caller and both of those import
+// appCorrections already -- see the header of appRecheck.ts for the cycle it avoids.
+import { recheckAfterTextWrite } from './appRecheck'
 import { loadThresholds } from './checkPrefs'
 // The independent reviewer. Imported HERE for the first time: it has been deployed and
 // callable since P4 with no caller anywhere in the product.
@@ -808,14 +812,37 @@ export async function renderArtifact(client: any, art: any, opp: any, pkg: Recor
 // has no template (caller falls back to the legacy prose path).
 // Composition of the two steps above, so the single-artifact endpoints keep their exact behaviour
 // while the loop can take the two halves separately.
-async function buildTemplatedArtifact(client: any, art: any, opp: any, regen: boolean) {
+//
+// THE CHECKS RUN HERE, at the shared root, and that is the fix for the render-path bypass.
+// `renderArtifact`'s write (line ~802) flips `status` from 'todo' to 'review'. Until this call
+// existed, the ONLY caller that then evaluated the artifact was `runPacketBuild`; the two
+// single-artifact routes (`artifactDocument`, `artifactSlides`) call this function directly, so an
+// owner pressing "create the document" got a real Google Doc, status `review`, and NO gate row, NO
+// check results and NO verdicts. Measured live: packet 487cb017-2f3f-4f70-a573-0983b780ea75 holds a
+// resume (4347 chars) and a portfolio (2954 chars) at status `review` with ZERO `check_result` rows.
+// This is the deterministic, free half of checks being skipped entirely — it does not need
+// `chk_coverage_judge` to be on to matter.
+//
+// `opts.check === false` DEFERS it, and exactly one caller passes it: `runPacketBuild`, which must
+// evaluate AFTER its evidence pass (see the comment at its own `evaluateArtifact` call). Deferring
+// there rather than evaluating twice keeps one run per artifact per build.
+async function buildTemplatedArtifact(client: any, art: any, opp: any, regen: boolean, owner: string, opts?: { check?: boolean }) {
   if (!metaFor(art.type)) return null
   const { pkg, warnings, qcApplied, lineage, analysis } = await ensurePackage(client, art, opp, regen)
   const rendered = await renderArtifact(client, art, opp, pkg)
+  // NON-FATAL, and after the render write has landed: a document that exists must not be reported
+  // as a failed build because its gate could not be computed. `recheckAfterTextWrite` never throws;
+  // a failure comes back as `{ ok:false, error }` and rides out on `warnings`, where
+  // `summariseBuild` already surfaces partial success.
+  const checkWarnings: string[] = []
+  if (opts?.check !== false) {
+    const rc = await recheckAfterTextWrite(client, art.id, owner, { label: `${art.type} render` })
+    if (!rc.ok) checkWarnings.push(`checks did not run, so this artifact cannot be approved yet (${rc.error})`)
+  }
   // P7 item 6 - carried to the caller so a partial build cannot report clean success.
   // `lineage`/`analysis` ride along for the same reason and no further: the build persists them,
   // nothing scores off them.
-  return rendered && { ...rendered, warnings, qcApplied, lineage, analysis }
+  return rendered && { ...rendered, warnings: [...(warnings || []), ...checkWarnings], qcApplied, lineage, analysis }
 }
 
 // POST /api/app/artifact/{artifactId}/document — turn the generated text into a
@@ -840,7 +867,7 @@ export async function artifactDocument(req: HttpRequest, context: InvocationCont
     // G6: if this type has a designed template, COPY it and fill placeholders.
     if (metaFor(art.type)) {
       const regen = ((await req.json().catch(() => ({}))) as any)?.regen === true
-      const built = await buildTemplatedArtifact(client, art, opp, regen)
+      const built = await buildTemplatedArtifact(client, art, opp, regen, owner)
       const packetStatus = await recomputePacket(client, art.packet_id)
       // P7 item 6 — `ok` says whether the build was CLEAN, not merely whether it returned. A run
       // that lost a section to an unmapped title, or whose ATS-QC call came back empty, still
@@ -919,7 +946,7 @@ export async function artifactSlides(req: HttpRequest, context: InvocationContex
     // G6: COPY the designed Slides template and fill its placeholders.
     if (metaFor(art.type)) {
       const regen = ((await req.json().catch(() => ({}))) as any)?.regen === true
-      const built = await buildTemplatedArtifact(client, art, opp, regen)
+      const built = await buildTemplatedArtifact(client, art, opp, regen, owner)
       const packetStatus = await recomputePacket(client, art.packet_id)
       return { status: 200, headers: HEADERS, jsonBody: { ok: !built!.warnings?.length, artifactId, type: art.type, deckUrl: built!.url, docUrl: built!.url, title: built!.title, cleanedTokens: built!.cleaned, templated: true, packetStatus, warnings: built!.warnings || [], qcApplied: built!.qcApplied } }
     }
@@ -1103,7 +1130,13 @@ export async function runPacketBuild(
     for (const a of artifacts) {
       if (!metaFor(a.type)) continue // skip video (HeyGen) + non-templated
       try {
-        const built = await buildTemplatedArtifact(client, { ...a, packet_id: pkt.id, opp_id: oppId }, opp, regen)
+        // `check: false` — THE ONE CALLER THAT DEFERS THE CHECK, and it is not an opt-out from
+        // checking. This loop evaluates every artifact further down, AFTER `resolveEvidenceForOpp`,
+        // because coverage is decided by the evidence rows that pass persists and the gate must read
+        // the same rows. Letting the check fire here as well would grade the build against evidence
+        // that does not exist yet and then grade it a second time — two runs per artifact, the first
+        // of them wrong. See the `evaluateArtifact` call below.
+        const built = await buildTemplatedArtifact(client, { ...a, packet_id: pkt.id, opp_id: oppId }, opp, regen, owner, { check: false })
         regen = false
         results.push({ type: a.type, url: built!.url, cleanedTokens: built!.cleaned,
                        warnings: built!.warnings || [], qcApplied: built!.qcApplied,
@@ -1186,6 +1219,11 @@ export async function runPacketBuild(
       const art = artifacts.find((a: any) => a.type === r.type)
       if (!art) continue
       let checksRan = false
+      // RETAINED DELIBERATELY when the render path gained its own check call. `buildTemplatedArtifact`
+      // now evaluates for its other two callers, and this loop passes `check: false` to defer to
+      // HERE — because this is the only position that is after `resolveEvidenceForOpp`, and the gate
+      // must read the evidence rows that pass persists rather than re-resolving the same question.
+      // One run per artifact per build: not zero, not two.
       try { await evaluateArtifact(client, art.id, owner); checked.push(r.type); checksRan = true }
       catch (e) { checkWarnings.push(`${r.type}: checks did not run, so this artifact cannot be approved yet (${String(e).slice(0, 200)})`) }
       // ONLY AFTER THE DETERMINISTIC PASS SUCCEEDED. `runReview` refuses with "run the deterministic
@@ -1468,6 +1506,9 @@ export async function opportunityEnrich(req: HttpRequest, context: InvocationCon
 export async function artifactContent(req: HttpRequest, context: InvocationContext): Promise<HttpResponseInit> {
   if (req.method === 'OPTIONS') return { status: 204, headers: HEADERS }
   const artifactId = req.params.artifactId
+  // Resolved for the post-write recheck below. `requireWrite` proves someone is signed in; the
+  // evaluator needs to know WHOSE thresholds and settings the gate is computed under.
+  const owner = resolveOwner(req).owner
   let client
   try {
     const guard = requireWrite(req); if (guard) return guard
@@ -1490,7 +1531,13 @@ export async function artifactContent(req: HttpRequest, context: InvocationConte
       pkg = { ...cur, ...body.pkg }
       await client.query(`update packet set pkg_json = $1, updated_at = now() where id = $2`, [JSON.stringify(pkg), art.packet_id])
     }
-    return { status: 200, headers: HEADERS, jsonBody: { ok: true, content, pkg } }
+    // THE TEXT JUST CHANGED, SO THE GATE IS STALE. Without this, `artifact_gate` keeps describing
+    // text that no longer exists and the owner can approve on findings computed against the previous
+    // wording. One shared helper, four writers — see appRecheck.ts.
+    // NON-FATAL: the edit is already committed above and must be reported as saved either way, so a
+    // checking failure comes back as `checksStale` beside `ok: true`, never as a 500.
+    const rc = await recheckAfterTextWrite(client, artifactId, owner, { label: 'manual content edit' })
+    return { status: 200, headers: HEADERS, jsonBody: { ok: true, content, pkg, checksStale: !rc.ok, checksError: rc.error } }
   } catch (err) {
     return { status: 500, headers: HEADERS, jsonBody: { error: String(err) } }
   } finally { try { await client?.end() } catch {} }
@@ -1503,6 +1550,8 @@ export async function artifactContent(req: HttpRequest, context: InvocationConte
 export async function artifactAiEdit(req: HttpRequest, context: InvocationContext): Promise<HttpResponseInit> {
   if (req.method === 'OPTIONS') return { status: 204, headers: HEADERS }
   const artifactId = req.params.artifactId
+  // See artifactContent — resolved for the post-write recheck.
+  const owner = resolveOwner(req).owner
   let client
   try {
     const guard = requireWrite(req); if (guard) return guard
@@ -1550,7 +1599,11 @@ export async function artifactAiEdit(req: HttpRequest, context: InvocationContex
     } else {
       await client.query(`update artifact set content = $1, updated_at = now() where id = $2`, [revised, artifactId])
     }
-    return { status: 200, headers: HEADERS, jsonBody: { ok: true, revised, section, effort, model: AI_EDIT_MODEL } }
+    // Same stale-gate reason as `artifactContent`, and this is the primary editing surface: the
+    // model rewrote a whole section, so every check computed against the previous wording is now
+    // describing text nobody can read any more. NON-FATAL — the rewrite is persisted above.
+    const rc = await recheckAfterTextWrite(client, artifactId, owner, { label: 'ai edit' })
+    return { status: 200, headers: HEADERS, jsonBody: { ok: true, revised, section, effort, model: AI_EDIT_MODEL, checksStale: !rc.ok, checksError: rc.error } }
   } catch (err) {
     return { status: 500, headers: HEADERS, jsonBody: { error: String(err) } }
   } finally { try { await client?.end() } catch {} }

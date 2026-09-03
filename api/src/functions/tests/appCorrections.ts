@@ -197,6 +197,10 @@ export { getPgClient }
 import { app, HttpRequest, HttpResponseInit, InvocationContext } from '@azure/functions'
 import { resolveOwner, requireWrite } from './appSession'
 import { revertOne, locateOwnerPhrase } from './correction'
+// The ONE shared post-write recheck. Its own module rather than `appChecks` because appChecks
+// imports THIS file (`listCorrections`), so importing `evaluateArtifact` back from here would
+// cycle — see the header of appRecheck.ts.
+import { recheckAfterTextWrite } from './appRecheck'
 import { createHash } from 'node:crypto'
 
 const HEADERS = { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': '*', 'Access-Control-Allow-Methods': 'GET,POST,OPTIONS' }
@@ -290,7 +294,19 @@ export async function correctionRevert(req: HttpRequest, _c: InvocationContext):
       await client.query('commit')
     } catch (e) { await client.query('rollback'); throw e }
 
-    return { status: 200, headers: HEADERS, jsonBody: { ok: true, merge_field: target.merge_field, text: result.text } }
+    // AFTER THE COMMIT, NEVER INSIDE IT. `evaluateArtifact` runs its own begin/commit on this same
+    // client (appChecks.ts:264), so calling it inside the transaction above would nest them on one
+    // connection — the hazard appRemediation.ts:349-350 records. Placed here, the revert is already
+    // durable, which is also what makes the failure safe to swallow: the undo stands whether or not
+    // the gate could be recomputed.
+    //
+    // A revert changes the field's TEXT, so `verdictKey` (which hashes the exact text) changes with
+    // it and the stored gate no longer describes what the document says. Reverting a SYSTEM
+    // correction is a guaranteed cache MISS — that pre-correction text was never a persisted
+    // `pkg_json` value, so it has never been judged.
+    const rc = await recheckAfterTextWrite(client, target.artifact_id, owner, { label: 'correction revert' })
+
+    return { status: 200, headers: HEADERS, jsonBody: { ok: true, merge_field: target.merge_field, text: result.text, checksStale: !rc.ok, checksError: rc.error } }
   } catch (e: any) {
     return { status: 500, headers: HEADERS, jsonBody: { error: String(e?.message || e) } }
   } finally { try { await client?.end() } catch {} }
@@ -321,6 +337,9 @@ export async function correctionRevert(req: HttpRequest, _c: InvocationContext):
 export async function artifactOwnerEdit(req: HttpRequest, _c: InvocationContext): Promise<HttpResponseInit> {
   if (req.method === 'OPTIONS') return { status: 204, headers: HEADERS }
   const guard = requireWrite(req); if (guard) return guard
+  // Session-resolved, exactly as `correctionRevert` resolves it — the post-write recheck needs to
+  // know whose thresholds and check settings the gate is computed under.
+  const { owner } = resolveOwner(req)
   const artifactId = req.params.artifactId
   let client
   try {
@@ -380,7 +399,13 @@ export async function artifactOwnerEdit(req: HttpRequest, _c: InvocationContext)
       await client.query('commit')
     } catch (e) { await client.query('rollback'); throw e }
 
-    return { status: 200, headers: HEADERS, jsonBody: { ok: true, merge_field: mergeField, text: next, applied_seq: seq } }
+    // AFTER THE COMMIT, for the same transaction-nesting reason as `correctionRevert` above, and
+    // with the same non-fatal contract: the owner's edit is durable before this runs and must be
+    // reported as saved whether or not the gate could be recomputed. `checksStale` is how the client
+    // learns the difference rather than being shown a gate computed against the old wording.
+    const rc = await recheckAfterTextWrite(client, artifactId, owner, { label: 'owner edit' })
+
+    return { status: 200, headers: HEADERS, jsonBody: { ok: true, merge_field: mergeField, text: next, applied_seq: seq, checksStale: !rc.ok, checksError: rc.error } }
   } catch (e: any) {
     return { status: 500, headers: HEADERS, jsonBody: { error: String(e?.message || e) } }
   } finally { try { await client?.end() } catch {} }
