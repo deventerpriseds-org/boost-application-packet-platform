@@ -194,8 +194,11 @@ test('H:forward-carries-the-artifact-with-the-sentence', () => {
   // The panel is artifact-scoped, so a forwarded sentence that does not name its artifact would have
   // to be resolved later from whatever step is active - a guess, on the reader's own document. The
   // binding happens at the call site where `a.id` is unambiguous.
-  assert.match(BUILDER, /onSeedAssistant=\{\(text\) => seedAssistant\(text, a\.id\)\}/,
-    'the forward no longer binds the artifact at the call site')
+  // WIDENED 2026-09-03: the forward now carries the FIELD too. The artifact binding is unchanged and
+  // still asserted; what is new is that a seeder which knows its merge field must hand it over, or
+  // SPEC 4.11-4's field scope is unreachable from the one control a reader would naturally use.
+  assert.match(BUILDER, /onSeedAssistant=\{\(text, section\) => seedAssistant\(text, a\.id, section\)\}/,
+    'the forward no longer binds the artifact AND the field at the call site')
   assert.match(BUILDER, /if \(!text \|\| !artifactId\) return/,
     'seedAssistant will open a panel that has nothing to send to')
   assert.ok(Object.values(ASSISTANT_HOOKS).every((v) => typeof v === 'string' && v.startsWith('assistant-')),
@@ -285,4 +288,38 @@ test('H:scope-decides-the-section-the-handler-reads', () => {
   assert.ok(!('section' in asset))
   // A field scope with no field cannot fabricate one.
   assert.deepEqual(assistantSendBody({ instruction: 'x', scopeId: 'field', field: null }), { instruction: 'x' })
+})
+
+
+// ---------------------------------------------------------------------------------------------
+// SPEC 4.11-4, the reachability half. The scope selector shipped and its field option was
+// effectively unreachable: only `goToField` wrote `fieldFocus`, so a reader clicking "Ask the
+// assistant" ON A FIELD got the asset scope. Measured live before the fix (ui-verify 33756770327):
+// go-to-field then open-assistant both clicked `ok` and the picker still rendered 0 chips.
+
+test('H:seeding-from-a-field-focuses-that-field', () => {
+  // The seeders in AssetBlocks know their row. Both must hand the merge field over -- one that does
+  // not is a control that silently drops the reader's context.
+  // NOT `onSeedAssistant\([^)]*\)` + /row\.merge_field/. Mutation-proving showed that reads
+  // EQUIVALENT: `[^)]*` stops at the FIRST ')', which is the one inside
+  // `fieldLabel(row.merge_field)`, so the fallback string satisfies the match whether or not the
+  // ARGUMENT is passed. The guard would have gone green with the field dropped -- an inert guard,
+  // believed. Assert the argument position itself instead.
+  const blocks = strip(src('../src/screens/AssetBlocks.jsx'))
+  const chunks = blocks.split('onSeedAssistant(').slice(1)
+  assert.ok(chunks.length >= 2, `expected both field seeders, found ${chunks.length}`)
+  for (const c of chunks) {
+    assert.match(c.slice(0, 200), /, row\.merge_field\)/,
+      `a field seeder drops the merge field ARGUMENT, so the field scope cannot be offered: onSeedAssistant(${c.slice(0, 120)}`)
+  }
+  // And the receiver must WRITE the focus, not just accept the argument.
+  assert.match(BUILDER, /setFieldFocus\(\{ artifactId, section: section\.trim\(\) \}\)/,
+    'seedAssistant takes a section and never writes it, so the field scope stays unreachable')
+})
+
+test('H:seeding-without-a-field-must-not-invent-a-focus', () => {
+  // A whole-asset ask has no field. Writing a focus anyway would offer to change "one field" the
+  // reader never chose -- the same class of invention as grading an unlocatable posting line.
+  assert.match(BUILDER, /if \(typeof section === 'string' && section\.trim\(\)\) setFieldFocus/,
+    'the focus is written unconditionally, so a fieldless seed fabricates a field scope')
 })

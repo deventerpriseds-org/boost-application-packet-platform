@@ -944,11 +944,11 @@ function AssetBlock({ row, reqs, swapsForList, wide, artifactId, listOwners, thr
           <span className="px-link" role="button" tabIndex={0}
             data-qc={BLOCK_HOOKS.forward} data-qc-field={row.merge_field}
             style={{ fontSize: 11.5 }}
-            onClick={() => onSeedAssistant(shorten.ask || `Change ${fieldLabel(row.merge_field)}: `)}
+            onClick={() => onSeedAssistant(shorten.ask || `Change ${fieldLabel(row.merge_field)}: `, row.merge_field)}
             onKeyDown={(e) => {
               if (e.key !== 'Enter' && e.key !== ' ') return
               e.preventDefault()
-              onSeedAssistant(shorten.ask || `Change ${fieldLabel(row.merge_field)}: `)
+              onSeedAssistant(shorten.ask || `Change ${fieldLabel(row.merge_field)}: `, row.merge_field)
             }}>
             Ask the assistant
           </span>
