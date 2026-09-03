@@ -794,29 +794,53 @@ learning algorithms"* — rather than emitting the `[X%]` placeholders it produc
 This is ACT-22's fabricated-JD problem in a new surface. Ledger:
 `D:video-script-is-never-authored-by-the-build`, `D:video-script-prompt-omits-the-candidate`.
 
-## WRITE INTO THE RETRIEVAL WINDOW, NOT THE END OF THE FILE (strict rule, 2026-09-03)
+## RETRIEVAL: the window is an INDEX, not a feed (2026-09-03 — reconciled, see the warning below)
 
-The SessionStart hook does not load the tracking files. It loads BOUNDED SLICES:
+**This section is a RECONCILIATION, not a new rule.** The convention already existed in two places
+and this section first duplicated it — the exact failure the *Extend, don't duplicate* rule forbids,
+committed while writing a rule about memory. The prior art, which OUTRANKS anything new here:
 
-| File | What the next session actually sees |
+- **`memory.md`'s own comment:** *"NEWEST FIRST ... Every line here costs a line of what a new session
+  sees: WRITE NEW STATE AT THE TOP AND **DELETE WHAT IT SUPERSEDES**. Detail goes in a dated section
+  below and is **LINKED** from here."*
+- **`memory.md:1` `# WHERE THINGS LIVE — read this BEFORE grepping code`** (commit `8dad8e1`,
+  *"because retrieval is what failed"*) — the INDEX, and the actual answer.
+
+**What this section adds that was genuinely absent — the measured slice sizes:**
+
+| File | What a new session actually sees |
 |---|---|
-| `memory.md` | `sed -n '/## Active work/,$p' \| head -60` — ~60 lines after the FIRST `## Active work` |
+| `memory.md` | `sed -n '/## Active work/,$p' \| head -60` — ~60 lines after the **FIRST** `## Active work` |
 | `accuracy-log.md` | `sed -n '1,45p'` — the first 45 lines ONLY |
 | `actions.md` | only between `## Open` and `## Closed` |
-| `CLAUDE.md` | loaded in full — the ONLY guaranteed-read file |
+| `CLAUDE.md` | loaded IN FULL — the only guaranteed-read file |
 
-**Appending to EOF is writing to /dev/null with extra steps.** Measured 2026-09-03: three correct,
-detailed entries were appended at `memory.md:6659`, `accuracy-log.md:806`, `actions.md:8453` — and
-**none is inside any window**. Other lanes PREPEND into the window and theirs are visible; the
-convention existed and was not followed.
+**The owner's correction, which is the point of this section:** *"newer fits in the window but new
+isn't always what you needed — old items are just as valuable to return."* Correct, and it kills the
+naive version of this rule. A window whose eviction policy is AGE is a cache keyed on a proxy for
+relevance rather than relevance itself. The video chain proves it: that was OLD knowledge, and no
+amount of newest-first ordering would have surfaced it — only a named pointer would.
 
-1. **PREPEND** new entries at the top of the section the hook reads, never append to EOF.
-2. **A durable, cross-session FACT about how the system works belongs in `CLAUDE.md`** — that is the
-   only file read in full. `memory.md` is for the narrative of what happened.
-3. **`memory.md` has TWO `## Active work` headings** (~522 and ~6402). `sed` stops at the first, so
-   anything written under the second is unreachable by construction. Do not add a third.
-4. **The Stop gate checks the files were TOUCHED, not that the content is RETRIEVABLE.** An
-   unreadable append passes it cleanly — the same shape as an inert guard: believed because it ran.
+So, in priority order:
+1. **A durable FACT about how the system works goes in `CLAUDE.md`** — the only file read in full.
+   `memory.md` is for the narrative of what happened.
+2. **The window is an INDEX of pointers.** Extend `WHERE THINGS LIVE`; do not add another dated block
+   at the top. An index does not decay; a feed does.
+3. **SUPERSEDE, don't accumulate.** New state at the top DELETES what it replaces, and links to the
+   dated detail below. This is the clause the first draft of this section dropped.
+4. **Never append to EOF.** Measured: three correct entries landed at `memory.md:6659`,
+   `accuracy-log.md:806`, `actions.md:8453` — none inside any window. Writing them produced nothing
+   retrievable.
+
+**Two structural traps, both live:**
+- **`memory.md` has TWO `## Active work` headings.** `sed` stops at the FIRST, so anything under the
+  second is unreachable by construction. Do not add a third.
+- **The Stop gate checks the files were TOUCHED, not that content is RETRIEVABLE**, and its
+  extend-vs-duplicate trace (requirement (g)) is **TIER 1 only** — `STOP_PROMPT` says *"do NOT
+  require (a), (b), (g) or (h) for TIER 2 or TIER 3"*, and prose is TIER 3. **So a prose edge that
+  adds a duplicate rule passes every guard we have.** Tier is the wrong axis for
+  extend-vs-duplicate; "am I introducing a NEW thing" is the right one. Tracked as
+  `ACT:extend-first-is-tier-exempt` — the gate change is TIER 1 and needs its own AC pass.
 
 ## No dead UI (standing rule)
 

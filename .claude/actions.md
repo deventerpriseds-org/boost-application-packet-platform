@@ -17,6 +17,47 @@ Status values: `open` | `in-progress` | `blocked` | `done`
      index of what is live, not a second copy of the ledger. Detail stays in the ACT entries below
      and in `.claude/DEFERRED.md`. -->
 
+### ACT:extend-first-is-tier-exempt — the extend-vs-duplicate trace cannot see a prose edit (2026-09-03)
+- **Status:** 🔵 OPEN. Diagnosed, NOT fixed. The fix changes a gate, so it is TIER 1 and needs its
+  own AC pass. **Owner's call.**
+- **The hole, quoted from `setup.sh`'s `STOP_PROMPT`:** *"do NOT require (a), (b), (g) or (h) for
+  TIER 2 or TIER 3"* — and **(g) is the integration trace that asks EXTEND-existing vs NEW/parallel.**
+  TIER 3 is *"prose: CLAUDE.md, .claude/*.md."* So **a prose edit that introduces a duplicate rule is
+  structurally exempt from the only check that would catch it.**
+- **Proof it is real, from today:** I wrote a *"PREPEND into the retrieval window"* rule into
+  `CLAUDE.md` that duplicated a convention already at `memory.md`'s `NEWEST FIRST` comment AND already
+  solved better by the `WHERE THINGS LIVE` index (commit `8dad8e1`). Every guard passed. The owner
+  caught it and asked *"what needs to be updated for you to remember extend first again?"*
+- **Why more prose is the wrong fix:** *Extend, don't duplicate* already exists in BOTH
+  `/root/.claude/CLAUDE.md` and this repo's `CLAUDE.md`, and was broken anyway. Per the standing
+  hardening rule, a recurring miss graduates to a STRUCTURAL guard, not another line.
+- **Proposed fix:** **tier is the wrong axis.** Trigger (g) on "am I introducing a NEW thing" instead —
+  a standing rule added by a prose edit IS a new subsystem in the governance layer. Narrow, checkable
+  version: any turn that ADDS a new `## ` heading to `CLAUDE.md` owes the extend-vs-new trace
+  regardless of tier.
+- **Partial mitigation SHIPPED (not the fix):** `WHERE THINGS LIVE` (`memory.md:1`) EXTENDED with a
+  fourth question class — *"does a RULE / CONVENTION about this already exist"* — so retrieval now
+  precedes rule-writing. Evidence: this commit.
+
+### ACT:model-spend-measured — there is nothing to save; make the model a setting for CONTROL (2026-09-03)
+- **Status:** ✅ CLOSED as a question answered. Owner asked whether self-hosting a model or the
+  OpenAI Batch API would cut cost.
+- **MEASURED from `usage_metering`, all time (2026-07-08 → 2026-09-03): $5.87 total, $0.10/day,
+  ~$3.09/month projected.** By model: `gpt-4o-mini` 6,738 calls $3.18 · `gpt-4o` 364 calls $2.68 ·
+  `text-embedding-3-small` 14,688 calls $0.003.
+- **Self-hosting: NO, off by 2-3 orders of magnitude.** An always-on cloud GPU is ~$360-$2,900/month
+  against a $5.87 EIGHT-WEEK bill, and it would trade GPT-4o-class quality on the exact paths that
+  decide a gate (`opportunity:jd-parse`, `evidence:escalate`, `coverage:judge`).
+- **Batch API: halves the wrong number.** 50% applies only to work tolerating 24h turnaround; the
+  interactive paths (`packet:*:generate`, `artifact:review`, `coverage:judge`) cannot wait. Ceiling if
+  EVERYTHING were batchable is ~$1.54/month.
+- **The only real lever: `gpt-4o` is 46% of spend on 1.7% of calls.** `evidence:escalate` alone is
+  34% ($2.00 / 268 calls / $0.00746 each). Re-pointing that one feature would beat Batch API outright
+  — and it is what `D:model-is-43-literals` blocks (43 literals, 32 files).
+- **Recommendation:** make the model a setting because the no-hardcoded-config rule requires it and it
+  enables quality experimentation — **not** for savings. At $3/month, optimising spend costs more in
+  engineering time than it can ever return.
+
 ### ACT:video-script-authoring — the chain is traced; five owner requirements are in an AC pass (2026-09-03)
 - **Status:** 🔵 OPEN. AC pass RUNNING, writing `docs/qc-evidence/AC-video-script-authoring.md`
   incrementally. **No code written yet — TIER 1, so ACs come first.**

@@ -13,6 +13,29 @@ live / does X already exist"*, the answer was in there and I grepped code narrow
 **The rule this earns: for any "where does X live / does X exist" question, read THIS TABLE FIRST,
 then `DEFERRED.md`, then grep — and sweep EVERY store, never one.**
 
+**EXTENDED 2026-09-03 — the question class now includes RULES, not just data and code.** This index
+covered stores, routes and components, so "does a CONVENTION about X already exist" had no entry and
+nothing told me to look. I then wrote a *"PREPEND into the retrieval window"* rule into `CLAUDE.md`
+that duplicated a convention already living at `memory.md`'s `NEWEST FIRST` comment and already
+solved better by this very index (commit `8dad8e1`, *"because retrieval is what failed"*). The owner
+caught it: *"can I save money"* came in the same breath as *"what needs to be updated for you to
+remember extend first again?"* — because prose duplication is invisible to every guard we have.
+
+| Question | Read FIRST | Then |
+|---|---|---|
+| where does DATA live / does a store exist | this table + `## The owner's data — five stores` | `DEFERRED.md`, then grep |
+| does a FEATURE exist / who produces this field | `CLAUDE.md` (always loaded), then `DEFERRED.md` `## Open` | the TYPE ENUMERATION, then grep |
+| **does a RULE / CONVENTION about this already exist** | **`CLAUDE.md` headings, then `grep -n '^## ' .claude/memory.md`, then this index** | **`accuracy-log.md` 1-45 — a rule is often the guard from a past miss** |
+| is this work already open / already decided | `.claude/actions.md` `## Open` + `.claude/DEFERRED.md` | never present a tracked row as new |
+
+**Why a fourth row was needed and prose was not:** the Stop gate's extend-vs-duplicate trace —
+requirement (g) — is **TIER 1 only**. `setup.sh`'s `STOP_PROMPT` says *"do NOT require (a), (b), (g)
+or (h) for TIER 2 or TIER 3"*, and TIER 3 is *"prose: CLAUDE.md, .claude/*.md."* **A rule added by a
+prose edit is structurally exempt from the only check that would catch it duplicating another rule.**
+Tier is the wrong axis for extend-vs-duplicate; "am I introducing a NEW thing" is the right one, and
+a standing rule is a new subsystem in the governance layer even though it is prose. Tracked as
+`ACT:extend-first-is-tier-exempt`; the gate change is itself TIER 1 and needs its own AC pass.
+
 ## DESIGN INTENT — read TOP-DOWN, never from the render alone
 
 Recorded in `docs/qc-evidence/IMPORT-NOTE.md` and violated anyway: I answered "what does the design
@@ -574,6 +597,21 @@ incident twice.
 
 ## Active work
 
+<!-- ============================ HOW TO WRITE IN THIS SECTION ============================
+     The SessionStart surfacer emits THIS HEADING PLUS ~60 LINES AND NOTHING ELSE. Every line
+     here costs a line of what the next session sees.
+       1. NEWEST FIRST, and WRITE NEW STATE AT THE TOP AND DELETE WHAT IT SUPERSEDES.
+       2. Detail goes in a dated section BELOW and is LINKED from here - this is an INDEX of
+          pointers, not a feed. The owner's correction, 2026-09-03: "newer fits in the window
+          but new isn't always what you needed - old items are just as valuable to return."
+          Age is a proxy for relevance, not relevance. A named pointer does not decay.
+       3. A durable FACT about how the system WORKS belongs in CLAUDE.md (read in full), not
+          here. This file is the narrative of what happened.
+       4. This file has TWO `## Active work` headings and sed stops at the FIRST - anything
+          under the second is UNREACHABLE. Do not add a third.
+     Full rule: CLAUDE.md `## RETRIEVAL: the window is an INDEX, not a feed`.
+     ===================================================================================== -->
+
 **2026-09-03 - THE VIDEO CHAIN is documented in `CLAUDE.md` (always-loaded), not here.** Five
 functions in series; `artifactGenerate` (`appPackets.ts:271`) authors the script from
 `ARTIFACT_BRIEF.video`; `runPacketBuild` SKIPS the type (`if (!metaFor(a.type)) continue`), so 39 of
@@ -997,9 +1035,10 @@ Verified from the written files, not from the script's own stdout:
 Repo state at session start: `boost` HEAD `2c693d1` == `origin/main`, clean tree, on branch
 `claude/eds-skills-setup-summary-ngpaos`. **Other sessions are working this codebase in parallel** —
 fetch before every answer about state, and re-check before every commit.
-<!-- NEWEST FIRST, and the SessionStart surfacer emits this heading plus 60 LINES and nothing else.
-     Every line here costs a line of what a new session sees: WRITE NEW STATE AT THE TOP AND DELETE
-     WHAT IT SUPERSEDES. Detail goes in a dated section below and is LINKED from here. -->
+<!-- The NEWEST FIRST / supersede-and-link convention MOVED 2026-09-03 to directly under the FIRST
+     `## Active work`, because it governs the surfaced window and was itself OUTSIDE it (measured:
+     grep -c on the emitted 60 lines returned 0, so the rule nobody read is why nobody followed it).
+     Canonical text now lives there and in CLAUDE.md `## RETRIEVAL: the window is an INDEX`. -->
 
 **2026-08-30 — THE AC / VERIFIER VEHICLE CHANGED. `## Long agent work does not run in this session
 any more (2026-08-29)` further down this file, and the matching section in `CLAUDE.md`, are now
