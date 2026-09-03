@@ -5850,3 +5850,50 @@ test('H:attribution-follows-the-posting-line-not-the-keyword: a swap row never s
   assert.ok(similarity(text, byPostingLine.verbatim) >= ATTRIBUTION_THRESHOLD,
     'the fixture must actually exercise the threshold, or this test proves nothing')
 })
+
+// H:deploy-sha-comes-from-the-bundle -- the convergence gate cannot be satisfied by a label.
+//
+// `api-deploy.yml` refuses to run pg-migrate until /api/health reports the sha it just deployed.
+// That guard is the only thing between a deploy and a migration against the PREVIOUS bundle, and it
+// read `process.env.DEPLOYED_SHA` -- an APP SETTING the workflow writes in a step that runs BEFORE
+// the code deploy. So the value flipped to the new sha while the old bundle was still serving, and
+// the poll cleared on attempt 1 every time. A gate that checks a label the gate itself wrote cannot
+// fail.
+//
+// MEASURED TWICE, IDENTICALLY:
+//   2026-08-28  "pg-migrate ran the PREVIOUS bundle's SCHEMA_SQL ... '31/31 tables present', and
+//               the JD column rename had not happened" (api-deploy.yml's own comment).
+//   2026-09-03  runs 33731929584 and 33732790777. The second is PROOF rather than a symptom: that
+//               deploy's source contained a 33-entry EXPECTED_TABLES and the running code still
+//               answered "32/32 tables present". Neither deploy created `owner_master_block`; a
+//               manual pg-migrate ten minutes later created it instantly.
+//
+// The 2026-08-28 fix moved `DEPLOYED_SHA` to BEFORE the deploy. That cured the symptom it aimed at
+// (the poll timing out) and reintroduced the disease in a form that ALWAYS passes -- which is why
+// this fix changes WHAT is measured rather than when.
+//
+// MUTATION that must make this FIRE: revert health.ts to `deployedSha: process.env.DEPLOYED_SHA`.
+test('H:deploy-sha-comes-from-the-bundle: health reports the compiled sha, not the app setting', () => {
+  const health = src('../health.ts')
+  assert.match(health, /deployedSha:\s*servingSha\(\)/,
+    'health must report the sha compiled INTO the bundle. Reading process.env.DEPLOYED_SHA directly '
+    + 'makes the deploy gate check an app setting the workflow wrote before deploying the code, '
+    + 'which is how a migration ran against the previous bundle twice.')
+
+  // The fallback may exist, in ONE place. If health reads the env var itself, the bundle stamp can
+  // be bypassed at the call site while this test still sees servingSha().
+  // COMMENTS STRIPPED FIRST. The first run of this guard fired on the explanatory comment directly
+  // above the fixed line -- prose that NAMES the defect, which is exactly the cry-wolf failure this
+  // file bans ("a guard that fires on prose is one people learn to ignore"). The assertion is about
+  // a code reference, so it reads code.
+  assert.ok(!/DEPLOYED_SHA/.test(stripComments(health)),
+    'health.ts must not READ DEPLOYED_SHA -- the fallback belongs in buildStamp.servingSha(), or '
+    + 'the bundle stamp can be bypassed at the call site while this test still sees servingSha()')
+
+  const stamp = src('../buildStamp.ts')
+  assert.match(stamp, /export const BUILD_SHA: string \| null = /,
+    'buildStamp must expose BUILD_SHA in the exact shape api-deploy.yml rewrites; the workflow '
+    + 'asserts its own edit applied, and this asserts the target it edits still exists')
+  assert.match(stamp, /BUILD_SHA \|\| process\.env\.DEPLOYED_SHA/,
+    'the BUNDLE must win over the app setting -- reversing the order restores the defect exactly')
+})

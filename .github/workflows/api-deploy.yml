@@ -29,6 +29,21 @@ jobs:
       - name: Build TypeScript
         run: |
           cd api
+          # STAMP THE COMMIT INTO THE SOURCE BEFORE COMPILING, so the sha travels inside the bundle.
+          # The convergence poll below waits for this value; reading it from the app setting instead
+          # made the poll pass while the OLD bundle was serving, twice (see buildStamp.ts).
+          python3 - <<'STAMP'
+          import pathlib, re
+          p = pathlib.Path('src/functions/buildStamp.ts')
+          s = p.read_text(encoding='utf-8')
+          s2 = re.sub(r"export const BUILD_SHA: string \| null = null",
+                      "export const BUILD_SHA: string | null = '${{ github.sha }}'", s, count=1)
+          # A silent no-op here would restore the exact defect this replaces, so assert the edit.
+          assert s2 != s, 'BUILD_SHA placeholder not found -- the stamp did not apply'
+          p.write_text(s2, encoding='utf-8')
+          print('stamped BUILD_SHA=${{ github.sha }}')
+          STAMP
+          grep -n "BUILD_SHA: string" src/functions/buildStamp.ts
           npm run build
 
       - name: Login to Azure
