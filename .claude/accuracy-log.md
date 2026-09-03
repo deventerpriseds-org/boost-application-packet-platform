@@ -665,3 +665,21 @@ third defect of the same shape in that one file (TAP-only, then spacing), and th
 holds: *a harness that reports the wrong outcome is worse than no harness, because the alarming
 answer is the one that gets acted on.* Fixed by squeezing whitespace on both sides while keeping the
 caller's name an `-F` fixed string.
+
+### Same slip four times in one hour — the mutate.sh test command needs an ABSOLUTE cd
+
+`CLAUDE.md` states it outright: *"use an ABSOLUTE `cd` in the test command"*. I omitted it on four
+consecutive mutation runs, got `UNDETERMINED` every time, and each time "fixed" it by changing the
+shell's cwd AROUND the call rather than the string passed INTO it — `mutate.sh` runs
+`eval "$TEST_CMD"` from its own cwd, so an outer `cd` is invisible to it. The fourth attempt still
+printed `CMD is: npm run build...` with no `cd` in it, an echo I had added specifically to check.
+
+**No new guard is warranted and none should be written.** `mutate.sh`'s `UNDETERMINED` branch caught
+it all four times and said exactly what was wrong — *"either a DIFFERENT test failed ... or the
+harness prints a format this script cannot read. NOTHING IS PROVEN."* The instrument was right four
+times running; I kept re-reading my own diagnosis instead of the string I had handed it. Worth naming
+as a pattern: **when a tool tells you the same thing four times, read the input you gave it, not the
+code around it.**
+
+For the trend table: `instrument-caught`, four of four, none reached the owner, and all four guards
+it was blocking were subsequently proved FIRED.
