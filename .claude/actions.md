@@ -4871,7 +4871,7 @@ The three ABSENT rows (4.5-12 PickList, 4.8-21 `Ask why`, 4.11-4 scope selector)
 | `H:coverage-absent-rows-carry-a-check` | an ABSENT claim nobody can falsify |
 | `H:coverage-absent-check-is-real` | an empty pattern (`/(?:)/` matches everything) or a path that no longer exists — both stolen from the ledger guard, which learned them the hard way |
 | `H:coverage-stale-absent-fails` | **the one that earns the file**: the pattern now MATCHES, so it was built |
-| `H:coverage-absent-is-rare-enough` | ABSENT swelling past 12, i.e. rows added faster than anyone checks them |
+| `H:coverage-absent-is-rare-enough-to-mean-something` | ABSENT swelling past 12, i.e. rows added faster than anyone checks them |
 
 **Five mutations, all failing correctly:** feature built under an ABSENT row, clause removed, file
 renamed, pattern emptied, verdict word changed. app 391/391.
@@ -7335,6 +7335,73 @@ reclassified DELIBERATE to flatter the count.
 one false INERT (I piped the test command through `grep -q`, so the must-fail pattern could never
 match) -- both my harness errors, both caught by the harness reporting honestly rather than guessing.
 
+### ACT-2026-09-02-e — the fixture now carries `comparison`, and the jd step was RE-MEASURED
+
+Owner: *"fix the fixture builder to carry comparison, then re-measure."* Done, TIER 1, ACs first
+(`docs/qc-evidence/AC-fixture-comparison.md`), findings in `PROTOTYPE-COVERAGE.md` §17.
+
+**The AC pass rejected my plan and was right.** I would have extended the builder; the hole was
+UPSTREAM of it (`comparison_dimension` appears 0 times in `fixture-refresh.yml`), and re-deriving
+`summary`/`set`/`stale` in JS would have been a second dimension brain whose drift renders as app
+gaps — a fixture that measures itself. The runner captures the real route instead; zero derivation.
+
+**Result: 27 → 16 panels, 3 → 2 controls, bodyLen 10,146 → 16,196, with NO app code changed.**
+Eleven "gaps" were the instrument. All 16 remaining classify as rename / deliberate / demo value, so
+the step still has **zero confirmed gaps** — and the comparison surface is now MEASURED, not assumed.
+
+**Two of my own defects caught in flight, both worth keeping:**
+1. My first `H:canary-refuses-a-hollow-comparison` **re-implemented the predicate inline**, so it
+   graded a copy and would have passed with the guard reverted — an inert guard committed inside a
+   guard against inert guards. Rewritten to exercise the shipped canary in a child process; the
+   mutation then FIRED.
+2. The AC pass judged my earlier `!!comparison` canary too weak: an unresolved opportunity returns a
+   REAL body that passes it while nothing renders. Strengthened to `resolved===true` + non-empty
+   `dimensions` + numeric `summary.graded` + non-empty `set.keys`.
+
+**AC-12, honestly:** the gate it named has cleared (`total` present, the "unknown - not zero" branch
+gone). The three per-kind labels did not render for this asset, which `assetBlocks.js:923` documents
+as legitimate — *"a kind the posting does not use is not a 0/0 stat"* — not a regression.
+
+**Recorded because it favours the app:** the rendered comparison distinguishes `Nothing found`
+(asked, unevidenced) from `Not compared` (never asked). The prototype has ONE label for both. That is
+this repo's "absent evidence is `not_applicable`, never a shortfall" rule, which the prototype breaks.
+
+### ACT-2026-09-02-f — all seven steps re-measured at `f57526d`; my prediction was WRONG
+
+Raw: `docs/qc-evidence/gap-all-f57526d.json` (`compare-ui --all`, fixed fixture, app rebuilt).
+
+| step | panels was | now | controls was | now |
+|---|---:|---:|---:|---:|
+| jd | 27 | **16** | 3 | **2** |
+| resume | 62 | 60 | 4 | 2 |
+| cover | 22 | 22 | 3 | 1 |
+| portfolio | 24 | 22 | 4 | 2 |
+| video | 2 | 2 | 0 | 0 |
+| qc | 22 | 20 | 4 | 4 |
+| send | 6 | 6 | 1 | 0 |
+| **total** | **165** | **148** | **19** | **11** |
+
+**THE PREDICTION THAT FAILED.** I told the owner the other six steps' numbers were "suspect in the
+same direction" and that I expected them to "fall substantially". They did not: −2, 0, −2, 0, −2, 0.
+**The comparison surface exists ONLY on the jd step**, so fixing the fixture could only ever help jd,
+and the ~11 rows it recovered are all there. The small movements elsewhere are other sessions' UI
+work landing, not my fix. I did at least refuse to guess a number; the directional claim was still
+wrong and is retracted here.
+
+**`video` is effectively at parity** and should stop being counted as 2: its only two prototype-only
+rows are `SafetyIQ · Head of Engineering` (a mockup demo value, excluded by §0) and `fail` (the
+deliberate match-header refusal, §16c). Prototype bodyLen 932 vs app 739 — proportionate, not starved.
+
+**WHAT 148 IS NOT.** It is not a backlog. It is a string-level diff that cannot tell a rename from a
+deliberate divergence from a real gap — on jd, classifying 16 such rows yielded **zero** real gaps.
+Extrapolating that ratio to the other steps would be exactly the error this whole lane exists to
+stop, so it is not extrapolated.
+
+**DO NOT DUPLICATE THE CLASSIFICATION.** Another session is already doing it against a better
+denominator — spec rows, not strings — and is at **164/183 (89.6%)** with the `cover` step rendered
+and four rows re-verdicted (`826c846`, `8369424`, `beb44e5`). This measurement's value is as a
+CANDIDATE LIST feeding that instrument, not as a second headline competing with it. Two headline
+numbers from two instruments is the state §1a already warns about.
 ---
 
 ## ACT-70 — PROTOTYPE-COVERAGE headline collides across parallel render lanes
@@ -7454,6 +7521,128 @@ null.** Read back from production (`33651206610`), not inferred from a 200.
 id that 404'd, and `artifact_score.created_at` which does not exist (the column is `computed_at`).
 The schema was 5 lines away both times.
 
+### ACT-2026-09-02-g — the JD-analysis rows re-verdicted, and EVERY tally line was stale
+
+Owner asked whether §4.1-§4.3 could "sit dormant and untouched". **Confirmed: yes.** The parity
+lane's commits (`5d37e3d`, `826c846`, `8369424`, `d28be1d`) edit §4.4, §4.5 and §4.8 — never §4.1-4.3.
+So the JD-analysis area sat on a source-only read from 26-27 August while my §16/§17 render evidence
+was appended BELOW it and never reconciled INTO the rows.
+
+**Six open rows, re-verdicted against the render:** `4.2-2`, `4.3-12`, `4.3-13` -> **BUILT**;
+`4.1-5` -> **DELIBERATE** (its own note already argued the refusal, citing a code comment — the
+verdict cell contradicted its evidence); `4.1-10` and `4.1-12` **stay PARTIAL** with reasons stamped.
+`4.1-10` deliberately NOT promoted: §0 requires a DELIBERATE verdict to cite a decision, and
+"better-sourced" asserted in this file is not one.
+
+**THE BIGGER FIND — all 11 per-section tally lines were stale, every one UNDER-claiming.** The
+headline was being recomputed each pass; the section lines never were. Worst: `§4.10` read
+`BUILT 2 · PARTIAL 2 · ABSENT 4` against eight rows that all say BUILT; `§4.11` read
+`BUILT 0 · ABSENT 6` against rows saying BUILT 5 · ABSENT 1. Recounted mechanically from the rows.
+
+**Headline: 167/182 (91.8%) -> 170/181 (93.9%).** It reconciles exactly — my +3 BUILT and -4 PARTIAL
+are the whole delta, so the other lane's number was right and only the section lines had rotted.
+**ABSENT across the entire document is now 1.**
+
+**GUARD: `H:coverage-tally-matches-rows`** (`app/test/prototypeCoverage.test.mjs`) recounts each
+section and fails on any disagreement with its stated line. It extends the existing staleness guard,
+whose scope note said PARTIAL/BUILT drift is "cheap" — true of a ROW, false of a TALLY, because the
+tally is what gets quoted.
+
+**Mutation note worth keeping:** my first mutation came back INERT because I aimed it at the TEST
+(disabling its own assertion), which cannot make that test fail. Re-aimed at the DOCUMENT — putting
+`§4.10`'s stale numbers back — it **FIRED**. For a guard whose subject is a file, the file is what
+you mutate.
+
+### ACT-2026-09-02-h — the tally guard was WITHDRAWN to satisfy (a) honestly, not backfilled
+
+The Stop gate blocked: a check that gates a coverage count is TIER 1, and I wrote it with no
+independent AC pass. It was right. `ACT-2026-09-01-m` records that (a) becomes unsatisfiable once
+code exists, and that fabricating a retroactive AC artifact is the worst available outcome — a
+manufactured pass looks identical to a real one in the record.
+
+**What was different this time: a third option existed.** The guard is ~40 lines, so instead of
+faking (a) or arguing the tier down, I REMOVED it, and the ACs are being written cold against a tree
+where it is absent. That makes (a) genuinely true rather than backfilled, at the cost of one pass.
+
+**Kept, because it is data and prose rather than TIER 1 code:** the six §4.1-§4.3 row re-verdicts,
+the 11 recounted tally lines, and the 170/181 headline. Every doc reference to the withdrawn guard
+was swept so the file does not advertise protection it does not have — claiming an absent guard is
+worse than having none, because it is believed.
+
+**Also owed and now paid: requirement (g), the integration trace.** ONE core system —
+`PROTOTYPE-COVERAGE.md`; every parity number derives from its rows. UPSTREAM producers: the parity
+lane's commits, my §4.1-4.3 re-verdicts, `gap-all-*.json` feeding candidates. **Nothing produces the
+tally lines** — a derived value with no deriver, which IS the defect. DOWNSTREAM consumers:
+§13-CURRENT's headline (recomputed by hand each pass), `.claude/actions.md`, the existing ABSENT
+guard in `prototypeCoverage.test.mjs`, and the owner reading status. The tallies had **no consumer
+that validated them**, which is exactly why 11 of 11 rotted while the hand-recomputed headline stayed
+correct. EXTEND, not new: `prototypeCoverage.test.mjs` already owns doc staleness.
+
+### ACT-2026-09-02-i — the tally guard, re-implemented FROM cold ACs; the AC pass rejected 3 of my choices
+
+Withdrawing it (ACT-h) paid for itself immediately. `docs/qc-evidence/AC-tally-drift-guard.md`
+(537 lines, written against a tree where the guard was absent) found **three real defects in the
+version I had shipped**, none of which I would have caught by re-reading my own code:
+
+1. **"the verdict is the 4th cell" is FALSE.** Rows carry 3, 5, 6 and 7 cells — §4.12 is a 3-cell
+   table with the verdict in cell 2 — so my parser resolved NOTHING for those rows and only looked
+   correct because a `cells.length < 4` guard skipped them. I had written **a second row parser into
+   the one file whose header records a second parser reporting "129 BUILT against a real 151."**
+   The fix is to reuse the file's own `parse()`, which resolves 221/221.
+2. **Section boundaries do not partition rows.** One heading at `:487` covers §4.11 AND §4.12 —
+   14 rows against a correct `§4.11 tally — 9 rows`. Attribute by ROW-ID PREFIX.
+3. **A live cry-wolf mine.** `:346` is an orphan fragment `ABSENT **2** · DELIBERATE **7**.` inside
+   §4.5, whose rows hold 0 ABSENT and 6 DELIBERATE. A section-scoped scanner fires TWICE on a correct
+   document on day one. Scan the tally LINE. `:346` is left in place as a permanent negative control.
+
+It also closed a hole my version left open: "only check the categories the line names" lets a
+non-zero category be DROPPED and stay green — the §4.10/§4.11 shape. `sum(stated) == stated N rows`
+forbids it with no category list to maintain. And it named `AC-5` (exactly 11 tally lines must parse)
+as load-bearing: without it the failure mode is not a misfire but **the guard silently ceasing to
+exist**, which is the original defect one level up.
+
+**Shipped:** 4 assertions + a not-vacuous test that reinstates each defect INTO the document in-suite
+(the `deferredLedger.test.mjs:235` pattern, which has anchor-found and change-applied assertions —
+the in-suite equivalent of `mutate.sh`'s NOT-APPLIED outcome). App suite **436/436**. `mutate.sh`
+cross-check against the real §4.11 defect: **FIRED**.
+
+**Honest gap the AC pass surfaced and I am not papering over:** `H26` enforces slug naming by reading
+`new URL('./hardening.test.mjs')`, so it is **structurally blind to `app/test/`**. These H-cases are
+slug-named by discipline, not by enforcement.
+
+### ACT-2026-09-02-j — H26 fixed, and the REGEX was the bigger hole (owner-prompted)
+
+Owner: *"don't you need to fix the h26 problem?"* Yes — I had named it and walked away, which is the
+flagged-not-fixed pattern this repo has been bitten by before.
+
+**The AC pass rejected my framing.** I briefed it on scope (one file vs many). It found the worse
+defect one level down: **H26's capture regex could not see 258 of the 689 cases that already exist,
+including SIX IN ITS OWN FILE** (`H5c`, `H39c`, `H39d`). Widening the glob while keeping that regex
+would have reproduced, for the third time, the *"STRUCTURALLY BLIND to the actual failure"* verdict
+H26's own comment block records about an earlier attempt.
+
+**Proven, not argued:** `test('H45: x')` and `test('H45b: x')` are caught by the mint ban;
+**`test('H45c: x')` was INVISIBLE and minted a number past the frozen range with the suite green.**
+The counter-retirement mechanism was one keystroke wide.
+
+**Adjudication adopted — option (B):** an id may repeat WITHIN one file (one guard, several
+assertions) but never across two. (A) was rejected on HARM, not tidiness: the four live repeats carry
+unique full titles and are cited externally, so renaming them converts *resolves-to-two* into
+*resolves-to-nothing* — which this repo treats as worse.
+
+**Shipped:** title-first recogniser covering all seven registration forms (numeric, `b`-suffix,
+ANY-letter suffix, slug+clause, slug-as-whole-title, UPPERCASE, and the aliased `t(` registrar);
+scope = `api/test` + `app/test`; template-literal ids excluded by construction so the guard cannot
+accuse correct code. **The `>= 52` floor is retired** — it had rotted to 2.5x stale against a real
+131 — and replaced with file-SET equality, which has no literal to rot. Scan now sees **688 cases,
+682 distinct**. Suite 136/136 api, 436/436 app. **4 mutations, 4 FIRED**, including one that blinds
+the recogniser itself and correctly fails rather than reporting a quiet zero.
+
+**OPEN, deliberately deferred with a reason:** AC-11 (an H-id cited from source or `actions.md` must
+resolve to a defined case) has a LIVE failure — ~4-5 dangling citations — but could not be made
+binary: an H-slug is open-ended prose that truncates, wraps and interpolates, so the cleanest variant
+false-accuses ~6 of 11 findings including H26's own comment. The AC pass's recommendation, which I
+accept: **a five-minute hand fix, not a guard.** Not silently dropped.
 ---
 
 ## ACT-72 — Merge the render + intent lanes to `main`; close I1 with live data
@@ -7531,6 +7720,109 @@ regex only, not a semantic rewrite. Inherent to string matching.
 **Still open, unchanged:** the 8 stale per-section tally lines (own commit), `13-RENDER`'s `83 of 84`
 (different formula), and the 4th `fixture-canary.mjs` REQUIRED entry (blocked until
 `fixture-refresh.yml` is dispatched).
+
+### ACT-2026-09-02-k — citation resolution MEASURED; six danglers found; guard NOT built, with a reason
+
+Follow-on to ACT-j, which deferred this as "not binary". The owner asked for a visual to weigh the
+options, so it was measured rather than left as an estimate.
+
+**Method:** scan `api/test` + `app/test` for registered test names (the widened recogniser from
+ACT-j), then match every back-ticked `H:` reference in `api/src`, `app/src` and `.claude/actions.md`.
+
+**Result at `faf2d1d`: 682 tests defined · 97 ids cited · 6 that resolve to nothing.**
+
+| id | cited from | verdict |
+|---|---|---|
+| `H:coverage-tally-matches-rows` | actions.md | **FALSE ALARM** — exists, built at runtime as `` test(`H:coverage-${name}`) ``, so no literal to match |
+| `H:coverage-absent-is-rare-enough` | actions.md | TRUNCATED — real name is `…-to-mean-something` |
+| `H:refusal-guard-fires` | `appRequirements.ts:272` | DANGLING — *"Exercised by X … asserts `refused` increments"* |
+| `H:a-judged-row-counts-and-a-proposed-one-does-not` | `checks.ts:981` | DANGLING — *"which is why X pins both halves"* |
+| `H:offsets-from-original` | `requirementSupport.ts:31` | DANGLING — *"See X"* |
+| `H:safety-floor-not-configurable` | `requirementSupport.ts:320` | DANGLING — **a value is exported SPECIFICALLY for a test that does not exist** |
+
+**All six are LIVE claims**, not history notes — each tells a reader something is protected. The harm
+is silent: the reader believes the behaviour is guarded and edits freely, and nothing fails because
+nothing is watching.
+
+**GUARD NOT BUILT, and this is the reason rather than a punt.** Measured ~50% false-positive rate.
+Three shapes defeat a pattern-matcher, each with a live instance: an id built at runtime (row 1 —
+correct code the checker calls broken), a long id WRAPPED across lines in a comment, and a note that
+names something deliberately to say it is GONE (flagging that accuses the only honest comment in the
+file). Against `CLAUDE.md`'s standing rule — *a guard people learn to ignore is worse than none* —
+a checker wrong half the time is muted within a week and then protects nothing while looking like it
+does. The D-ledger equivalent works only because `D\d{1,2}[a-z]?` is a CLOSED lexical form; an
+H-slug is open-ended prose.
+
+**Recommendation put to the owner with a visual** (artifact `3577a1ad`): five hand edits, each a
+judgement a checker could not make anyway ("re-point at the test that really covers this, or delete
+the claim?"). Revisit the guard only if these recur — recurrence is the evidence that would justify
+it, and there is none yet.
+
+**RESOLVED 2026-09-02 — owner: "fix by hand". All five applied, plus two the same scan found later.**
+
+Two of the five turned out **not to be misnamed — they were FALSE**. No test asserts `refused`
+increments through the `resolver` seam, and nothing pins judged-vs-proposed counting. Re-pointing
+them would have invented a guard; both comments were rewritten to say the behaviour is UNPROVEN.
+That distinction is the argument against the checker restated: a pattern-matcher can only ever
+re-point, and re-pointing here would have made the file *more* wrong.
+
+| id | disposition |
+|---|---|
+| `H:coverage-absent-is-rare-enough` | re-pointed to `…-to-mean-something` (actions.md:4874). The row at 7726 KEEPS the broken name — it is the record of the defect, and an assertion caught me about to rewrite both |
+| `H:offsets-from-original` | re-pointed to `H32` (`requirementSupport.ts`) |
+| `H:safety-floor-not-configurable` | re-pointed to `M17/M37` in `matcher.test.mjs` |
+| `H:refusal-guard-fires` | **claim deleted** — rewritten to "NOT CURRENTLY EXERCISED … the branch below is UNPROVEN rather than proven" |
+| `H:a-judged-row-counts-and-a-proposed-one-does-not` | **claim deleted** — rewritten to "AND NOTHING PINS IT" |
+| `H:pooled-mode-is-relevant-only` (found later) | re-pointed to `…-and-only-off-the-master` — same truncation shape as row 2 |
+| `H:proposed-evidence-cannot-pass-the-gate` (found later) | **claim was OBSOLETE, not just dangling.** `matcher.test.mjs:1441` argued the escalation toggle is safe ON because "a proposed row can never reach the gate". The owner INVERTED that rule on 2026-09-01 ("proposals can count until vetoed"), so the sentence was false as well as dead. Re-pointed to `H:a-vetoed-row-cannot-pass-the-gate` and the reversal recorded inline |
+
+**Re-scan: 13 dangling ids → 12, and every one of the 12 is now accounted for** — 2 built at
+runtime (`` test(`H:coverage-${name}`) ``), 3 illustrative examples inside naming-convention
+comments (`H:schema-parity`, `H:no-vacuous-gate`, `H45c`), and 7 deliberate correction prose that
+names a dead id in order to say it is dead. **Zero live false claims remain.** The residual is
+exactly the shape that defeats a checker, which is why the count does not go to zero and should not
+be driven there.
+
+**Side effect the suite caught, and it is the good kind.** `deferredLedger.test.mjs` failed on
+`D:hslug-scan-one-file` — its `check: grep` no longer matched, because the ACT-j rewrite of `H26`
+removed the single-file `readFileSync` the row names. A stale-row guard reporting its own row stale
+is the ledger working. Row CLOSED with the wider finding recorded: the blindness was not only
+cross-file, `test('H45c: x')` also minted past the frozen range invisibly.
+
+Evidence: api 1063/1063, app 441/441, `tsc` clean.
+
+### ACT-2026-09-02-l — I PUSHED CONFLICT MARKERS. Hardening lesson, not a footnote.
+
+While recording ACT-k I ran `git merge origin/main` and `git add -A && git commit` in **one chained
+command**. The merge conflicted; `add -A` staged the conflicted files; the commit succeeded and I
+**pushed `75a5969` containing conflict markers** in `PROTOTYPE-COVERAGE.md`, `prototypeCoverage.test.mjs`
+and `actions.md`. Nothing in my own tooling stopped it — I caught it only because the next command's
+output looked wrong.
+
+**THE RULE: never chain `git merge` with `git add -A && git commit` in one invocation.** `git merge`
+exits NON-ZERO on conflict, but `;`-separation and a following `&&` chain let the commit run anyway.
+Merge, then LOOK (`git status --porcelain | grep '^UU'`), then stage.
+
+**What the repair surfaced — both lanes had built complementary guards in the same file:** mine on
+per-section tallies, theirs on the global headline. Kept both. Naive keep-both concatenation broke
+the file's syntax (conflict hunks do not respect JS structure), so it was rebuilt as
+`origin/main`'s file + my block re-appended, verified with `node --check`.
+
+**Then the guards earned their keep, three times in a row, on the merge itself:**
+1. `H:headline-matches-the-rows` (theirs): headline stated 170/181, merged rows said **172** — row
+   moves across lanes are ADDITIVE, so the merged truth is higher than either lane reported.
+2. `H:coverage-every-tally-is-read` (mine, AC-5): their tally format carries a parenthetical before
+   the colon, which my regex missed. It reported *"tally line(s) no longer parse for: 4.8, 4.10"*
+   **by name** instead of silently checking nothing. That is the exact failure AC-5 exists for.
+3. Once parsing, it found §4.8 stating BUILT 18 / PARTIAL 4 against merged rows saying **19 / 3**.
+
+**And the not-vacuous fixture caught two of MY errors:** the §4.10 anchor no longer matched the
+reformatted line (reported `applied no change - it would report the guard inert`, refusing a false
+result), and rebuilding from their base had silently reverted my `parse(lines = …)` change, so
+fixtures were being checked against the unmutated file — a genuinely INERT guard, caught by the
+assertion that exists to catch exactly that.
+
+Headline now **172 of 181 (95.0%)**, ABSENT **1**. api 140/140, app 441/441.
 ---
 
 ## ACT-68c — Re-apply the eds guard stack and confirm the live-DB connector (2026-08-29)

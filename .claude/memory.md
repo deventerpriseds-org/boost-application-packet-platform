@@ -6127,3 +6127,47 @@ assuming a format is equivalent.
 - **Phase tags must be BARE text at the start of a block.** `eds-phase-tag.py:has_tag` is
   `text.lstrip().startswith(t)` against plain strings, so `**Fact Finding:**` FAILS on the markdown
   bold. Two Stop cycles were spent on this. Write `Fact Finding: ...`, unformatted, every block.
+
+
+### Citation resolution: measured, not guarded (2026-09-02)
+
+682 H-tests defined, 97 cited by name, **6 resolve to nothing** (see `actions.md` ACT-2026-09-02-k
+for the table). One of the six is a FALSE ALARM — `H:coverage-tally-matches-rows` exists but is built
+at runtime from a template, so it has no literal name to find.
+
+**A checker for this was deliberately NOT built.** Measured ~50% false positives, because an H-slug
+is open-ended prose that interpolates, wraps across comment lines, and gets named on purpose in
+history notes. The `D`-ledger equivalent works only because `D\d{1,2}[a-z]?` is a closed lexical
+form. Standing rule applied: *a guard people learn to ignore is worse than no guard.*
+
+**The generalisable lesson:** before building a guard, ask whether the thing it must recognise has a
+CLOSED form. Closed (an id like `D12b`, a status token, a column name) — a guard works. Open-ended
+prose — a guard cries wolf and gets muted, and the honest answer is a hand fix plus a note about what
+would justify automating it later.
+
+### The five hand fixes: two were FALSE CLAIMS, not misnamed (2026-09-02, closes the block above)
+
+Owner: *"fix by hand"*. Applied, and the outcome sharpens the block above rather than just closing it.
+
+**Only three of the five were re-pointable.** The other two named a guard that had never existed:
+nothing asserts `refused` increments through the `resolver` seam, and nothing pins judged-vs-proposed
+counting. **Re-pointing those would have invented a guard.** Both comments were rewritten to say the
+behaviour is UNPROVEN. This is the strongest argument yet against the checker that was declined: a
+pattern-matcher can only re-point, and here re-pointing makes the file *more* wrong, not less.
+
+**A later scan found two more, and one had gone OBSOLETE rather than merely dangling.**
+`matcher.test.mjs` argued the escalation toggle is safe ON because *"a proposed row can never reach
+the gate"* — a rule the owner INVERTED on 2026-09-01 (*"proposals can count until vetoed"*). The
+citation dying is what surfaced the sentence being false. **A dangling citation is a smoke detector
+for a stale ARGUMENT, not just a stale name** — which is a better reason to scan periodically than
+tidiness.
+
+**The count does not go to zero, and must not be driven there.** 13 → 12 distinct: 2 built at
+runtime, 3 illustrative examples in naming-convention comments, 7 deliberate prose naming a dead id
+in order to say it is dead. Zero live false claims. Those three shapes are exactly what defeats a
+pattern-matcher — the residual IS the evidence for the decision not to automate.
+
+**The ledger caught my own H26 rewrite.** `D:hslug-scan-one-file`'s `check: grep` stopped matching
+because the rewrite removed the single-file `readFileSync` the row names, so `deferredLedger.test.mjs`
+failed. A stale-row guard reporting its own row stale is the mechanism working exactly as designed —
+row CLOSED, not silenced. api 1063/1063, app 441/441, `tsc` clean.

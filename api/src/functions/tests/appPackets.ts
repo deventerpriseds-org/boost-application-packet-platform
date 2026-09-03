@@ -1629,7 +1629,76 @@ export async function packetResumeTemplate(req: HttpRequest, context: Invocation
   } finally { try { await client?.end() } catch {} }
 }
 
+/**
+ * GET /api/app/packet/{packetId}/analysis - the model output that reached no document.
+ *
+ * WHY THIS ROUTE EXISTS. `collectAnalysis` has captured every section a model produced that maps to
+ * no merge field since P7, and `last_build.analysis` has been written on every build since. NOTHING
+ * HAS EVER READ IT. Measured 2026-09-02 (db-query run 33657794878): 22 stored sections across the
+ * owner's packets -- a 4,473-char length-compliance check, a 4,374-char JD summary, a 2,893-char
+ * Jobscan extraction, the ATS skills table and its swap suggestions -- roughly 16,000 characters per
+ * build, saved and never shown.
+ *
+ * IT WENT UNNOTICED BECAUSE OF A NAME COLLISION, which is worth recording so nobody re-derives it:
+ * `jdAnalysis` ALSO returns a field called `analysis` (`{keywords, mustHaves, atsScore, gaps}`), and
+ * that one IS read, at `PacketBuilder.jsx:570`. So a grep for `analysis` in `app/src` finds a live
+ * consumer and stops. Two different objects, one name.
+ *
+ * READ-ONLY AND OWNER-SCOPED, joined through `opportunity` exactly as `swapsGet` does, so a packet
+ * id alone never discloses another owner's analysis.
+ *
+ * SEMI-DYNAMIC BY CONSTRUCTION, which is what makes it cacheable (owner-requested). The payload can
+ * only change when a BUILD runs, so `builtAt` is returned as the version: a client that holds a
+ * response for a given (packetId, builtAt) can reuse it forever, and a rebuild changes the key
+ * rather than invalidating anything. That is why the timestamp is projected rather than stripped --
+ * it is not decoration, it is the cache key.
+ */
+export async function packetAnalysis(req: HttpRequest, context: InvocationContext): Promise<HttpResponseInit> {
+  if (req.method === 'OPTIONS') return { status: 204, headers: HEADERS }
+  const owner = resolveOwner(req).owner
+  let client
+  try {
+    client = await getPgClient()
+    const row = (await client.query(
+      `select p.id, p.last_build, p.updated_at
+         from packet p join opportunity o on o.id = p.opp_id
+        where p.id = $1 and o.owner_email = $2`, [req.params.packetId, owner])).rows[0]
+    if (!row) return { status: 404, headers: HEADERS, jsonBody: { error: 'not found' } }
+    const lb: any = row.last_build || {}
+    const raw = Array.isArray(lb.analysis) ? lb.analysis : []
+    // NEVER an error, and never an empty array pretending to be an answer. A packet built before
+    // `collectAnalysis` existed, or one whose models placed every section, both legitimately have
+    // nothing here -- and the caller has to be able to tell that from a failure, or the screen says
+    // "no analysis" about a route that broke. Same rule as `atsCoverage`: absent evidence is stated.
+    return {
+      status: 200, headers: HEADERS,
+      jsonBody: {
+        ok: true,
+        packetId: row.id,
+        builtAt: lb.builtAt || row.updated_at || null,
+        count: raw.length,
+        reason: raw.length ? null
+          : 'this packet has no unplaced analysis - either it was built before the pipeline recorded it, or every section reached a document',
+        sections: raw.map((x: any) => ({
+          call: Number(x?.call) || null,
+          title: String(x?.title ?? ''),
+          body: String(x?.body ?? ''),
+          // `chars` is the FULL length the model produced; `body` may be shorter. Kept apart on
+          // purpose -- `collectAnalysis` records the real size precisely so a truncation is
+          // visible, and collapsing them here would hide the thing the field exists to show.
+          chars: Number(x?.chars) || 0,
+          truncated: x?.truncated === true,
+        })),
+      },
+    }
+  } catch (e: any) {
+    context.error('[packet-analysis]', e)
+    return { status: 500, headers: HEADERS, jsonBody: { error: String(e?.message || e) } }
+  } finally { try { await client?.end() } catch {} }
+}
+
 app.http('packetGet', { methods: ['GET', 'OPTIONS'], authLevel: 'anonymous', route: 'app/opportunity/{id}/packet', handler: packetGet })
+app.http('packetAnalysis', { methods: ['GET', 'OPTIONS'], authLevel: 'anonymous', route: 'app/packet/{packetId}/analysis', handler: packetAnalysis })
 app.http('packetResumeTemplate', { methods: ['POST', 'OPTIONS'], authLevel: 'anonymous', route: 'app/packet/{packetId}/resume-template', handler: packetResumeTemplate })
 app.http('artifactContent', { methods: ['POST', 'OPTIONS'], authLevel: 'anonymous', route: 'app/artifact/{artifactId}/content', handler: artifactContent })
 app.http('artifactAiEdit', { methods: ['POST', 'OPTIONS'], authLevel: 'anonymous', route: 'app/artifact/{artifactId}/ai-edit', handler: artifactAiEdit })
