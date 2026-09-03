@@ -8357,3 +8357,15 @@ the fields are genuinely distinct.
 [#81](https://github.com/deventerpriseds-org/boost-application-packet-platform/pull/81) (docs only —
 `.claude/memory.md`, `.claude/actions.md`; no code path changed, so nothing deploys from it).
 Subscribed to its activity.
+
+### ACT:deploy-gate-was-vacuous — FIXED and landed (2026-09-03)
+`api-deploy.yml` polled an app setting it wrote before deploying the code, so pg-migrate ran the
+previous bundle. Twice (2026-08-28 "31/31", 2026-09-03 "32/32"). Sha now stamped into the bundle
+(`buildStamp.ts`). Guard `H:deploy-sha-comes-from-the-bundle`, mutation-proved. NOT fully proven:
+the poll still clears on attempt 1, which is consistent with the fix but not evidence of it.
+
+### ACT:mastercontext-to-postgres — table is LIVE, copy NOT run
+`owner_master_block` exists on production (run 33733374880: "33/33 tables present"), 0 rows.
+NEXT: (1) `POST /api/app/master-context/copy` via api-test.yml; (2) confirm AC-5 byte-identical
+`masterBaseline` output on the owner's real data; (3) flip `MASTERCONTEXT_SOURCE=postgres`;
+(4) the Settings text editor. Storage is deleted at NO step.

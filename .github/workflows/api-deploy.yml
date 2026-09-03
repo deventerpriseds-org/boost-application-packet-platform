@@ -135,8 +135,21 @@ jobs:
           # SCHEMA_SQL, answered `ok:true, "Schema applied... 31/31 tables present"`, and the JD
           # column rename had not happened. Green deploy, old schema, no error anywhere. The only
           # thing that distinguishes the two workers is which commit they are running, so that is
-          # what we wait for. `DEPLOYED_SHA` is set in the app settings above and returned by
-          # /api/health.
+          # what we wait for.
+          #
+          # WHAT IS POLLED CHANGED 2026-09-03, and the old wording is kept below because it is the
+          # trap. This used to say "`DEPLOYED_SHA` is set in the app settings above and returned by
+          # /api/health" -- and that was the defect, not the design. An app setting written by a
+          # step ABOVE the code deploy flips before the code does, so the poll cleared on attempt 1
+          # while the OLD bundle served, and pg-migrate ran the old SCHEMA_SQL. Measured twice:
+          # 2026-08-28 at "31/31 tables present" (the JD rename never happened) and 2026-09-03 at
+          # "32/32" -- that second one is proof rather than a symptom, because the deploy's SOURCE
+          # had a 33-entry EXPECTED_TABLES and the RUNNING code still said 32.
+          #
+          # /api/health now reports `BUILD_SHA`, stamped into src/functions/buildStamp.ts in the
+          # Build step ABOVE and compiled into dist/, so it ships INSIDE the zip and cannot change
+          # until the new bundle is serving. `DEPLOYED_SHA` survives only as a fallback for an
+          # unstamped build. Guarded by H:deploy-sha-comes-from-the-bundle.
           # BUDGET: 90 x 6s = 9 minutes. The first version allowed 40 x 6s = 4 minutes and FAILED the
           # deploy of d02e300 -- `health reports '<none>'` on all 40 attempts. Two causes, both mine:
           # `DEPLOYED_SHA` was being set in the POST-deploy settings step, and setting app settings

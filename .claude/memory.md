@@ -6519,3 +6519,35 @@ what it looks like where the fields are genuinely distinct (`@CoverLetterBody` v
   populations — packets, artifact types, opportunities with and without packets. The owner had to
   say "count Trinnex only" to stop it. **Guardrail: state the scope in the query itself (a `where`
   on packet or opp id), not in the prose around the result.**
+
+### The deploy gate was vacuous, and `owner_master_block` is now LIVE (2026-09-03)
+
+**What was broken.** `api-deploy.yml` polls `/api/health` for the sha it just deployed before letting
+pg-migrate run. It read `process.env.DEPLOYED_SHA` -- an APP SETTING written by a step that runs
+BEFORE the code deploy -- so the label flipped while the old bundle served, the poll cleared on
+attempt 1, and the migration ran the PREVIOUS bundle's SCHEMA_SQL. Measured twice: 2026-08-28 at
+"31/31 tables present" (the JD rename never happened) and 2026-09-03 at "32/32". The second is proof
+rather than a symptom: that deploy's SOURCE carried a 33-entry EXPECTED_TABLES and the RUNNING code
+still answered 32.
+
+**Fixed by changing WHAT is measured.** The sha is stamped into `src/functions/buildStamp.ts` before
+`npm run build`, compiled into `dist/`, and ships inside the zip. `DEPLOYED_SHA` survives only as a
+fallback, in one place. The stamp step asserts its own edit applied, and the step was verified by
+EXTRACTING it from the YAML and RUNNING it, not by reading the indented heredoc.
+
+**Result, verified in the deploy log and the live database:** run 33733374880 reported
+`33/33 tables present` with `"owner_master_block":0` in the list, and the table exists with 4
+columns, `PRIMARY KEY (owner_email, block_key)` and the 14-value CHECK intact.
+
+**HONEST LIMIT ON THE FIX'S PROOF.** I predicted the poll would now take real time instead of one
+attempt. It still says `after 1 attempt(s)`. That is CONSISTENT with the fix (the app has
+`WEBSITE_RUN_FROM_PACKAGE`, so a restart can mount the new bundle near-instantly) but it is NOT
+proof of it -- a deploy where BUILD_SHA and DEPLOYED_SHA differ would discriminate, and none has run.
+What IS proven: the stamp applied (its assertion would have failed the step), and the running code
+executed the new schema. Do not upgrade "consistent with" to "proven" without that test.
+
+**Two guards earned here, both mutation-proved:**
+- `H:every-declared-table-is-registered` -- H11 walked a HAND-MAINTAINED list and was therefore
+  blind to any genuinely new table; the new one derives the list from SCHEMA_SQL.
+- `H:deploy-sha-comes-from-the-bundle` -- health must report the compiled sha, and must not name
+  `DEPLOYED_SHA` at all so the fallback cannot be reintroduced at the call site.
