@@ -1,5 +1,4 @@
 import { app, HttpRequest, HttpResponseInit, InvocationContext } from '@azure/functions'
-import { TableClient } from '@azure/data-tables'
 
 /**
  * GET /api/diag/skill-sources — READ-ONLY. Returns the MasterContext fields a skill bank would be
@@ -25,7 +24,6 @@ import { TableClient } from '@azure/data-tables'
  * problem the moment a second owner exists. Recorded, not papered over.
  */
 
-const CONN = process.env.AZURE_STORAGE_CONNECTION_STRING!
 const HEADERS = {
   'Content-Type': 'application/json',
   'Access-Control-Allow-Origin': '*',
@@ -53,16 +51,11 @@ export async function readSkillFields(): Promise<{
   fields: Record<string, { chars: number; text: string | null; present: boolean }>
 }> {
   try {
-    const client = TableClient.fromConnectionString(CONN, 'MasterContext')
-    const entities: any[] = []
-    for await (const e of client.listEntities({ queryOptions: { filter: "PartitionKey eq 'context'" } })) {
-      entities.push(e)
-    }
-    if (!entities.length) {
+    const { entity: ctx, count } = await readMasterContextEntity()
+    if (!count) {
       // An empty table is a RESULT to report, never an empty pool to seed from silently.
       return { ok: false, error: 'MasterContext is empty', entities: 0, fields: {} }
     }
-    const ctx = entities[0]
     const fields: Record<string, { chars: number; text: string | null; present: boolean }> = {}
     for (const f of SKILL_FIELDS) {
       const raw = ctx[f] == null ? null : String(ctx[f])
@@ -74,7 +67,7 @@ export async function readSkillFields(): Promise<{
         text: raw,
       }
     }
-    return { ok: true, entities: entities.length, fields }
+    return { ok: true, entities: count, fields }
   } catch (err: any) {
     return { ok: false, error: String(err?.message || err), entities: 0, fields: {} }
   }
@@ -107,6 +100,7 @@ app.http('diagSkillSources', {
 import { getGoogleOAuthToken } from './googleAuth'
 import { PORTFOLIO_TEMPLATE_ID } from './packetTemplates'
 import { extractSlideTables, previewTables } from './slideTables'
+import { readMasterContextEntity } from './masterContext'
 
 export async function diagSlideTables(req: HttpRequest, context: InvocationContext): Promise<HttpResponseInit> {
   if (req.method === 'OPTIONS') return { status: 204, headers: HEADERS }

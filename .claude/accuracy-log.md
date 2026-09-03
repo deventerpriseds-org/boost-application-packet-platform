@@ -330,10 +330,23 @@ lot of mistakes... is it overdoing it or are you underdoing it?"* Counting, for 
 
 | | Count |
 |---|---|
-| Verification passes with verdicts | 21 |
-| CONFIRMED verdicts | ~398 |
-| REFUTED verdicts | ~67 (**14%**) |
+| Verification passes with verdicts | 19 |
+| CONFIRMED verdicts | **140** |
+| REFUTED verdicts | **31 (18%)** |
 | Entries in THIS log before today | 5 |
+
+> **CORRECTED an hour after first writing this row, by the tool built to check it.** The numbers I
+> first gave the owner — "~398 confirmed, ~67 refuted, 14%" — came from `grep -c CONFIRMED`, which
+> counts every line containing the WORD, including prose like *"confirmed by reading the source"*.
+> `scripts/accuracy-trend.mjs` counts only a verdict in a VERDICT POSITION and gets 140/31.
+>
+> **The rate barely moved (14% -> 18%) but the absolutes were inflated ~2.5x, and I had already
+> written them into this log as the baseline.** That is this log's own failure mode happening while
+> writing the entry about it: a number produced by a convenient command, reported without checking
+> what the command actually counts. The inflated version also flattered me — a larger denominator
+> makes the rate look smaller.
+>
+> Left visible rather than silently overwritten, because the correction is the more useful record.
 
 **Four of those five were caught by the OWNER, one by a verifier.** So this log has been recording
 the owner's catches, not my error rate — it measured their patience. A log biased toward
@@ -372,6 +385,27 @@ the move is identical — *state it, then look, instead of look, then state it.*
 owner never sees is a mistake that gets to happen twice. The count above is the baseline: if this
 log does not grow at roughly the rate `VERIFY-*.md` accrues REFUTED verdicts, it is lying again.
 
+### The measurement, so decline is observable rather than asserted
+
+Owner, same day: *"be sure you are updating the accuracy log so that your mistakes are on a
+consistent decline."* A prose log cannot show a trend — it accumulates anecdotes, and the writer
+picks which ones. `scripts/accuracy-trend.mjs` counts verdicts across every `VERIFY-*.md`, dates
+them from git rather than mtime (a container restore rewrites mtimes), and prints the rate per pass.
+
+**Baseline, 2026-09-02:** 19 passes, 31 refuted / 171 verdicts = **18%**. Earlier half 20%, recent
+half 16%.
+
+Three honesty constraints built into the tool rather than left to the reader:
+
+- **It refuses to weight by severity.** That is the exact knob a motivated reader turns to make a
+  bad month look fine. Severity belongs in prose where a human judges it; the number stays blunt.
+- **It prints the pass COUNT beside the rate**, and says outright that a rate falling because fewer
+  passes ran is not improvement. The cheapest way to fake this metric is to stop running verifiers.
+- **The trend is first-half vs second-half, not a fitted line.** With 19 points a regression reads as
+  more precision than exists.
+
+**A 16% recent rate is not a success.** Roughly one claim in six still fails an independent read.
+The target is the direction, and the number above is what the next session has to beat.
 ---
 
 ## RECONCILIATION 2026-09-02 — two lanes wrote this file at once, and THEIRS CORRECTS MINE
@@ -539,6 +573,116 @@ All of these are `instrument-caught`; none reached the owner. And none would hav
 the **fifth** independent confirmation of the narrow scope published with it, which is the one thing
 in this whole exercise that has held up unchanged across three verification loops.
 
+## 2026-09-03 — I LAUNCHED TWO AC PASSES AND READ NEITHER ARTIFACT
+
+One root cause, two instances, and the second is the expensive one because I quoted the artifact
+back to the owner as if I had read it.
+
+### Instance 1 — a $1.81 pass whose entire output was a note saying it was going to start
+
+> **CORRECTED the same hour, before this entry had been pushed.** The first draft of this entry
+> said FOUR AC passes had written nothing and named a $2.99 run as wasted. That was itself the
+> error it describes — a claim about what exists, made without sweeping for it. Shape-checking all
+> 39 AC artifacts in this repo: **38 carry criteria, 5 to 71 each.** Two of the four I called hollow
+> (`assembly-time-provenance`, 5 criteria; `mastercontext-to-postgres`, 9) have their REAL artifact
+> committed here — those skills-repo files are run RECEIPTS, and nothing was lost or wasted. One
+> (`spend-report`) says in its own text that it was written retrospectively. **Exactly ONE was
+> genuinely criterion-free: instance 2 below.** The defect is real but narrower than I first wrote:
+> `verify.sh` labels its OUT path OK when a pass wrote the deliverable somewhere else, and a caller
+> polling that path is told the work is done. The guard stands; the body count does not.
+
+| | |
+|---|---|
+| **Claim** | "The MasterContext AC pass is running" (stated to the owner, twice, across two turns). |
+| **Ground truth** | **REFUTED.** The 22:35 run completed `RUN_STATUS: OK` in 82.7s / 9 turns / $1.812 and wrote a **967-byte** artifact whose whole body reads: *"The MasterContext→Postgres AC pass is already running in the background from earlier work in this session — no need to relaunch it. I've set up a background watcher and will report the results as soon as it completes."* It produced **zero** feasibility rows and **zero** ACs. It had impersonated the session agent and deferred to itself. |
+| **The single source that would have settled it** | `wc -c docs/qc-evidence/AC-mastercontext-to-postgres.md` — 967 bytes against a 25,840-byte sibling. One command, and it was available for six hours. |
+| **Root cause** | I treated **launch** as the deliverable. `verify.sh` prints `wrote <path> (OK, $1.812)` on exit; I read `OK` as "the pass succeeded" when it only means "the process exited cleanly". A pass can exit 0 having produced nothing. |
+
+### Instance 2 — an artifact I cited without noticing it had no ACs in it
+
+| | |
+|---|---|
+| **Claim** | Implicit in `BRIEF-ac-reword-carries-the-link.md`, which I edited to say *"The AC pass refuted the FK before any code was written"* — presenting the artifact as a completed AC pass. |
+| **Ground truth** | **Half true, and the missing half is the point.** §3c really did refute `requirement_id`, and that finding is sound. But the artifact **stops dead at the end of §4** — no §5, no §6, no acceptance criteria of any kind. 262 lines, four sections, and **not one `Given/when/then`**. The one thing an AC pass exists to produce was absent, and I quoted the artifact in the owner's brief without noticing. |
+| **The single source that would have settled it** | `grep -c "^Given\|Given .*when .*then" docs/qc-evidence/AC-reword-carries-the-link.md` → 0. Or simply `grep '^#'` on it: the heading list ends at `## 4.` |
+| **Root cause** | **I read the artifact for the part I wanted and stopped.** I went looking for the FK verdict, found it, used it, and never asked whether the document contained what it was commissioned to contain. This is the "answered from a proxy" shape applied to my own evidence: a section that confirms my design is not proof the pass did its job. |
+
+### The guard this earns — and it is structural, not another line of prose
+
+Both instances are the same missing check: **nothing asserts that a pass's artifact has the SHAPE of
+its deliverable.** `verify.sh` knows `--kind`; it can refuse to report `OK` on an artifact that does
+not contain what that kind is defined to produce — for `AC`, at least one `Given/when/then`
+criterion; for `VERIFY`, at least one per-claim `CONFIRMED`/`REFUTED`/`NOT_APPLICABLE` verdict. The
+eds Stop gate **already applies exactly this test to VERIFY artifacts** and accepts a committed
+evidence file *"only if it carries per-claim verdicts"* — so the rule exists, is agreed, and is
+simply not applied at the point of production or to the AC kind at all. Extending the check to where
+the artifact is written closes both instances above with one assertion, and follows the standing
+rule that a recurring miss becomes a deterministic check rather than a reminder.
+
+Noting against the "more prose does not work" principle: a *"read the artifact"* rule would have
+been the fourth instruction of its kind in this file, and I violated three existing ones today.
+
+### For the trend table
+
+Instance 1 is `self-caught`, six hours late, and only because a container restore forced me to
+re-derive what was running. Instance 2 is `self-caught` in the same sweep. Neither reached the
+owner as a false claim of completion — but Instance 2 came within one turn of doing so, because the
+next step it gates is implementation.
+
+### CORRECTED AGAIN, and this time the root cause was mine to find, not the passes'
+
+Both instances above blamed the AC passes. **They had done the work.** `verify.sh` was destroying it.
+
+Every AC/verifier brief in this org tells the pass to write into `docs/qc-evidence/<the artifact>`
+AS IT GOES and commit per section — the standing defence against a container restore. `verify.sh`
+then wrote `header + the model's closing reply` to **that same path** at the end of the run. The
+reply wins.
+
+| | |
+|---|---|
+| **Claim** | (mine, twice) that four AC passes "wrote a chat-style summary instead of any criteria". |
+| **Ground truth** | **REFUTED.** `AC-reword-criteria.md` was **40,222 bytes carrying 24 criteria** at 04:25, committed in four per-section commits. At 04:28 its own run ended and `verify.sh` replaced it with a **2,833-byte** summary. Recovered with `git checkout --`. Every "hollow" artifact is this collision. |
+| **The single source that would have settled it** | `git show HEAD:<the artifact> \| wc -c` against `wc -c < <the artifact>` — the file's own history, one command, and it says the content existed and then stopped existing. I compared the artifact against *my expectation* of an AC pass instead of against *its own previous version*. |
+| **Root cause** | Two mechanisms writing one path, and I only knew about one of them. I had read the brief (which says "write as you go") and I had read `verify.sh` (which writes at the end) — in different hours, never against each other. **A collision between two things you understand separately is invisible until you ask what they do to the same resource.** |
+
+Fixed in `eds-claude-skills` `184560f`: `$OUT` is fingerprinted before the run; if the pass wrote it,
+that content is kept and the reply becomes a `## Run reply` appendix. Three behavioural checks
+(`VS-NOCLOBBER`), mutation-proved — `pass_wrote_it = False` → FIRED.
+
+**The wider lesson, and it is the one worth keeping:** my first two entries today were both written
+with real evidence, real commands, and real numbers, and both told the wrong story — because I
+diagnosed from the artifact's *content* when the answer was in its *history*. "Ground-truth before
+answering" has a second clause I keep missing: **ask what the thing looked like before, not only
+what it looks like now.**
+
+### And one guard was found broken while being used
+
+`mutate.sh`'s Python matcher greps `FAIL␣␣<name>` — two spaces. **Ten of this repo's twelve
+checkers print one space**; only `test_phase_tag.py` matches. So a matcher whose own comment claims
+it "ended the misreport" worked for one suite in twelve and returned UNDETERMINED for the rest —
+found only because the new shape guard could not be proved against `test_verify_sh.py`. This is the
+third defect of the same shape in that one file (TAP-only, then spacing), and the standing lesson
+holds: *a harness that reports the wrong outcome is worse than no harness, because the alarming
+answer is the one that gets acted on.* Fixed by squeezing whitespace on both sides while keeping the
+caller's name an `-F` fixed string.
+
+### Same slip four times in one hour — the mutate.sh test command needs an ABSOLUTE cd
+
+`CLAUDE.md` states it outright: *"use an ABSOLUTE `cd` in the test command"*. I omitted it on four
+consecutive mutation runs, got `UNDETERMINED` every time, and each time "fixed" it by changing the
+shell's cwd AROUND the call rather than the string passed INTO it — `mutate.sh` runs
+`eval "$TEST_CMD"` from its own cwd, so an outer `cd` is invisible to it. The fourth attempt still
+printed `CMD is: npm run build...` with no `cd` in it, an echo I had added specifically to check.
+
+**No new guard is warranted and none should be written.** `mutate.sh`'s `UNDETERMINED` branch caught
+it all four times and said exactly what was wrong — *"either a DIFFERENT test failed ... or the
+harness prints a format this script cannot read. NOTHING IS PROVEN."* The instrument was right four
+times running; I kept re-reading my own diagnosis instead of the string I had handed it. Worth naming
+as a pattern: **when a tool tells you the same thing four times, read the input you gave it, not the
+code around it.**
+
+For the trend table: `instrument-caught`, four of four, none reached the owner, and all four guards
+it was blocking were subsequently proved FIRED.
 ---
 
 ## 2026-09-02 — "4.6-8 is blocked: there is NO JOIN between keywords and swap rows" (reported to the owner TWICE)
@@ -598,3 +742,36 @@ screen.
 **Cost:** roughly ten turns of design debate about how to build a sentence that ships today, plus
 two `verify.sh` runs (~$2.78 each) briefed on the wrong premise. The independent AC pass found it in
 one read — which is the argument for the pass, not against it.
+
+### A green deploy over a missing table, and the guard that was blind by construction
+
+| | |
+|---|---|
+| **Claim** | "Deployed" — api-deploy run 33731929584 succeeded for `036620a`, pg-migrate returned `ok: true`, detail *"Schema applied to boost_resume_n_packet_builder: 32/32 tables present"*. |
+| **Ground truth** | **REFUTED.** `owner_master_block` did not exist in the live database. Confirmed through `boost-pg-mcp-write`: right database (`boost_resume_n_packet_builder`, 51 tables, `correction` and `swap_decision` present), table absent. |
+| **The single source that would have settled it** | The live database — one `information_schema.tables` query, which is what I ran. **I nearly didn't.** The deploy was green and I had already written "Deployed" in my own report. What made me check was that the repo's own session-start hook names this exact class: *"Work was written to change production and the change did not happen."* |
+| **Root cause** | `pgMigrate` verifies against `EXPECTED_TABLES`, a hand-maintained list. My table was declared in `SCHEMA_SQL` and never added to that list, so "32/32" counted 32 names that all existed and never looked at the 33rd. **The number was true and meaningless.** |
+
+**The guard that should have caught it was blind by construction, and that is the finding worth
+keeping.** `H11` — *"every table this layer added is registered for migration"* — iterates a
+hardcoded array of table names. It can only check a table someone remembered to add to it, so the
+guard against *"you forgot to register your new table"* itself requires you to remember your new
+table, in a **third** place. It was green the entire time. Replaced by
+`H:every-declared-table-is-registered`, which derives the list from `SCHEMA_SQL` and therefore
+cannot be blind to a new table; mutation-proved FIRED.
+
+**Why the table was missing at all is a SEPARATE and still-open question.** A manual pg-migrate
+re-run created it immediately, so the deployed bundle did contain the statement. The workflow's
+converge check reported *"worker is serving 036620a after 1 attempt(s)"* — first attempt, unusually
+fast for a fresh deploy — and its own comment says it exists so that *"pg-migrate would not run
+whichever bundle IS serving"*. **Leading hypothesis, stated as inference not fact:** Azure Functions
+runs several worker instances; the health probe hit a converged one and the pg-migrate POST landed
+on another still serving the old bundle. I have no instance-level evidence, so this is not proven —
+it is the next thing to measure, and it is recorded rather than fixed on a guess.
+
+**Calibration note on my own reporting.** I wrote "Deployed" and "api-deploy → success" before
+querying the database. That sentence was true about the workflow and false about the world. A
+deploy's exit code describes the deploy; only the database describes the schema.
+
+For the trend table: `self-caught`, but only just, and after the claim had already been made to the
+owner in this session.

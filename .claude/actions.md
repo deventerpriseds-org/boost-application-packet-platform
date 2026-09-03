@@ -7721,6 +7721,38 @@ regex only, not a semantic rewrite. Inherent to string matching.
 (different formula), and the 4th `fixture-canary.mjs` REQUIRED entry (blocked until
 `fixture-refresh.yml` is dispatched).
 
+
+## ACT:reword-link + ACT:mastercontext-move — design corrected, migration started (2026-09-02)
+
+Owner: *"fix the reword design and start mastercontext in parallel."* Both landed on
+`claude/incumbent-wins-swap` at **`86e0e0b`**; the reader that preceded them is LIVE on `main`
+**`b8e3246`** (api run `33690495389`, web run `33690495375`, both success).
+
+**ACT:reword-link — DESIGN CORRECTED, not yet built.** `correction.requirement_id` is REFUTED and
+replaced by `correction.requirement_text`. Evidence: `AC-reword-carries-the-link.md` §3c, which
+found `writeRequirements` (`appRequirements.ts:506`, `:535`) runs an unconditional
+`delete from requirement where opp_id=$1` on every re-extraction and re-inserts with
+`default uuid_generate_v4()`. The id does not survive a JD re-parse. `requirement_coverage`
+(`schema.ts:553-555`) and `evidence_confirmation` (`:518-520`) already key on the extracted TEXT and
+each say in its own comment that an id or seq is *"destroyed or silently reused"*. A third FK would
+have broken on the owner's next re-parse and taken every reword link with it. **Status: design ready,
+implementation NOT started.**
+
+**ACT:mastercontext-move — AC pass launched, and the sweep resized the work before the brief was
+written.** `grep -rn "PartitionKey eq 'context'" api/src` returns **10 raw read sites across 9
+files** — five in the product (`pipeline.ts` TWICE at `:209`/`:391`, plus `appApply`, `appFacts`,
+`appInsertions`, `diagSkillSources`), the rest the legacy MT-XX harness. There is **no single
+accessor**; `loadMasterBaseline` is the nearest thing and most sites bypass it. Proposed sequencing,
+handed to the pass for confirmation rather than asserted: introduce ONE accessor with the Storage
+backing UNCHANGED, then swap the store. Swapping first is nine simultaneous edits with no way to
+bisect a failure.
+
+**THE OPEN QUESTION THAT COULD RESIZE IT AGAIN:** the sweep found READERS ONLY. Who WRITES
+`MasterContext`? If the writer is the Jotform/zap pipeline or a manual Storage edit, a move Postgres
+owns is overwritten or orphaned on the owner's next edit, and the real first step is a writer. The
+brief forbids assuming a writer exists here because readers do — the same absence-claim error this
+repo's accuracy log is full of, in reverse. **Status: AC pass running, implementation NOT started,
+and it should not start until the writer question is answered.**
 ### ACT-2026-09-02-k — citation resolution MEASURED; six danglers found; guard NOT built, with a reason
 
 Follow-on to ACT-j, which deferred this as "not binary". The owner asked for a visual to weigh the
@@ -7851,6 +7883,27 @@ the custom connectors i added in claude"*.
 **Evidence:** setup output "Skills registered: 16 / Agents registered: 1 / … eds hooks installed
 (version 19)"; `execute_sql` result above; `ListConnectors` output.
 
+### ACT:verify-sh-clobber — CLOSED 2026-09-03
+`verify.sh` overwrote the artifact its own pass had written. Fixed + mutation-proved in
+`eds-claude-skills` `184560f`; the shape guard that surfaced it is `fe097dd`, and the `mutate.sh`
+matcher that could not prove it is `d7a9b54`. Evidence: this repo's `.claude/accuracy-log.md`
+entry "2026-09-03 — I LAUNCHED TWO AC PASSES AND READ NEITHER ARTIFACT" plus its two corrections.
+
+### ACT:reword-carries-the-link — ACs LANDED, implementation OPEN
+`docs/qc-evidence/AC-reword-criteria.md` (24 criteria, commit `058ee4d`). First commit is defined in
+§11 and is the schema half only. TIER 1: needs an independent verifier after implementation.
+
+### ACT:mastercontext-to-postgres — ACs LANDED, BLOCKED on three owner questions
+`docs/qc-evidence/AC-mastercontext-to-postgres.md` (9 criteria, commit `ccc28c6`). §5 asks: (1) which
+owner the one-time copy targets, (2) whether `answersFromQuestions` gets real owner resolution now,
+(3) whether a writer for the owner's master text is in scope here or a follow-on. Commit 1 (one
+accessor, Storage backing unchanged) does not depend on any of them.
+
+### ACT:mastercontext-to-postgres — commits 1 + 2a landed, 2b needs one decision
+Landed on `claude/incumbent-wins-swap`: `5f4c0c9` (accessor), `d85934d` (table). Both guards
+mutation-proved; schema executed against a populated local Postgres.
+OPEN: the accessor has no owner parameter and three callers have no owner in scope. Owner has
+already confirmed the Settings text editor is wanted after the copy.
 ### ACT-68c — guard the COMMITTED fixture, not just the canary's rules (2026-09-02)
 
 **Asked:** fix the thing that made the fixture canary fire twice in one measurement pass.
@@ -8270,3 +8323,49 @@ silently absorbed:
 3. **The open-item count moved with the merge.** `.claude/DEFERRED.md` was 90 rows / 43 `OPEN` at
    `2c693d1`; at the merged tree it is **95 rows / 45 `OPEN` / 50 `CLOSED`**, counted with the
    ledger's own parser, not by eye.
+
+### ACT:mastercontext-to-postgres — LANDED on main `036620a`, INERT until the copy runs
+Accessor + table + Postgres backing + copy route + rollback switch are on `main`. Reader still uses
+Storage (`MASTERCONTEXT_SOURCE` defaults to `storage`), so nothing changed in production.
+OPEN, in order: (1) run `POST /api/app/master-context/copy` on the deployed Function via
+api-test.yml; (2) confirm AC-5 byte-identical `masterBaseline` output on the owner's real data;
+(3) flip `MASTERCONTEXT_SOURCE=postgres`; (4) build the Settings text editor the owner confirmed
+they want. Storage is NOT deleted at any step (AC-9).
+### ACT-68l — TRINNEX ONLY: 71% -> 86% coverage by judging the other artifacts (2026-09-03)
+
+**Owner scoped it:** *"I only want us counting trinnex right now stop looking at anything else."*
+Packet `85cee965`. Everything before this was eMoney (the fixture's packet).
+
+**Before:** resume judged Sep 2 (201 verdicts); cover, portfolio, compact_resume, video all ZERO.
+**Action:** `POST /app/artifact/{id}/checks` on cover, portfolio, compact_resume (runs
+`33731602666`, `33731675845`, `33731728791`, all success).
+
+**Result: 21 live requirements, 21 judged, 18 covered (86%), 11 covered by more than one artifact.**
+Resume alone was 15 of 21 (71%). **Judging the other artifacts found 3 requirements it missed.**
+
+**`compact_resume` wrote 0 new verdicts and that is CORRECT.** `requirement_coverage` is unique on
+`(opp_id, verdict_key)` — per OPPORTUNITY — and `artifact_id` is documented in `schema.ts` as
+*"Provenance only, NEVER identity: the verdict is a function of the text."* `compact_resume` asks
+the same seven fields with the same text as the resume, so every key was already cached.
+
+**Correction to my own reporting: never group `requirement_coverage` by `artifact_id` to attribute
+coverage.** It answers who paid for the verdict first, not who covers the requirement. The split I
+quoted (resume 15 / portfolio 10 / cover 9) is provenance and only means what it appears to where
+the fields are genuinely distinct.
+
+**Landed:** commit `8a8ddab`, PR
+[#81](https://github.com/deventerpriseds-org/boost-application-packet-platform/pull/81) (docs only —
+`.claude/memory.md`, `.claude/actions.md`; no code path changed, so nothing deploys from it).
+Subscribed to its activity.
+
+### ACT:deploy-gate-was-vacuous — FIXED and landed (2026-09-03)
+`api-deploy.yml` polled an app setting it wrote before deploying the code, so pg-migrate ran the
+previous bundle. Twice (2026-08-28 "31/31", 2026-09-03 "32/32"). Sha now stamped into the bundle
+(`buildStamp.ts`). Guard `H:deploy-sha-comes-from-the-bundle`, mutation-proved. NOT fully proven:
+the poll still clears on attempt 1, which is consistent with the fix but not evidence of it.
+
+### ACT:mastercontext-to-postgres — table is LIVE, copy NOT run
+`owner_master_block` exists on production (run 33733374880: "33/33 tables present"), 0 rows.
+NEXT: (1) `POST /api/app/master-context/copy` via api-test.yml; (2) confirm AC-5 byte-identical
+`masterBaseline` output on the owner's real data; (3) flip `MASTERCONTEXT_SOURCE=postgres`;
+(4) the Settings text editor. Storage is deleted at NO step.

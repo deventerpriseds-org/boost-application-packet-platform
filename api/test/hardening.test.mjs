@@ -33,7 +33,10 @@ import { parseResumePackage, headingKeysFor } from '../dist/functions/tests/resu
 import { validateCitations, reviewerChecks, agreementFor } from '../dist/functions/tests/reviewer.js'
 import { extractFigures, scanEcho, claimKey, isMarked, generalize } from '../dist/functions/tests/figureEcho.js'
 import { planCorrections } from '../dist/functions/tests/correction.js'
-import { profileRecords, resolveEvidence } from '../dist/functions/tests/evidence.js'
+// MC_KIND joins this import so H:mastercontext-block-key-domain compares the SQL CHECK against
+// the module that OWNS the block list, never against a literal retyped in the test.
+import { profileRecords, resolveEvidence, MC_KIND, masterBaseline } from '../dist/functions/tests/evidence.js'
+import { entityFromBlocks, masterContextSource } from '../dist/functions/tests/masterContext.js'
 
 const SRC = new URL('../src/functions/tests/', import.meta.url).pathname
 const src = (f) => readFileSync(join(SRC, f), 'utf8')
@@ -303,6 +306,44 @@ test('H11: every table this layer added is registered for migration', () => {
     assert.ok(new RegExp(`'${t}'`).test(schema.slice(schema.indexOf('EXPECTED_TABLES'))),
       `${t} is not in EXPECTED_TABLES, so a migration gap would go unreported`)
   }
+})
+
+// H:every-declared-table-is-registered -- H11's missing half, and the reason it was believed.
+//
+// H11 above walks a HAND-MAINTAINED list of table names. It can only check a table someone
+// remembered to add to it, so the guard against "you forgot to register your new table" itself
+// requires you to remember your new table -- in a THIRD place. It is structurally incapable of
+// catching a genuinely new one, and it passed while doing nothing.
+//
+// MEASURED 2026-09-03. `owner_master_block` shipped to main declared in SCHEMA_SQL and absent from
+// EXPECTED_TABLES. api-deploy went green, pg-migrate returned `ok: true` with the detail
+// "32/32 tables present", and the live database did not have the table. The count was 32/32 because
+// EXPECTED_TABLES held 32 names and every one of them existed -- a gate that passes by not looking,
+// which is exactly the vacuous-pass this repo bans ("absent evidence is not_applicable, never
+// pass"). H11 was green throughout.
+//
+// So this derives the list from SCHEMA_SQL instead of restating it. It needs no maintenance and
+// cannot be blind to a new table. H11 STAYS: its named list also asserts each table is still
+// DECLARED, which this does not, and two overlapping checks on a migration path is not ceremony.
+//
+// MUTATION that must make this FIRE: delete 'owner_master_block' from EXPECTED_TABLES in schema.ts.
+test('H:every-declared-table-is-registered: SCHEMA_SQL and EXPECTED_TABLES cannot diverge', () => {
+  const schema = src('schema.ts')
+  const body = schema.slice(schema.indexOf('SCHEMA_SQL = `'), schema.indexOf('\n`;'))
+  // Strip SQL line comments first. A comment is prose ABOUT the schema, not schema -- without this
+  // the phrase "create table if not exists is a NO-OP" in this file's own commentary is read as a
+  // table named `is`, and the guard cries wolf on its first run.
+  const code = body.split('\n').map((l) => l.replace(/--.*$/, '')).join('\n')
+  const declared = [...new Set([...code.matchAll(/create table if not exists (\w+)/g)].map((m) => m[1]))]
+  const registered = schema.slice(schema.indexOf('EXPECTED_TABLES'))
+  const unregistered = declared.filter((t) => !new RegExp(`'${t}'`).test(registered))
+  assert.deepEqual(unregistered, [],
+    `these tables are declared in SCHEMA_SQL but not in EXPECTED_TABLES: ${unregistered.join(', ')}. ` +
+    `pgMigrate reports "n/n tables present" against EXPECTED_TABLES, so an unregistered table makes ` +
+    `that number pass while the table itself is never checked -- a green deploy over a missing table.`)
+  assert.ok(declared.length >= 30, `only ${declared.length} tables parsed out of SCHEMA_SQL -- the ` +
+    `extraction broke, and an empty list would make this guard pass vacuously, which is the exact ` +
+    `failure it exists to catch`)
 })
 
 // ---------------------------------------------------------------------------------------------
@@ -5614,6 +5655,126 @@ test('H:fixture-score-gap-is-per-artifact: one starved asset among scored ones m
     `the refusal must name the ratio and the offender so a reader knows what to fix; got: ${err}`)
 })
 
+// H:mastercontext-one-accessor -- the owner's master profile is read in ONE place.
+//
+// EVIDENCE, measured 2026-09-03: `grep -rn "PartitionKey eq 'context'" api/src` returned TEN hits
+// across NINE files, each opening its own TableClient against the same global partition. That is
+// what made "move this store" a ten-file edit with no way to bisect a failure, and it is why the
+// accessor lands as its own commit BEFORE anything about the store changes
+// (docs/qc-evidence/AC-mastercontext-to-postgres.md, commit ccc28c6: "one accessor first,
+// store-swap second -- confirmed correct").
+//
+// THE MT-XX HARNESS IS DELIBERATELY EXEMPT, and this is a scope decision rather than an oversight.
+// `CLAUDE.md` names `web/` + the mt* routes as the LEGACY DEV CONSOLE, "NOT the product". Dragging
+// four dead files behind the accessor would widen a bisectable commit for no reader. If the harness
+// is ever revived, the exemption list is the one place to change.
+//
+// MUTATION that must make this FIRE: re-add a raw
+// `listEntities({ queryOptions: { filter: "PartitionKey eq 'context'" } })` loop to any product
+// file -- e.g. restore the old body of `loadMasterBaseline` in appInsertions.ts.
+test('H:mastercontext-one-accessor: only masterContext.ts reads the MasterContext partition', () => {
+  // The legacy MT-XX harness (CLAUDE.md: "NOT the product") and the accessor itself.
+  const EXEMPT = /^(mt\d+\.ts|masterContext\.ts)$/
+  const offenders = allSources()
+    .filter(([name]) => !EXEMPT.test(name))
+    .filter(([, text]) => text.includes("PartitionKey eq 'context'"))
+    .map(([name]) => name)
+  assert.deepEqual(offenders, [],
+    `these product files read the MasterContext partition directly instead of calling ` +
+    `readMasterContextEntity() from masterContext.ts: ${offenders.join(', ')}. ` +
+    `Every raw read is one more file the store-swap has to touch at once.`)
+})
+
+// H:mastercontext-block-key-domain -- the SQL CHECK and MC_KIND cannot drift apart.
+//
+// `owner_master_block.block_key` is constrained to the blocks the owner's master profile actually
+// has, and `MC_KIND` (evidence.ts) is already the ONE place that knows what that set is -- its own
+// comment calls itself "the second lock on the same door" for `itemsToOmit`, the BANNED list that
+// must never become storable. Two homes for one list is the drift this repo keeps paying for, so
+// this reads the domain out of SCHEMA_SQL and compares it to the module rather than to a literal
+// retyped here (a retyped literal agrees with whichever side someone edited last).
+//
+// PROVEN AGAINST A REAL DATABASE, 2026-09-03, main's schema applied to a populated db then this
+// branch's on top (psql exit 0): inserting block_key 'skills1' succeeded, inserting 'itemsToOmit'
+// was REJECTED by owner_master_block_key_check, and the same key under two owner_emails coexisted.
+//
+// MUTATION that must make this FIRE: add a 15th key to MC_KIND in evidence.ts without widening the
+// CHECK in schema.ts (or drop one value from the CHECK).
+test('H:mastercontext-block-key-domain: the block_key CHECK matches MC_KIND exactly', () => {
+  const m = /alter table owner_master_block add constraint owner_master_block_key_check\s*\n?\s*check \(block_key in \(([\s\S]*?)\)\)/
+    .exec(src('schema.ts'))
+  assert.ok(m, 'the owner_master_block_key_check CHECK is missing from SCHEMA_SQL')
+  const inSql = [...m[1].matchAll(/'([^']+)'/g)].map((x) => x[1]).sort()
+  const inModule = Object.keys(MC_KIND).sort()
+  assert.deepEqual(inSql, inModule,
+    `the block_key CHECK and MC_KIND disagree. Only in SQL: ` +
+    `${inSql.filter((k) => !inModule.includes(k))}; only in MC_KIND: ` +
+    `${inModule.filter((k) => !inSql.includes(k))}. A block the module knows but the database ` +
+    `rejects is a row the migration silently drops.`)
+})
+
+// H:mastercontext-baseline-parity -- the two backings produce the SAME baseline.
+//
+// `masterBaseline()` is what every swap row's "original" compares against, so if the Postgres cut
+// changes its output by one character, provenance is silently rewritten on every packet built after
+// the flip. AC-5 is that the output is byte-identical across the cut; this is its STATIC half (the
+// live half needs the owner's real data and is a db-query.yml check after the copy runs).
+//
+// IT DRIVES THE REAL ASSEMBLY, `entityFromBlocks`, rather than rebuilding the entity in the test.
+// A guard that re-implements the thing it checks passes whenever the test and the code make the
+// same mistake -- the inert-guard shape this repo has already paid for more than once.
+//
+// MUTATION that must make this FIRE: in masterContext.ts, make entityFromBlocks skip or rename a
+// key (e.g. `entity[r.block_key + '_'] = r.text`).
+test('H:mastercontext-baseline-parity: Storage-shaped and Postgres-shaped give the same baseline', () => {
+  // ONE fixture, rendered two ways -- the point is that only the SHAPE differs, never the content.
+  const fixture = {
+    resumeSummary: 'Twenty years shipping platforms.',
+    skills1: 'Product, Platform, AI',
+    skills2: 'Governance, Risk',
+    workHistory1: 'eMoney — CTO — 2019-2024',
+    expertise: 'Executive engineering leadership',
+    softHardSkillsPool: 'facilitation; forecasting',
+  }
+  // What Storage returns: one entity, plus the system columns every Table row carries.
+  const storageShaped = { partitionKey: 'context', rowKey: '1', etag: 'W/"x"', ...fixture }
+  // What Postgres returns: one row per block, through the SHIPPING assembly function.
+  const pgShaped = entityFromBlocks(Object.entries(fixture).map(([block_key, text]) => ({ block_key, text })))
+
+  assert.deepEqual(masterBaseline(pgShaped), masterBaseline(storageShaped),
+    'the Postgres backing changes what masterBaseline() returns. That is the BASELINE every swap ' +
+    'row compares its "original" against, so a difference here rewrites provenance on every packet ' +
+    'built after the flip.')
+})
+
+// H:mastercontext-rollback-flag -- the switch has two REACHABLE branches, not one plus dead code.
+//
+// AC-6 makes rollback "flip MASTERCONTEXT_SOURCE back", which is only true while both branches
+// still work. A switch hardcoded to one side is the shape of a rollback that exists in the comment
+// and not in the code -- and this repo's rule is that a value the owner may need to change must not
+// be a literal only a developer can move.
+//
+// MUTATION that must make this FIRE: make masterContextSource() return a constant.
+test('H:mastercontext-rollback-flag: both source branches are reachable from the env', () => {
+  const before = process.env.MASTERCONTEXT_SOURCE
+  try {
+    process.env.MASTERCONTEXT_SOURCE = 'postgres'
+    assert.equal(masterContextSource(), 'postgres')
+    process.env.MASTERCONTEXT_SOURCE = 'storage'
+    assert.equal(masterContextSource(), 'storage', 'the storage branch is unreachable -- rollback is gone')
+    delete process.env.MASTERCONTEXT_SOURCE
+    assert.equal(masterContextSource(), 'storage',
+      'the DEFAULT must be storage until the copy has run and been confirmed live; defaulting to ' +
+      'postgres flips production the moment this deploys, with no copy behind it')
+    // Anything unrecognised must fall back to the safe side rather than being treated as postgres.
+    process.env.MASTERCONTEXT_SOURCE = 'Postgres'
+    assert.equal(masterContextSource(), 'storage', 'a typo must not silently switch the store')
+  } finally {
+    if (before === undefined) delete process.env.MASTERCONTEXT_SOURCE
+    else process.env.MASTERCONTEXT_SOURCE = before
+  }
+})
+
 test('H:committed-fixture-passes-the-canary: the file every render uses must satisfy the rules the canary enforces', async () => {
   const { execFileSync } = await import('node:child_process')
 
@@ -5688,4 +5849,51 @@ test('H:attribution-follows-the-posting-line-not-the-keyword: a swap row never s
     + 'all — the keyword is not an input to the match')
   assert.ok(similarity(text, byPostingLine.verbatim) >= ATTRIBUTION_THRESHOLD,
     'the fixture must actually exercise the threshold, or this test proves nothing')
+})
+
+// H:deploy-sha-comes-from-the-bundle -- the convergence gate cannot be satisfied by a label.
+//
+// `api-deploy.yml` refuses to run pg-migrate until /api/health reports the sha it just deployed.
+// That guard is the only thing between a deploy and a migration against the PREVIOUS bundle, and it
+// read `process.env.DEPLOYED_SHA` -- an APP SETTING the workflow writes in a step that runs BEFORE
+// the code deploy. So the value flipped to the new sha while the old bundle was still serving, and
+// the poll cleared on attempt 1 every time. A gate that checks a label the gate itself wrote cannot
+// fail.
+//
+// MEASURED TWICE, IDENTICALLY:
+//   2026-08-28  "pg-migrate ran the PREVIOUS bundle's SCHEMA_SQL ... '31/31 tables present', and
+//               the JD column rename had not happened" (api-deploy.yml's own comment).
+//   2026-09-03  runs 33731929584 and 33732790777. The second is PROOF rather than a symptom: that
+//               deploy's source contained a 33-entry EXPECTED_TABLES and the running code still
+//               answered "32/32 tables present". Neither deploy created `owner_master_block`; a
+//               manual pg-migrate ten minutes later created it instantly.
+//
+// The 2026-08-28 fix moved `DEPLOYED_SHA` to BEFORE the deploy. That cured the symptom it aimed at
+// (the poll timing out) and reintroduced the disease in a form that ALWAYS passes -- which is why
+// this fix changes WHAT is measured rather than when.
+//
+// MUTATION that must make this FIRE: revert health.ts to `deployedSha: process.env.DEPLOYED_SHA`.
+test('H:deploy-sha-comes-from-the-bundle: health reports the compiled sha, not the app setting', () => {
+  const health = src('../health.ts')
+  assert.match(health, /deployedSha:\s*servingSha\(\)/,
+    'health must report the sha compiled INTO the bundle. Reading process.env.DEPLOYED_SHA directly '
+    + 'makes the deploy gate check an app setting the workflow wrote before deploying the code, '
+    + 'which is how a migration ran against the previous bundle twice.')
+
+  // The fallback may exist, in ONE place. If health reads the env var itself, the bundle stamp can
+  // be bypassed at the call site while this test still sees servingSha().
+  // COMMENTS STRIPPED FIRST. The first run of this guard fired on the explanatory comment directly
+  // above the fixed line -- prose that NAMES the defect, which is exactly the cry-wolf failure this
+  // file bans ("a guard that fires on prose is one people learn to ignore"). The assertion is about
+  // a code reference, so it reads code.
+  assert.ok(!/DEPLOYED_SHA/.test(stripComments(health)),
+    'health.ts must not READ DEPLOYED_SHA -- the fallback belongs in buildStamp.servingSha(), or '
+    + 'the bundle stamp can be bypassed at the call site while this test still sees servingSha()')
+
+  const stamp = src('../buildStamp.ts')
+  assert.match(stamp, /export const BUILD_SHA: string \| null = /,
+    'buildStamp must expose BUILD_SHA in the exact shape api-deploy.yml rewrites; the workflow '
+    + 'asserts its own edit applied, and this asserts the target it edits still exists')
+  assert.match(stamp, /BUILD_SHA \|\| process\.env\.DEPLOYED_SHA/,
+    'the BUNDLE must win over the app setting -- reversing the order restores the defect exactly')
 })
