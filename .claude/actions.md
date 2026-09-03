@@ -8022,3 +8022,53 @@ told the agent to write there incrementally, so it reasoned about the file it fo
 producing the document. **Clearing the stale artifact before relaunching.** Cost of the lesson:
 $2.775 and five minutes, and it is worth recording that `RUN_STATUS: OK` says the process exited
 cleanly, NOT that the pass produced anything.
+
+### ACT-68h — the AC pass landed, and it corrected two of my numbers (2026-09-03)
+
+**Criteria:** `docs/qc-evidence/AC-swap-attribution-judge.md` — feasibility table where every row
+cites the command it ran, 45 numbered ACs in A-K groups, then a section on what the brief gets wrong.
+Authored by an independent `Agent` subagent (`general-purpose`, backgrounded, 46 tool uses, 505s).
+**No source file was modified by it.**
+
+**A CONCURRENT LANE WROTE TO THE SAME PATH.** The subagent reported it mid-pass and rewrote its own
+document atomically. Consequence for the record, stated plainly rather than quietly fixed:
+- `ebbb71c` committed a **539-line, 11-AC document that was the OTHER lane's**, and I described its
+  findings to the owner as my subagent's.
+- `4372cdb` (the memory.md commit, `git add -A`) then swept up my subagent's **381-line** document,
+  which is what HEAD carries now.
+**Both documents independently found the same headline defect**, which is corroboration rather than
+confusion — but the provenance in my report was wrong and is corrected here.
+**Lesson: `docs/qc-evidence/` is shared ground in a multi-lane session. An agent writing there needs
+a lane-unique filename.**
+
+**FINDING 1 — the causal sentence already ships.** `keywordDisplacement`/`keywordDisplacementText`
+(`assetBlocks.js:591,609`) print *"Took the place of X"* from a purely deterministic match, rendered
+at `AssetBlocks.jsx:1202-1206`, guarded by four `H:displacement-*` tests. **So the work is moving a
+live causal sentence behind a judge and re-wording the exact lane — a behaviour change to shipped
+UI, not a greenfield addition.**
+
+**FINDING 2 — my COST doc's denominator was wrong, and the owner was told it twice.**
+I reported *"lane 1 lands 2 of 30 — about 7%"*. That mixes populations: only **17** of the 30 swapped
+rows carry a `requirement_id`, and without one no keyword is associated with the row at all.
+**Correct: 2 of 17 = 12%, and the judgeable remainder is 15 pairs, not 28** — my figure overstated
+the population by ~87%. Verified independently before accepting it. Cost doc corrected.
+
+**FINDING 3 — the shipped exact lane is EQUALITY, not containment, and fires zero times here.** The
+code comment at `AssetBlocks.jsx:1187` cites a production-wide "11 of them joining exactly"
+(run 33687166561) which does not hold on this packet: the intersection of the 35 normalised keywords
+and the 30 normalised swapped `to_label`s is **empty**.
+
+**FINDING 4 — `Put back` exists but is DROP-scoped.** `restoreOptions` filters `action === 'dropped'`;
+the swap case is genuinely absent (both producers and consumers swept). AC 22 requires EXTENDING that
+control rather than composing a second `Put back` string.
+
+**Every measured claim in my brief reproduced exactly** — 43 rows, 30 swapped, 17 with
+`requirement_id`, 8 of 17 at zero overlap, 2 of 17 verbatim, including the worked example.
+
+**Could not verify:** no live DB (the connector reports *requires authentication*), so every number
+is from the committed dump; and the pass did not read the prototype at `docs/qc-evidence/qc/assets.jsx`.
+
+**Still open for the owner:** the ACs choose **one request per packet per loop** (splitting per list
+only on overflow, per-pair prompts so batching cannot change a cached answer) — which now AGREES with
+the owner's 1-3 batch instruction. The earlier 11-AC document's lazy-per-row design was the other
+lane's, not this pass's, and my previous message attributed it wrongly.

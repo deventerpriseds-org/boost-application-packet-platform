@@ -16,14 +16,14 @@ asks about one document at a time. Attribution asks the opposite question and ca
 axes — every replacement item in the packet, against the shortlisted requirements, in one request.
 
 **The payload is small.** The items are skill labels (`"Global Engineering Teams"`), not documents:
-30 rows of a few words each, plus 35 requirement lines. That is a small prompt, well inside one
-call.
+15 judgeable pairs of a few words each, plus their shortlisted requirement lines. That is a small
+prompt, well inside one call.
 
 | | calls |
 |---|---:|
 | **Whole packet in one request** | **1** |
 | Split per list (`skills_1`, `relevant_*`, `expertise`) for smaller, more focused prompts | **2-3** |
-| ~~One per swap row~~ | ~~28~~ — superseded |
+| ~~One per swap row~~ | ~~28~~ — superseded twice: batched, and the population is 15 not 28 |
 
 **Why 2-3 might still beat 1:** a per-list call keeps each prompt to items that compete for the same
 slots, which is the context that makes an attribution judgeable. That is an AC question, not a cost
@@ -31,9 +31,16 @@ one — both are cheap.
 
 ## THE HONEST HEADLINE: lane 1 is thin
 
-**Exact containment removes 2 of 30 rows — about 7%.** The owner asked what percentage the keyword
-lane could land; this is it, and it is small, because a keyword rarely survives verbatim into the
-replacement text the model writes.
+**Exact containment removes 2 of 17 — about 12%.**
+
+**CORRECTED 2026-09-03 by the AC pass, which caught a denominator error.** This document previously
+said *"2 of 30 rows — about 7%"*, mixing two populations. Only **17** of the 30 swapped rows carry a
+`requirement_id` at all, and without one there is no keyword associated with the row — so those 13
+rows are not candidates for either lane. The honest ratio is against the 17, and the judgeable
+remainder is **15 pairs, not 28**: the earlier figure overstated the population by roughly 87%.
+
+The share is still small, because a keyword rarely survives verbatim into the replacement the model
+writes.
 
 **So this is a judge feature with a free fast path, not a keyword feature with a judge safety net.**
 Worth naming plainly now, so nobody later plans as though the deterministic half carries the load.
