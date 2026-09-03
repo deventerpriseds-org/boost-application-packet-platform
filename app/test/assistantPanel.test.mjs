@@ -365,3 +365,33 @@ test('H:assistant-binding-does-not-outlive-the-step', () => {
   assert.match(BUILDER, /useEffect\(\(\) => \{ setAssistantBinding\(null\) \}, \[activeStep\]\)/,
     'the binding is never cleared, so it follows the reader onto a step it does not belong to')
 })
+
+
+// ---------------------------------------------------------------------------------------------
+// The panel header reads `Working on your ${scope.label}` and falls back to "No asset open" without
+// it. The 4.11-4 refactor replaced assistantScope() -- which returned a label -- with a locally
+// built object that did not, so the header read "No asset open" PERMANENTLY, with an asset open and
+// both scope chips rendering below it. Shipped to production and caught there by ui-verify
+// 33758768784, which asserted the ABSENCE of that string. A unit test never saw it because every
+// test asserted options and sentences; nothing asserted the label the header consumes.
+
+test('H:scope-carries-the-label-the-header-renders', () => {
+  const withField = assistantScopes({ id: 'a1', type: 'compact_resume' }, 'ResumeSummary')
+  assert.equal(withField.label, 'compact resume',
+    'the header renders `Working on your ${label}` and shows "No asset open" without it')
+  const noField = assistantScopes({ id: 'a1', type: 'resume' }, null)
+  assert.equal(noField.label, 'resume')
+  // Nothing open really has no label -- that is the ONE case the fallback is for.
+  assert.equal(assistantScopes(null, 'ResumeSummary').label, null)
+})
+
+test('H:the-header-never-says-no-asset-open-while-an-asset-is-bound', () => {
+  // The consumer side of the same fact, asserted against the SOURCE the header reads, so a future
+  // refactor that drops the label again fails here rather than on production.
+  const PANEL = strip(src('../src/screens/AssistantPanel.jsx'))
+  assert.match(PANEL, /label: scopeLabel/,
+    'the scope object handed to the header has no label, so it will read "No asset open" always')
+  const scopes = assistantScopes({ id: 'a1', type: 'cover' }, 'CoverLetterBody')
+  assert.ok(scopes.label && scopes.options.length >= 1,
+    'a bound artifact must yield BOTH a label for the header and at least one scope')
+})
