@@ -132,3 +132,54 @@ turns out to bother owners in practice.
 **Do not implement (B) under this brief without an explicit go-ahead** — it is a materially larger
 and riskier change than the brief's framing suggested, and the exact-once refusal is not to be
 weakened for either option (binding rule, unchanged).
+
+## THE FIVE THINGS THAT MAKE THIS MORE THAN A TEXTAREA — resolved, not just posed
+
+1. **`checksStale` visibility.** Resolved above as a real, pre-existing gap (`onStaleSignal` never
+   reaches `AssetBlocks.jsx`). The new Save action, and — while the call site is already open —
+   the existing "List Tweaks" `api.aiEditArtifact` call at the same component, must both report
+   `checksStale`/`checksError` up through a newly threaded `onStaleSignal` prop:
+   `PacketBuilder.jsx`'s `<AssetBlocks .../>` mount (line 221) already sits inside `ArtifactCard`,
+   which already receives `onStaleSignal` (line 151) and already has a proven consumer
+   (`markQcStale`, line 1026's sibling usage). Thread the SAME prop through, do not invent a second
+   staleness channel.
+2. **Concurrent edit.** Resolved above: option (A)'s exactly-once rule gives this for free. The
+   AC is that the OWNER sees `locateOwnerPhrase`'s real refusal text when it fires for this reason,
+   not a paraphrase.
+3. **Refusal in plain words.** `api.ownerEdit` already uses `postDetailed`. The existing "List
+   Tweaks" box already renders `askError` verbatim in a `px-note` (`AssetBlocks.jsx:974`) — the new
+   Save control must follow the identical convention: render `res.reason` verbatim, not "save
+   failed" (grep target for the guard: `H:owner-edit-refusal-rendered-verbatim`).
+4. **"Previous versions" needs a surface — extend, don't duplicate.** Resolved by the feasibility
+   table: the field margin's existing "Corrected for you" list (`AssetBlocks.jsx:1036-1045`,
+   `CorrectionRow` `inField`) already renders every row for this `merge_field` regardless of
+   `source` (`correctionsForField` filters only on `merge_field`, `assetBlocks.js:1308-1311`), and
+   `undoAvailability` has no `source` branch. **Do not build a second history list on the block.**
+   The only change needed is: after a successful owner-edit save, call the existing
+   `useArtifactCorrections(...).refresh()` (already exposed, `AssetBlocks.jsx:169`) so the new row
+   appears without a page reload — exactly what `onCorrectionsChanged` already does for the AI-edit
+   path (`AssetBlocks.jsx:988`).
+5. **Empty is a real edit — and a self-inflicted dead end.** CORRECTION TO THE BRIEF: there is **no**
+   database constraint named `correction_phrase_nonempty` anywhere in `schema.ts` or
+   `appCorrections.ts`'s `ensureCorrectionTable` (checked both; the only phrase-shaped constraint is
+   `correction_span_matches_phrase`, which permits an empty phrase with `char_start=char_end`). The
+   guard the brief is thinking of is **application-level only** — `if (!phrase) return 400` at
+   `appCorrections.ts:351` — and it is exactly what creates the AC-8 dead end below: once a field is
+   owner-edited to empty, `current` (the next `phrase`) is `''`, and every subsequent Save through
+   this route 400s before reaching `locateOwnerPhrase`. **This is not proposing to weaken that
+   guard** — the fix belongs in the client: an Edit box whose field is currently empty must not
+   silently offer a Save that will 400; it must say why in the owner's terms and point at the one
+   path that still works (`List Tweaks`/AI edit, which does not use `phrase` at all and is
+   unaffected — confirmed by reading `artifactAiEdit`, `appPackets.ts:1610-1615`, which writes
+   `pkg_json` directly with no phrase match of any kind).
+
+## FEASIBILITY TABLE VERDICTS, restated in the required column
+
+| Dependency | Producer | Consumer today | Proof | Verdict |
+|---|---|---|---|---|
+| `artifactOwnerEdit` route | `appCorrections.ts:337` | none in `app/` | grep, above | EXISTS-BUT-UNCALLED |
+| `api.ownerEdit` | `api.js:201` | none | grep, above | EXISTS-BUT-UNCALLED |
+| version history read+undo in the block's own margin | `correction` rows, `listCorrections`, `CorrectionRow` `inField` | already mounted at `AssetBlocks.jsx:1040` | traced end to end | EXISTS AND WIRED (stronger than the brief claimed) |
+| `checksStale` reaching the card | route returns it | nothing forwards it past `AssetBlocks.jsx` | grep, above | ABSENT — must be added, and is shared with the pre-existing AI-edit gap |
+| the Edit/Save control itself | — | — | one `<textarea>` exists and it is the AI box | ABSENT — this is the actual net-new UI |
+| the "type into stored text" pattern the owner remembers | `ResumeField`/`saveArtifactContent`, `OppDetail.jsx:440` | live today | read `appPackets.ts:1516-1558` | EXISTS-BUT-CONSTRAINED — it exists, and it must NOT be the template, because it has no version history |
