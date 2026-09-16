@@ -21,6 +21,18 @@ each section. This container restores; a commit that is not pushed dies with it.
       && git commit -q -m "AC owner-inline-edit: <section>" \
       && git push -q origin claude/session-handoff-setup-ctozd3
 
+## DURATION CONTRACT
+
+Wall-clock budget - AT THE BUDGET: **25 minutes.** At 25 minutes, stop. Deliver every claim you
+have actually proven, mark every claim you did not reach `NOT REACHED`, and end. A partial pass
+that says which rows are unproven is useful; an unbounded one is not. Nothing in the harness bounds
+elapsed time — the stall watchdog times a GAP in progress, so a pass with steady output can run for
+hours without tripping anything.
+
+Incremental artifact - COMMIT AND PUSH PER CLAIM: write `docs/qc-evidence/AC-owner-inline-edit.md`
+as you go and `git add` + `git commit` + **`git push`** after EACH claim lands. A commit that is not
+pushed dies with the container. Do not batch the artifact to the end of the run.
+
 ## THE OWNER ASKED FOR THIS, in these words
 
 > *"update the text to be editable and saveable right there in the block by myself, not only ai
