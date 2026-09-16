@@ -1,147 +1,75 @@
-# AC — Owner inline edit, in-block, with version history
+<!-- WHAT:          Adversarial AC brief for owner-typed inline editing of an asset field, in the
+                    block itself, with prior versions kept and revertable.
+     WHY:           Cold, independent re-verification of BRIEF-ac-owner-inline-edit.md against the
+                    live source at origin/main a041d8f (no code has landed since; see git diff below).
+     SUPERSEDES:    nothing.
+     SUPERSEDED-BY: nothing -- current.
+     EVIDENCE:      every row below cites the command run and its actual output, not the brief's
+                    claims. Two brief claims were found stale or incomplete during this pass; both
+                    are called out explicitly rather than silently corrected. -->
 
-Task (owner's words): "update the text to be editable and saveable right there in the block by
-myself, not only ai edits that i have to list. i should be able to click edit and update while
-previous versions are saved in case we need to revert. I believe this is the case in other parts
-of the packet builder"
+# AC — type your own edit in the block, with versions kept (loop 1)
 
-Written cold, against `origin/main` (this branch is up to date with it, see git log below).
-Sources actually read: `api/src/functions/tests/appCorrections.ts` (full artifactOwnerEdit +
-artifactCorrectionsGet + correctionRevert), `api/src/functions/tests/correction.ts` (full —
-locateOwnerPhrase, reapplyOwnerEdits, originalOf, revertOne, CORRECTION_FRAME), `api/src/functions/tests/appPackets.ts`
-(artifactContent, artifactAiEdit — read in full), `api/src/functions/tests/schema.ts` (correction
-table DDL), `app/src/screens/AssetBlocks.jsx` (AssetBlock, the askOpen box, the "Corrected for
-you" margin), `app/src/screens/QcRail.jsx` (CorrectionRow, in-field mode), `app/src/screens/OppDetail.jsx`
-(ResumeField, ResumeTab, staleById), `app/src/screens/PacketBuilder.jsx` (ArtifactCard, useQcEntries,
-markQcStale), `app/src/api.js` (ownerEdit, saveArtifactContent, aiEditArtifact, revertCorrection).
+Repo `/home/user/boost-application-packet-platform`, branch `claude/session-handoff-setup-ctozd3`.
+Verified before writing anything below: `git diff --stat a041d8f HEAD -- . ':!docs/qc-evidence'` is
+EMPTY — no application code has changed since the brief's evidence commit. All line numbers here
+were re-read from the live files today (2026-09-16), not copied from the brief.
 
-Session state at start: `git log --oneline -3` → `4689908`/`b657217`/`a041d8f`;
-`git rev-list --left-right --count origin/<branch>...HEAD` → `0  0` (in sync, not behind/ahead).
+**Wall-clock budget: 25 minutes, self-timed from spawn.** This pass used its research time on
+ground-truthing the brief's central premise (see "CORRECTION TO THE BRIEF" below) rather than
+padding every row; all claims below were actually run, none are `NOT REACHED`.
 
----
+## THE OWNER ASKED FOR THIS, verbatim
 
-## 0. Correcting the owner's own premise — checked, not accepted
+> *"update the text to be editable and saveable right there in the block by myself, not only ai
+> edits that i have to list. i should be able to click edit and update while previous versions are
+> saved in case we need to revert. I believe this is the case in other parts of the packet builder"*
 
-Command: `grep -rn "<textarea" app/src/screens/*.jsx` then read every hit's surrounding component.
+## SWEEP: "I believe this is the case in other parts of the packet builder" — CHECKED, and the answer is split
 
-**The owner is half right, and the half that's wrong is the half that matters most to him.**
+The owner's belief is **half right**. There are TWO existing "type into stored text yourself"
+mechanisms in this codebase, doing genuinely different things, and the brief's feasibility table
+only found the one that is unwired. The other one is live, in production, right now — and it does
+**not** keep versions.
 
-There IS an existing "click Edit → textarea shows the real field text → Save" round trip:
-`ResumeField` in `app/src/screens/OppDetail.jsx:440`. It is wired on the Resume tab of the
-opportunity detail screen, not inside the Packet Builder's `AssetBlocks.jsx` field blocks the
-owner is describing — but the UX shape he remembers is real and it is the right one to match.
-
-**But `ResumeField.save()` calls `api.saveArtifactContent` → `POST /app/artifact/{id}/content`
-(`artifactContent` in `appPackets.ts:1520`), which does a bare
-`update packet set pkg_json = $1 ...` with NO insert into `correction` anywhere in that
-function.** Read the full function body (`appPackets.ts:1520-1558`) — confirmed, there is no
-`correction` table write on this path at all. So the "previous versions are saved in case we
-need to revert" half of the owner's ask is **NOT true anywhere in the app today**. `ResumeField`
-overwrites `pkg_json[fieldKey]` with no way to recover what was there before. This is a real,
-pre-existing gap in `ResumeField` itself — noted here, not fixed here (out of scope for this AC
-pass, which is scoped to the new AssetBlocks control) — worth a follow-up ACT item.
-
-The ONLY thing in this codebase that keeps a revertable version history of a text field is the
-`correction` table (`source='owner_edit'` for a manual edit, `frame='applied'`), written by
-`artifactOwnerEdit` (`appCorrections.ts:337`) and read back by `artifactCorrectionsGet` /
-reverted by `correctionRevert`. **Confirmed nothing in `app/src/` calls `ownerEdit` today**
-(`grep -rn "ownerEdit" app/src api/src` → the only hits are the `api.js:201` definition and the
-back-end file itself; zero call sites in any `.jsx`). So the feasibility table in the brief is
-confirmed correct on every row I checked, with one addition: there is a SECOND, decoy pattern
-(`ResumeField`/`artifactContent`) that looks like what the owner wants but silently fails the
-"revertable" half — the new control must NOT copy that one.
-
-**Verdict for "extend, don't duplicate":** match `ResumeField`'s UX shape (inline Edit → textarea
-→ Save/Cancel, in place) but call `artifactOwnerEdit`, never `artifactContent`, so the result
-actually has the version history the owner asked for. Do not create a third pattern.
-
----
-
-## 1. Feasibility table — re-verified against origin/main, row by row
-
-| Dependency | Producer | Consumer today | Proof (command + actual output) | Verdict |
+| Mechanism | Where | Route | Keeps versions? | Command run |
 |---|---|---|---|---|
-| `POST /app/artifact/{id}/owner-edit` | `appCorrections.ts:337 artifactOwnerEdit`, registered `appCorrections.ts:415` | none in `app/src` | `grep -rn "ownerEdit" app/src api/src` → only `api.js:201` (client def) and the two `appCorrections.ts` hits (impl + route reg) | **EXISTS-BUT-UNCALLED — confirmed** |
-| `api.ownerEdit(artifactId, body)` | `app/src/api.js:201` | no caller | `grep -rn "api\.ownerEdit\|\.ownerEdit(" app/src` → only the definition line itself | **EXISTS-BUT-UNCALLED — confirmed** |
-| version history rows | `correction` table, `source='owner_edit'`, `frame='applied'`, `applied_seq`, `before_sha256` | `artifactCorrectionsGet` (`appCorrections.ts:209`) | read the full route; returns `{artifact_id, corrections: rows}`, empty array (not absent key) when none | **EXISTS — confirmed** |
-| revert one version | `correctionRevert` (`appCorrections.ts:237`) | `QcRail.jsx` `CorrectionRow` (`QcRail.jsx:574`), and **also already rendered inline inside `AssetBlocks.jsx`** via `import { CorrectionRow } from './QcRail.jsx'` at `AssetBlocks.jsx:50`, mounted at `AssetBlocks.jsx:1040` under the "Corrected for you" label (`AssetBlocks.jsx:1038`) | `grep -n "CorrectionRow" app/src/screens/AssetBlocks.jsx` → import line 50, usage line 1040 | **EXISTS AND ALREADY WIRED INSIDE THE VERY BLOCK THE OWNER IS ASKING ABOUT** — stronger than the brief's row, which only cited `QcRail.jsx` |
-| the field block UI | `app/src/screens/AssetBlocks.jsx` | its only `<textarea>` at line 972 is the AI "List Tweaks" instruction box (`askOpen` block, sends to `api.aiEditArtifact`), not a direct-edit-the-text textarea | `grep -n "<textarea" app/src/screens/AssetBlocks.jsx` → one hit, line 972, inside the `askOpen &&` block that posts to `aiEditArtifact` | **ABSENT — confirmed, this is the real gap** |
-| AI edit path | `api.aiEditArtifact` → `artifactAiEdit` (`appPackets.ts:1564`) | `AssetBlocks.jsx` Send button, `AssetBlocks.jsx:978-992` | read in full | **EXISTS — confirmed, and must keep working unchanged (see AC-9)** |
-| a *decoy* whole-field-overwrite pattern that looks like what's wanted but has no version history | `artifactContent` (`appPackets.ts:1520`) | `ResumeField` in `OppDetail.jsx:440`, via `api.saveArtifactContent` (`api.js:239`) | read `artifactContent` in full: only writes `artifact.content` / `packet.pkg_json`, zero `correction` inserts | **EXISTS, WORKS, BUT IS THE WRONG MODEL TO COPY — see §0** |
-| per-field staleness UI pattern (`checksStale` → visible badge) | `artifactOwnerEdit`/`artifactContent`/`aiEditArtifact` all return `checksStale` | **at the ARTIFACT-CARD level**: `PacketBuilder.jsx` `useQcEntries`/`markQcStale`, rendered as `<Pill tone="warn">checks may be stale</Pill>` at `PacketBuilder.jsx:204`; **at OppDetail level**: `staleById` map, `OppDetail.jsx:516-518`, same `Pill tone="warn"` at line 622. **`AssetBlock` (the field-level component inside `AssetBlocks.jsx`) currently receives NO `onStaleSignal` prop at all** | `grep -n "onStaleSignal\|stale" app/src/screens/AssetBlocks.jsx` → zero hits in the `AssetBlock` function signature/body (only unrelated comments at lines 606, 895) | **EXISTS-BUT-CONSTRAINED — the pattern exists twice at two other altitudes (artifact-card, whole-page), but is not threaded down to the per-field block. Must be threaded, not invented fresh.** |
+| Whole-field textarea + Save | `app/src/screens/OppDetail.jsx:440-502` `ResumeField`, mounted in the Resume tab | `api.saveArtifactContent` → `POST /app/artifact/{id}/content` → `artifactContent` (`appPackets.ts:1520`) | **NO.** `pkg = {...cur, ...body.pkg}; update packet set pkg_json = $1` — a raw merge-and-overwrite. No `correction` row, no history table touched, nothing to revert. | `grep -n "saveArtifactContent" app/src/api.js app/src/screens/*.jsx`; read `appPackets.ts:1516-1558` |
+| Phrase-splice + versioned row | `api.ownerEdit` → `POST /app/artifact/{id}/owner-edit` → `artifactOwnerEdit` (`appCorrections.ts:337`) | writes one `correction` row, `source='owner_edit'`, revertable by the existing `correctionRevert` route | **YES**, already, today, for any caller that uses it | read `appCorrections.ts:337-412`; confirmed no caller in `app/src` below |
 
-**Table `ALREADY BUILT` calls:** revert-one-version UI is already built and already inside this
-exact block (stronger claim than the brief made — verified by reading the import, not assumed).
-The staleness *pattern* is already built twice; only the *plumbing* into `AssetBlock` is missing.
+**So the pattern the owner remembers exists, but it is the wrong one to copy.** `ResumeField` in
+`OppDetail.jsx` IS "click Edit, type in a textarea, Save, it's saved right there" — but it silently
+destroys whatever was there before with no way back. If this brief's job were merely "match the
+existing pattern," it would ship exactly the gap the owner is asking to close. **The correct
+instruction is inverted from the brief's framing**: don't copy the existing pattern, use the
+*better, already-built and already-unused* mechanism (`artifactOwnerEdit`) that happens to sit right
+beside it doing the harder job of keeping history for free.
 
-## 2. The design decision: (A) whole-text-as-phrase vs (B) minimal client diff
+This also means "extend, don't duplicate" cuts against `OppDetail.jsx`'s own pattern, not just
+against inventing something new. **Recorded as a gap, not fixed here**: `ResumeField`'s Save button
+is a pre-existing silent-data-loss risk (an owner typing in the Resume tab today loses whatever the
+draft replaced, with no record). Fixing that is out of scope for this brief — the owner asked about
+the block in the asset cards, `ResumeField` is a different screen — but it belongs in
+`.claude/actions.md` as a follow-up, and this AC set must not accidentally hold `ResumeField` up as
+the reference implementation.
 
-Read in full: `locateOwnerPhrase` and `reapplyOwnerEdits` (`correction.ts:206-238`),
-`artifactOwnerEdit` (`appCorrections.ts:337-412`), the caller of the correction pass in
-`appPackets.ts` around line 640, and every consumer of `ownerLapsed`/`built.warnings` down to the
-browser.
+## FEASIBILITY — re-verified line by line, not trusted from the brief
 
-**Trace of what happens to a lapsed edit, end to end (the exact question the brief asks):**
+| Dependency | Producer | Consumer today | Proof (command run just now) | Verdict |
+|---|---|---|---|---|
+| `POST /app/artifact/{id}/owner-edit` | `appCorrections.ts:337` `artifactOwnerEdit`, registered at `appCorrections.ts:415` | **NOTHING in `app/src/screens/`** | `grep -rn "ownerEdit\|OwnerEdit" app/src` → one hit, `api.js:201` (the client wrapper) plus its own comments; zero call sites | **EXISTS-BUT-UNCALLED** (brief's line number for the route, 337, is correct; the brief's claim of "only `api.js:201` + comments" is confirmed) |
+| `api.ownerEdit(artifactId, body)` | `app/src/api.js:201` (`postDetailed`, not `post` — refusals must surface in the owner's words) | no caller | same grep | **EXISTS-BUT-UNCALLED** |
+| version history rows | `correction` table; `artifactOwnerEdit` writes `source='owner_edit'`, `frame='applied'` (`appCorrections.ts:394-398`) | `artifactChecksResult` → `listCorrections` (`appChecks.ts:518`, confirmed: `corrections: await listCorrections(client, art.id)`) → `useArtifactCorrections` hook (`AssetBlocks.jsx:134-171`) → rendered by `CorrectionRow` in the field margin (`AssetBlocks.jsx:1036-1045`) | route registered; read path traced end to end | **EXISTS AND ALREADY WIRED FOR READING** — an owner-edit row, once written, needs **zero** new rendering code to show up in the field's existing "Corrected for you" list |
+| revert one version | `correctionRevert` (`appCorrections.ts:237`, registered line 416) | `CorrectionRow.doUndo` (`QcRail.jsx:585-604`), and that exact component is **already mounted inside `AssetBlocks.jsx`'s field margin** at line 1040 with `inField` | `undoAvailability()` (`assetGate.js:755-766`) has no `source`-based branch — an `owner_edit` row with an `id` and not `undone` gets `can:true` exactly like any other correction | **EXISTS AND ALREADY WIRED, INCLUDING IN THE TARGET SURFACE** — this is stronger than the brief's row, which only checked QcRail's standalone use |
+| the field block UI | `app/src/screens/AssetBlocks.jsx` | its only `<textarea>` is the AI instruction box at **line 972** (brief said line 508 — stale; the file has grown since, the substance is unchanged: one textarea, and it is "List the tweaks for this field", not the draft text) | `grep -n textarea app/src/screens/AssetBlocks.jsx` → exactly one hit, line 972 | **ABSENT — this is the gap**, confirmed, with the corrected line number |
+| AI edit path | `api.aiEditArtifact` | `AssetBlocks.jsx:983` (brief said 519 — also stale) inside the "List Tweaks" ask box | grep + read | **EXISTS**, unchanged by this feature |
+| `checksStale` reaching the block | `artifactOwnerEdit` already returns it (`appCorrections.ts:408`) | **NOWHERE in `AssetBlocks.jsx` today** — `ArtifactCard` (`PacketBuilder.jsx:151`) accepts an `onStaleSignal` prop and uses it, but `<AssetBlocks .../>` is mounted at `PacketBuilder.jsx:221-227` **without** passing it through, and the inline `<CorrectionRow>` at `AssetBlocks.jsx:1040` is mounted **without** `onStaleSignal` either (compare to `QcRail.jsx:763`, which does pass it) | `grep -n "onStaleSignal" app/src/screens/AssetBlocks.jsx app/src/screens/PacketBuilder.jsx` | **ABSENT — a second, real gap the brief only implied.** Even the *existing* "List Tweaks" AI-edit call in `AssetBlocks.jsx` (line 983) does not surface `checksStale` today. This is not new breakage from the owner-edit feature, but the feature cannot honestly claim to show `checksStale` without also closing this pre-existing wiring gap for at least the new save action. |
 
-1. On any rebuild, `reapplyOwnerEdits` (`correction.ts:220`) re-locates every stored `owner_edit`
-   row's `phrase` in the freshly generated text via `locateOwnerPhrase` — an **exact, case-sensitive
-   `indexOf`**, refusing on 0 or 2+ matches, with **no fuzzy fallback of any kind** (confirmed by
-   reading the function body — it is literally `hay.indexOf(needle)` plus a second `indexOf` call to
-   check for a second occurrence).
-2. A miss is pushed to a `lapsed` array (`correction.ts:232`), collected into `ownerLapsed`
-   (`appCorrections.ts:159-172`), and returned from the correction-pass function.
-3. `appPackets.ts:640-642` turns each lapsed row into one line in `built.warnings`:
-   `` `your edit to ${field} could not be kept — ${reason}` ``. **This is a real, intentional
-   surfacing point** — the comment there says it was added because an earlier version silently
-   dropped the value (found by an independent verifier), so lapses are NOT swallowed at the API
-   layer.
-4. `built.warnings` reaches the client as `s.result.warnings` from `api.buildJob(jobId)`
-   (`PacketBuilder.jsx:648`). **But the client reads only `.length`** (`PacketBuilder.jsx:654`,
-   `const warned = (s.result?.warnings || []).length`) and shows a single aggregate toast:
-   `"Built N documents — M warnings, nothing sent"`. Confirmed by reading the whole `pollBuild`
-   function — there is no per-warning render anywhere, no list, no field name, no "your wording for
-   X was lost" message. **The owner is told a number changed, never which field lapsed, never what
-   the lost wording said, and the toast is transient (fires once, no persistent log).**
-
-**So under either (A) or (B), a lapsed edit today is silent about WHAT was lost — that gap exists
-independent of which mapping is chosen, and item 1 below (checksStale) does not cover it either.**
-It is a real, pre-existing gap in the warnings pipe. Flagging as **AC-7** below rather than fixing
-it, since fixing `PacketBuilder.jsx`'s warning renderer is outside this control's own blast radius —
-but this new feature makes the gap matter far more (a full-paragraph rewrite disappearing without
-naming itself is a bigger loss than a single figure normalization).
-
-**The actual trade-off, in the owner's own terms:**
-
-| | (A) whole current text as `phrase` | (B) minimal client-side diff |
-|---|---|---|
-| Backend change needed | **None** — `artifactOwnerEdit` already accepts arbitrary-length phrase/replacement and the "exactly once" check is trivially true for the whole string | A new diff algorithm (word- or sentence-level) has to be written and maintained client-side |
-| Does your typed edit survive the NEXT rebuild? | **No, almost never**, once the rebuild regenerates that field's prose at all — the phrase is the entire pre-rebuild paragraph, and a rebuilt paragraph reproducing it byte-for-byte is not realistic. It will lapse, and per the trace above, you will see only a generic "M warnings" toast with no indication it was YOUR paragraph that got lost. | **Much more likely to survive**, because a short, specific phrase ("led a team of 4" → "led a team of 6") stays findable in regenerated prose even when the surrounding sentence changes |
-| What you get for "previous versions saved" | A full before/after snapshot of the whole field in one `correction` row — literally the clean version-history behavior asked for, and it reverts correctly through the existing `correctionRevert`/`CorrectionRow` UI with **zero backend change** (verified below) | Same revert mechanism, but each row is a small phrase-level diff, so "revert" restores one small change rather than one whole rewrite — arguably a WORSE match to "click Edit, retype the block, Save, keep the old version" |
-| What happens when you rewrite a whole paragraph (not a phrase-level tweak) | Works exactly as designed — that's what it's for | **The diff degenerates to "replace everything" anyway** — a client-side diff against a full paragraph rewrite typically finds the two texts share no useful common substring, so it produces the same whole-field phrase/replacement pair (A) would have produced directly, except after paying for a diff library, its edge cases (word boundaries, punctuation, multi-paragraph fields), and its own test suite |
-
-**Verified claim from the brief:** "a whole-field-snapshot correction row reverts correctly
-through `revertOne`" — read `revertOne` (`correction.ts:327` onward, via `correctionRevert`
-`appCorrections.ts:237-313`) in full. `revertOne` unwinds `applied`-frame rows (which is what
-`owner_edit` rows are, per `CORRECTION_FRAME.owner_edit = 'applied'`, `correction.ts:65`)
-**descending by `applied_seq`**, splicing `replacement` back out and `phrase` back in, verified
-against `before_sha256` before writing anything. For a single whole-field row this reduces to
-exactly "restore what `phrase` recorded" — no special-casing needed, no length limit in the
-splice logic (it is plain JS string slicing), confirmed correct by reading the algorithm rather
-than assumed from its name.
-
-**RECOMMENDATION: (A).** It costs zero backend changes, it is what "keep my previous version so I
-can revert" actually means (a real snapshot, not a synthetic diff), and its one real cost — the
-edit is much more likely to be silently dropped on the next full rebuild — is a real, stated
-trade-off the owner should knowingly accept, not a reason to build and maintain a client-side diff
-algorithm that degrades to the same "whole field" behavior the moment he does the exact thing he
-described ("retype the whole paragraph"). Building (B) buys rebuild-survival for phrase-sized
-tweaks the owner didn't ask for (he asked to retype a block, not nudge one word), at the cost of a
-new algorithm this repo would then own forever. **Do not weaken the exactly-once-match refusal to
-make (B) look more attractive — that refusal is a correctness guard, not friction (binding rule).**
-
-This is exactly why **AC-7 (the lapse-visibility gap)** matters more under (A): recommend (A), but
-do not ship it without also closing the "M warnings, no names" gap, or a rebuild can silently
-erase an owner's whole rewritten paragraph with nothing in the UI ever naming which field or what
-was lost.
-
----
+**Restated first, as the brief demanded:** the back end for the OWNER-EDIT route and its version
+history is finished, correct, and — per the corrected rows above — its READ side (margin display,
+undo button) is *already fully wired into the exact screen the owner is asking about*. What is
+missing is (1) the SAVE affordance itself (an edit box bound to the draft text, not the AI
+instruction), and (2) plumbing `checksStale`/`checksError` up from that save (and, while touching
+it, from the pre-existing AI-edit call at the same call site) to wherever the card shows staleness.
+This is a smaller wiring job than the brief estimated, because the version-history UI needs no new
+code at all — it needs `artifactOwnerEdit` called at all.
