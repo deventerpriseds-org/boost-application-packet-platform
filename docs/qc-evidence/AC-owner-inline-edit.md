@@ -73,3 +73,62 @@ instruction), and (2) plumbing `checksStale`/`checksError` up from that save (an
 it, from the pre-existing AI-edit call at the same call site) to wherever the card shows staleness.
 This is a smaller wiring job than the brief estimated, because the version-history UI needs no new
 code at all — it needs `artifactOwnerEdit` called at all.
+
+## THE DESIGN DECISION — (A) whole-text-as-phrase vs (B) client-side diff
+
+Read `reapplyOwnerEdits` (`correction.ts:220-238`) and `locateOwnerPhrase` (`correction.ts:206-218`)
+in full, plus `api/test/ownerEdits.test.mjs` (the H-cases that already pin this behavior) and the
+consumer of a lapse, `appPackets.ts` (grepped, not guessed: `for (const l of corrections.ownerLapsed
+|| [])` … `built.warnings.push(\`your edit to ${l.row.merge_field} could not be kept…\`)`).
+
+**Under (A):** `phrase` = the whole field text at click-Edit time, `replacement` = the whole new
+text. `reapplyOwnerEdits` re-locates `phrase` in the freshly-rebuilt field on every pipeline rebuild.
+A REBUILD REGENERATES THE FIELD'S PROSE, so the exact string that was the *entire previous field* is
+overwhelmingly unlikely to reappear verbatim — the edit lapses on **every realistic rebuild**, not
+some of them. That is NOT silent: `H:owner-lapse-reaches-the-owner` (`ownerEdits.test.mjs:210-226`)
+proves the lapse already reaches `built.warnings`, which `summariseBuild` surfaces as a packet note.
+So (A)'s cost is real and near-certain, but it is a **told** cost, in the exact channel this repo
+already built for exactly this failure mode.
+
+**Under (B):** a short, minimal diff span survives a rebuild whenever that specific sentence is
+untouched by regeneration — which is common (regeneration typically touches the sentence a check
+flagged, not the whole field) — but a client-side diff of a full paragraph rewrite is a real thing to
+build and get right (multi-line rewrites, whitespace-sensitive diffing, and it must still hit
+`locateOwnerPhrase`'s **exactly-once** rule per hunk or the hunk lapses on its own). It does not
+remove the lapse case, it only narrows when it fires, and the brief's warning is confirmed: this
+adds meaningfully more surface (client diff correctness, plus the same exactly-once-or-refuse
+question decided per-hunk instead of once) for a benefit that is a probability, not a guarantee.
+
+**A second, decisive cost of (A) that the brief did not name and is worth stating as its own
+finding**: `artifactOwnerEdit` refuses up front with `400 phrase is required` when `phrase` is empty
+(`appCorrections.ts:351`). Under (A), `phrase` is always `current` — the field's live text. **If an
+owner has already used this feature once to clear a field to empty text, the field can never be
+edited again through this route**, because the very next attempt sends `phrase: ''` and is refused
+before it even reaches `locateOwnerPhrase`. This is a real, findable trap that (B) does not have
+(a short phrase-per-hunk approach never needs "the whole empty field" as its match target). **This
+must be an explicit AC** (see AC-8 below) regardless of which option is chosen, because it is a dead
+end an owner can reach with a single legitimate action (typing nothing and pressing Save).
+
+**A benefit of (A) the brief also did not name**: it makes concurrent-edit detection come **for
+free** from the exactly-once rule, with no extra plumbing. If a second tab's stored `pkg_json` value
+for the field has changed at all since a tab loaded it, that tab's captured `current`-as-`phrase`
+will not be found verbatim in the live text, and `locateOwnerPhrase` refuses with *"this field was
+rewritten and no longer contains the words you changed"* — which is exactly the concurrent-edit
+protection item 2 of the brief asks for, with **zero additional code**, because it is what
+whole-text-as-phrase means as a side effect. (B)'s smaller phrases are strictly weaker here: a
+concurrent edit somewhere else in the same field would not be detected at all if the owner's own
+smaller hunk still matches.
+
+**RECOMMENDATION: (A).** In the owner's terms: *"your typed edit does not survive an automatic
+rebuild of this field — you'll see a note saying so and can re-type it — but it can never silently
+overwrite someone else's simultaneous change, needs no new code in this pass, and the version
+history you asked for already works." (B) would make some edits survive a rebuild that (A) would
+lose, at the cost of building and trusting a new client-side diff step, and it would need its own,
+weaker version of the concurrent-edit protection (A) gets for free.* This is a recommendation, not a
+unilateral pick — it is written up above as a decision for sign-off, per this repo's own
+feasibility-before-implementation rule, and (A) is cheap enough to reverse later if rebuild-lapse
+turns out to bother owners in practice.
+
+**Do not implement (B) under this brief without an explicit go-ahead** — it is a materially larger
+and riskier change than the brief's framing suggested, and the exact-once refusal is not to be
+weakened for either option (binding rule, unchanged).
