@@ -183,3 +183,91 @@ weakened for either option (binding rule, unchanged).
 | `checksStale` reaching the card | route returns it | nothing forwards it past `AssetBlocks.jsx` | grep, above | ABSENT — must be added, and is shared with the pre-existing AI-edit gap |
 | the Edit/Save control itself | — | — | one `<textarea>` exists and it is the AI box | ABSENT — this is the actual net-new UI |
 | the "type into stored text" pattern the owner remembers | `ResumeField`/`saveArtifactContent`, `OppDetail.jsx:440` | live today | read `appPackets.ts:1516-1558` | EXISTS-BUT-CONSTRAINED — it exists, and it must NOT be the template, because it has no version history |
+
+## ACCEPTANCE CRITERIA
+
+Every AC traces to one of: the owner's own words, the feasibility table above, or a defect this
+pass found while reading. `Given / When / Then`, binary, with what it is observed via.
+
+| # | Given / When / Then | Category | Observed via |
+|---|---|---|---|
+| AC-1 | Given a non-static asset field showing draft text, when the reader clicks the field's new "Edit" control, then a textarea pre-filled with the field's CURRENT `after_text` appears in place of the rendered draft (not the AI instruction box, which stays a separate control) | happy-path | Playwright: click `data-qc=<new-hook>-edit`, assert a `<textarea>` with `value` equal to the pre-edit rendered text |
+| AC-2 | Given the Edit textarea is open and the reader changes the text and clicks Save, when the save completes, then `POST /app/artifact/{id}/owner-edit` is called with `merge_field` = this field and the response's `text` is what the block now renders, surviving a reload (`GET .../checks-result` or the artifact fetch on next mount reflects it) | happy-path | network assertion (`res.ok===true`) + re-render shows new text + reload (fresh `GET`) still shows new text |
+| AC-3 | Given a field was just owner-edited, when the field's margin change log next refreshes (the existing `useArtifactCorrections().refresh()` call, not a new list), then the margin's "Corrected for you" section shows one new row whose `sourceText` reads "you changed this yourself" and whose Undo control is enabled | happy-path | DOM: `data-qc=fieldChangeLog` count increments by 1; the new row's `data-qc-state="corrected"`; `CORRECTION_SOURCE.owner_edit` string present |
+| AC-4 | Given an owner-edited row is visible in the margin, when the reader clicks its Undo, then `POST /app/correction/{id}/revert` is called, the field's text reverts to the pre-edit value, and the row now reads "Undone" | happy-path / regression | DOM before/after text diff + `data-qc-state="undone"` |
+| AC-5 | Given the field's current stored text does NOT contain, verbatim and exactly once, the text the reader started editing from (someone/something changed it since the block rendered — e.g. a rebuild or a second tab), when Save is clicked, then the block shows the server's own refusal sentence from `locateOwnerPhrase` verbatim (either "...no longer contains the words you changed" or "...appear more than once...") and does NOT overwrite the field, and does NOT show a generic "save failed" | edge / concurrency | mock the route to return `{ok:false, reason:"this field was rewritten and no longer contains the words you changed"}`, assert that exact string renders and no optimistic text replaced the draft |
+| AC-6 | Given the reader clicks Save with the textarea completely unchanged from what was loaded, when the request would be sent, then the client refuses to send it locally OR the server's own no-op refusal ("that is the same wording it already has") is shown verbatim — either way no request writes a pointless correction row for an unedited field | edge | either: Save is disabled with `phrase === replacement`, or a stubbed 200/`ok:false` shows that exact sentence |
+| AC-7 | Given `res.checksStale === true` on the owner-edit response, when the save completes, then the SAME stale-gate indicator the card already shows for other writes (`markQcStale`/the card's existing stale badge) appears — reusing the existing `onStaleSignal` channel, not a new one — and it disappears only via the existing re-check path (Re-run QC), never by itself | edge / regression | thread a stub `onStaleSignal` prop into `AssetBlocks`/`AssetBlock` in a component test, assert it is invoked with `(true, err)` on a stale response and the existing stale-badge renders |
+| AC-8 | Given a field's stored text is currently the empty string (because a prior owner-edit cleared it), when the reader clicks Edit, then the box does NOT silently offer a Save that will 400 — it states plainly that a cleared field can't be re-edited here yet and points at "List Tweaks", OR the client sidesteps the empty-phrase case by another means that does not touch the `phrase` validation guard | edge | set `after_text` to `''` in a fixture, open Edit, assert either the Save path is disabled with an explanatory `data-qc` note, or no `400 phrase is required` network response is ever produced by this control |
+| AC-9 | Given the "List Tweaks" AI-edit control on the same field, when it is used before or after this feature ships, then it behaves identically to today — same route, same request shape, same response handling — and a `correction` row is never written for it (that remains unchanged behavior, not a regression this brief introduces) | regression | `api/test` suite for `artifactAiEdit` unchanged and green; no new `insert into correction` call added to that function |
+| AC-10 | Given the owner opens the "Show original" panel and the field has been owner-edited, when they compare, then "Show original" (`originalState`, unrelated existing control) and the NEW owner-edit history are not conflated into one control — "Show original" still shows the pipeline's own pre-pipeline text, the margin's change log shows the versioned owner edits, and neither duplicates the other's job | regression / extend-not-duplicate | DOM: both controls present and independently functional; `original.kind` unaffected by an owner_edit row's presence |
+
+## GUARDS — each mutation-provable, named for the implementer to write and prove with `mutate.sh`
+
+None of these exist yet (no code has landed against this brief). Each is a REQUIRED new H-case, named
+by slug, with the exact mutation that must be shown to fail the suite before being trusted.
+
+| Guard (file : behavior) | Mutation to prove it | Proves |
+|---|---|---|
+| `H:owner-edit-block-uses-shared-route`, in the new client save handler (`AssetBlocks.jsx`) | Replace the call to `api.ownerEdit(...)` with a call to `api.saveArtifactContent(...)` (the no-history route) | AC-2, AC-3 — must fail because no `correction` row is written, so the margin never gains a new row |
+| `H:owner-edit-refusal-rendered-verbatim`, in the same handler | Replace `setError(res.reason)` with a hardcoded `setError('save failed')` | AC-5, AC-6 — must fail an assertion checking the literal server sentence is on screen |
+| `H:owner-edit-staleness-not-swallowed`, wherever `onStaleSignal` is threaded into `AssetBlocks`/`AssetBlock` | Delete the `if (onStaleSignal) onStaleSignal(...)` call after a successful owner-edit save | AC-7 — must fail a test asserting the stale badge appears after a stale response |
+| `H:owner-edit-empty-field-not-a-silent-400`, in the Edit-open logic | Remove whatever empty-field guard is added (button-disable or message) so an empty-field Save is attempted unconditionally | AC-8 — must fail a test asserting no unhandled 400 / a clear message appears instead |
+| `H:ai-edit-path-unchanged-by-owner-edit-feature`, in `artifactAiEdit` (`appPackets.ts`) or its call site | Make the new owner-edit save path ALSO invoke `artifactAiEdit` or otherwise touch its call, e.g. by having Save silently call `aiEditArtifact` as a fallback | AC-9 — must fail on an assertion counting exactly one call to `api.aiEditArtifact` per List-Tweaks click, none from Save |
+
+Run each with an ABSOLUTE `cd`:
+```
+cd /home/user/boost-application-packet-platform/app && \
+  /workspace/eds-claude-skills/scripts/mutate.sh <file> <anchor-file> <replacement-file> "<test-cmd>" "<must-fail-pattern>"
+```
+Raw TAP output only — never pipe through `grep -q`, per this repo's own binding rule on mutation
+proof.
+
+## THE SMALLEST FIRST COMMIT
+
+**Wire `api.ownerEdit` into a bare-minimum Edit/Save control on ONE field type, with no `checksStale`
+plumbing yet, and prove AC-1 through AC-4 and AC-6.** This is independently revertable (it touches
+only `AssetBlocks.jsx` plus its own new small handler; it adds no schema, no new route, no change to
+`artifactContent` or `artifactAiEdit`) and it proves something real on its own: that the "back end
+is finished, the wire was missing" claim is true — a correction row appears and is undoable the
+moment the wire exists, using the READ path this pass proved is already live. `checksStale`
+threading (AC-7) and the empty-field guard (AC-8) are real but separable follow-on commits; landing
+them together is fine, but the first commit should not be blocked on either.
+
+## GOAL → AC COVERAGE
+
+- "editable and saveable right there in the block" → AC-1, AC-2
+- "previous versions are saved" → AC-3, AC-10
+- "in case we need to revert" → AC-4
+- (implicit) "the change isn't secretly wrong or lost" → AC-5, AC-6, AC-7, AC-8
+- (implicit) "the AI path still works" → AC-9
+- Every AC traces to a goal above; none is implementation-detail-only.
+
+## BINDING RULES — compliance recorded
+
+- **Prompts table**: not read or touched. No route or query in this pass names it.
+- **Absent evidence** is stated as such throughout (e.g. `correction_phrase_nonempty` does not
+  exist — stated as ABSENT, not assumed present as the brief claimed).
+- **No guard weakened**: the exactly-once rule, the 200/`ok:false` refusal contract, and the
+  application-level empty-phrase 400 are all left exactly as they are; AC-8's fix is client-side.
+- **Every verdict above cites the command run.**
+- **Population, not one row**: the "checksStale never reaches the block" finding was checked
+  against BOTH the new owner-edit call site and the pre-existing AI-edit call site at the same
+  component, not just the one this brief was about, because both write text into the same
+  card and a reader would expect both to behave the same way.
+
+## GAPS / OPEN QUESTIONS FOR THE OWNER
+
+1. **`ResumeField` (`OppDetail.jsx:440`) has no version history today.** Not part of this feature's
+   scope (different screen), but it is the exact gap the owner is asking to close, existing
+   elsewhere in the product already. Recommend logging as a follow-up in `.claude/actions.md` rather
+   than silently leaving it as the "other place this already works" the owner believed in.
+2. **Design decision (A) vs (B) needs explicit sign-off** before implementation — recommended: (A),
+   whole-text-as-phrase, for the reasons above (free concurrency protection, zero backend change, a
+   told rather than silent rebuild-lapse cost). Do not start on (B) without it.
+3. **AC-8's exact UI wording** for the empty-field dead end is left to the implementer's judgment —
+   only the OBSERVABLE (no silent 400, a real explanation, a working alternative named) is
+   prescribed here.
+
+Every claim in this document was reached inside the wall-clock budget; nothing is marked NOT
+REACHED.
