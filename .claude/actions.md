@@ -8,6 +8,145 @@ Status values: `open` | `in-progress` | `blocked` | `done`
 
 ## Open
 
+### ACT:huddle-agent-architecture — establish how Huddle agents run before wiring the Boost tool (2026-09-03)
+- **Origin:** owner, stopping an implementation mid-flight: *"the convo AI is a wild goose chase...
+  don't move forward until you've researched how huddle agents work and the current model, text and
+  voice settings."*
+- **What I got wrong:** conflated BOOST's ConvAI custom-LLM endpoint with HUDDLE's voice calls after
+  the owner said *"voicecalls work fine"*, and began implementing S1 against the wrong system,
+  designing from search results rather than source. Reverted before commit.
+- **Established from source (`huddle` `3148bcd`):** text = `runHuddleTurn`, per-agent `openai` |
+  `lovable` fork defaulting to lovable, config arriving in the request payload; voice = OpenAI
+  Realtime (`gpt-realtime`) as the BRAIN (`create_response:true`, `output_modalities:["text"]`) with
+  ElevenLabs `eleven_flash_v2_5` speaking the result. Text never calls TTS at all.
+- **Consequence for `ACT:cole-bridge-spec`:** the voice path does NOT go through `runHuddleTurn` and
+  carries its OWN toolset — a FIFTH registration site. A tool wired only into the text dispatch
+  sites would silently not exist on a voice call.
+- **OPEN:** is Huddle's ConvAI code live or dead scaffolding? Background pass tracing callers;
+  artifact `huddle-extension-app/docs/spec-research/D-agent-architecture.md`.
+- **Status:** OPEN — research in progress. **S1 is PAUSED** until this settles what it would guard.
+  S2 and S3 are unaffected and remain committed.
+
+### ACT:convai-voice-option — Boost's ConvAI voice path is a WORKING OPTION, not dead (owner-corrected 2026-09-03)
+- **Owner's observation, which is ground truth here:** *"I do remember now it worked and was
+  authenticated. it worked well in fact so leave it as an option but of course Cole is default."*
+  Recorded as a fact to be explained, never contradicted.
+- **Do not read the Huddle research as saying ConvAI never worked.** Two different systems were
+  conflated once already this session and the note is what stops it happening again:
+  - **HUDDLE's** ConvAI code IS unreachable — `MeetingBar.tsx:131` hardcodes
+    `VOICE_1ON1_BACKEND = "openai"` and nothing reassigns it. That finding stands and is about
+    Huddle only.
+  - **BOOST's** ConvAI path is a different, real integration: a provisioned agent
+    (`ELEVENLABS_AGENT_ID=agent_1901kx3w6qd0f1yrr74gevbyhj1k`, hardcoded in `api-deploy.yml:98`)
+    pointed at `/api/app/voice/chat` as its custom LLM by `convaiAgentPoint`. **This is the one the
+    owner used and it worked well.**
+- **The one thing to check IF it is revived, stated as a question and not a contradiction.**
+  `convaiAgentPoint` as committed sends only `custom_llm: { url }` — no `api_key`, no
+  `request_headers` — and `voiceChat` performs no server-side check. So any authentication in that
+  setup was configured **ElevenLabs-side** (dashboard or a direct API call), outside this code path,
+  and the Function does not verify it. Both facts are compatible: the caller can present a
+  credential the callee never inspects. Worth confirming what the EL agent actually sends before
+  relying on it as a control.
+- **Status:** OPTION, kept. **Cole (the Huddle agent) is the DEFAULT path** for the bridge — that is
+  the owner's decision, and Phase 2 targets it. ConvAI stays available as an alternative voice route
+  into the same coach brain.
+- **S1 is DROPPED from Phase 0** by owner decision (*"agreed drop it from phase 0"*). The guard idea
+  is not deleted — it is parked here, because guarding this endpoint only matters once something
+  that reads real owner data is pointed at it.
+
+### ACT:model-policy-not-configurable — the difficulty ladder is a code constant (DEFERRED)
+- **Found while mapping Huddle's architecture.** `setModelPolicy` exists on the store with **zero UI
+  callers**, so the task-type→tier table and the 1-4 difficulty ladder
+  (`model-policy.ts:187-192`: luna/low, luna/high, o3/high, o3/high) cannot be changed by the owner.
+  That is the repo's own "no hardcoded config" rule being violated by the setting most likely to
+  need tuning.
+- **Owner decision 2026-09-03: DEFERRED** — *"defer the hardcoded config item until up and
+  running."* Not a bug to fix now; revisit once the bridge is working.
+- **Status:** DEFERRED by owner. Do not open this as work until the bridge is live.
+
+### ACT:capture-anonymous-write — `/api/app/capture` accepts an anonymous body-asserted owner (2026-09-03)
+- **Origin:** found by the Phase 0 AC pass while auditing the coach routes; **outside** that brief's
+  named scope. Owner decision 2026-09-03: *"2- track it separately"* — so it is tracked here and
+  deliberately NOT fixed in the Phase 0 branch.
+- **The defect, read from source at `a041d8f`:** `appCapture.ts:56` registers the route
+  `authLevel:'anonymous'`, the file contains **no `requireWrite` call at all**, and `:22` reads
+  `const owner = ro.verified ? ro.owner : (body?.owner || ro.owner)`. So an anonymous POST of
+  `{owner:"von.ellis@enterpriseds.io", url, title}` inserts an `opportunity` row into the real
+  production pipeline via `routeOpportunity`. Same SHAPE as the coach bypass, and worse in one
+  respect: coachChat at least ran a (flawed) guard first; this route runs none.
+- **WHY IT IS NOT SIMPLY A BUG, and why it was not folded into Phase 0.** The behaviour is
+  deliberate. The file header calls it *"the universal-capture endpoint the Chrome extension posts
+  to"*, and `:20-21` comments *"Prefer the server-verified token; else the extension's configured
+  owner (body)"*. The extension has no session to present. **Applying the S2 fix as-is would break
+  a working feature the owner uses** — which is exactly why this needed a decision rather than a
+  silent fold-in.
+- **What a real fix needs (not started):** the extension must carry something the server can check —
+  the same shared-secret shape S1 needs for ElevenLabs ConvAI, or a long-lived extension token
+  minted per owner. Both are a change to the EXTENSION as well as the API, so this is not a
+  one-file fix and should not be attempted inside a branch scoped to the coach routes.
+- **Interim risk, stated plainly:** the route is live and unauthenticated today. It writes
+  opportunity rows only — it does not read owner data back, send email, or reach the coach tool
+  belt, so the blast radius is data POLLUTION of one owner's pipeline, not exfiltration.
+- **Status:** OPEN, tracked, not scheduled. Not in the Phase 0 branch by owner decision.
+
+### ACT:coach-auth-bypass — two auth bypasses on the coach routes (2026-09-03)
+- **Origin:** found incidentally while auditing an inherited feature spec
+  (`BOOST_COPILOT_COLE_BRIDGE_SPEC.md`), not from an owner report. Nobody asked for a security
+  review; this is what the audit walked into.
+- **Finding 1 — body-`owner` bypass on `/api/app/coach/chat`.** `resolveOwner`'s fallback reads the
+  QUERY STRING only (`appSession.ts:63`); the handler reads `body?.owner` (`coachAgent.ts:198`). No
+  Bearer + no `?owner=` + `owner` in the JSON body ⇒ `requireWrite` passes on the demo branch, then
+  the full coach runs as that account. Same shape at `coachAgent.ts:334` and `:380`.
+- **Finding 2 — no guard whatsoever on `/api/app/voice/chat`.** `authLevel:'anonymous'`
+  (`appVoice.ts:120`), zero `requireWrite`/`resolveOwner` in the file. All 48 coach tools reachable
+  unauthenticated, `send_outreach` (real Graph email) included.
+- **Why this is urgent rather than theoretical:** finding 2 is harmless TODAY only because
+  `VOICE_OWNER` (`appVoice.ts:87`) points at an empty placeholder account. The spec's item C
+  proposes replacing that placeholder with the real user. Done without adding a guard, it converts
+  a harmless misconfiguration into anonymous internet access to the owner's real account. **The
+  ORDER is the mitigation: guard first (S1), identity second (B6).**
+- **Third item, same area:** the session-token signing key defaults to the Graph app secret, so
+  anyone able to mint a token can impersonate any user. Wants a dedicated `SESSION_SIGNING_SECRET`.
+- **Status:** OPEN, **not fixed, not exploited**. Verified by READING source at `a041d8f` — no live
+  call was made (egress blocks `azurewebsites.net`; both Postgres connectors were unauthorized this
+  session), so production behaviour is inferred from source, not observed.
+- **AUTHORISED by the owner 2026-09-03:** *"kickoff 0 as you mentioned"*. Phase 0 (S1/S2/S3) is
+  IN PROGRESS. Tier 1 by this repo's tiering — this code decides whether a request is authorised —
+  so an independent AC pass runs BEFORE any code (`docs/qc-evidence/AC-phase0-auth.md`, brief at
+  `BRIEF-phase0-auth.md`), then implementation, then an independent verifier, with every new guard
+  mutation-proved via `scripts/mutate.sh`.
+- **Still a separate confirmation:** landing Phase 0 on `main` DEPLOYS live auth changes to
+  `job-platform-api`. Authorising the work is not authorising the deploy; that gets its own ask.
+- **Evidence:** `docs/spec-research/A-coach-engine.md` (per-claim, file:line).
+
+### ACT:cole-bridge-spec — corrected spec for the Huddle ↔ Boost coach bridge (2026-09-03)
+- **Origin:** owner, directly — *"another chat attempted to make a partially blind guess at a spec…
+  see where it's off and what it got wrong and create a more accurate spec based on the current
+  repos and code status."*
+- **What shipped:** `docs/COLE_BRIDGE_SPEC_v2.md` (supersedes the v1 spec), plus three evidence
+  files under `docs/spec-research/` and one in `huddle-extension-app/docs/spec-research/`. Docs
+  only; **no application code changed**. PRs: boost #83, huddle #39.
+- **v1 claims adjudicated:** 2 CONFIRMED (Cole's 7 persona fields, roster of 15), 3 PARTLY-TRUE
+  (48 tools not ~50; gpt-4o not fixed in code; tenants), 2 REFUTED (deep-link contract;
+  `personaOverlay`), 1 answered that v1 called unbuildable (Huddle per-agent tool execution =
+  `runAgentTurn` inside `runHuddleTurn`, `huddle.functions.ts:1885`, with FOUR wiring sites), plus
+  the two bypasses above that v1 never mentions.
+- **Owner-supplied fact the code cannot show:** one human, TWO addresses (`dev@`, `von.ellis@`).
+  v1's "shared identity = same email" would split `coach_memory` into two stores. Canonical-identity
+  resolver is `B1` and must precede any cross-app memory test.
+- **The one real decision awaiting the owner:** thin passthrough (v1) vs. giving Cole a Boost tool.
+  Recommended the tool — additive rather than subtractive (Huddle's CLAUDE.md forbids subtractive
+  prompt edits without explicit sign-off), a complete precedent in `groom_backlog`, and reversible.
+  Cole has the longest-tuned snapshot of all 15 agents; passthrough discards it.
+- **FORK RESOLVED 2026-09-03:** the owner chose **option B — give Cole a Boost tool**, not the thin
+  passthrough. *"go ahead with the boost tool."* Phase 2 (H1-H4) targets B. Cole's snapshot is left
+  intact, so no subtractive prompt edit and no sign-off needed under Huddle's additive-only rule.
+- **ALSO SETTLED by the owner:** *"voicecalls work fine"* — so `ELEVENLABS_API_KEY` IS populated on
+  the deployed SWA and neither documented silent-failure mode is firing. The original observation
+  ("not using ElevenLabs") is fully explained by text chat never invoking TTS at all; see spec §6b.
+- **Status:** OPEN — spec delivered; Phase 0 in progress (see `ACT:coach-auth-bypass`), Phase 1 and
+  Phase 2 not started.
+
 <!-- SessionStart extracts the range between the two headings that bracket this section. Before they
      existed it matched nothing and surfaced 0 lines out of 5,279 — measured 2026-08-29.
      DO NOT write either heading's literal text inside this range, including in a comment: the range

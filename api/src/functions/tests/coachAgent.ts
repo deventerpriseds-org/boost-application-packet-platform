@@ -1,5 +1,5 @@
 import { app, HttpRequest, HttpResponseInit, InvocationContext } from '@azure/functions'
-import { resolveOwner, requireWrite } from './appSession'
+import { resolveOwner, requireWrite, resolveOwnerForWrite } from './appSession'
 import { coachToolSchemas, executeCoachTool } from './coachTools'
 import { bootstrapMemory, listMemory, recall, remember, deleteMemory, getPool } from './coachMemory'
 
@@ -190,12 +190,15 @@ export async function runCoachTurn(
 // POST /api/app/coach/chat { messages:[{role,content}], owner }
 export async function coachChat(req: HttpRequest, context: InvocationContext): Promise<HttpResponseInit> {
   if (req.method === 'OPTIONS') return { status: 204, headers: HEADERS }
-  const key = process.env.OPENAI_API_KEY
-  if (!key) return { status: 200, headers: HEADERS, jsonBody: { error: 'OPENAI_API_KEY not set' } }
   try {
-    const guard = requireWrite(req); if (guard) return guard
+    // AUTH BEFORE CONFIG. The OPENAI_API_KEY check used to sit above this and returned 200 early,
+    // so an unauthenticated caller both skipped the guard and learned the deployment's config state.
+    // Found by H:coach-body-owner-cannot-outrank-guard failing against the un-keyed test env.
     const body = await req.json() as any
-    const _ro = resolveOwner(req); const owner = _ro.verified ? _ro.owner : (body?.owner || DEMO_EMAIL).toString()
+    const _w = resolveOwnerForWrite(req, body); if (_w.reject) return _w.reject
+    const owner = _w.owner as string
+    const key = process.env.OPENAI_API_KEY
+    if (!key) return { status: 200, headers: HEADERS, jsonBody: { error: 'OPENAI_API_KEY not set' } }
     const history = Array.isArray(body?.messages) ? body.messages.slice(-16) : []
     if (!history.length) return { status: 400, headers: HEADERS, jsonBody: { error: 'messages required' } }
 
@@ -327,11 +330,11 @@ export async function coachConfigSet(req: HttpRequest): Promise<HttpResponseInit
 export async function coachMemoryAdd(req: HttpRequest): Promise<HttpResponseInit> {
   if (req.method === 'OPTIONS') return { status: 204, headers: HEADERS }
   try {
-    const guard = requireWrite(req); if (guard) return guard
     const body = await req.json() as any
+    const _w = resolveOwnerForWrite(req, body); if (_w.reject) return _w.reject
+    const owner = _w.owner as string
     const text = (body?.text || '').toString().trim()
     if (!text) return { status: 400, headers: HEADERS, jsonBody: { error: 'text required' } }
-    const _ro = resolveOwner(req); const owner = _ro.verified ? _ro.owner : (body?.owner || DEMO_EMAIL).toString()
     const kind = ['note', 'fact', 'preference', 'decision', 'feedback'].includes(body?.kind) ? body.kind : 'note'
     const r = await remember({ owner, kind, text, source: 'manual:settings' })
     return { status: 200, headers: HEADERS, jsonBody: { ok: true, id: r.id } }
@@ -375,9 +378,9 @@ export async function coachThreadGet(req: HttpRequest): Promise<HttpResponseInit
 export async function coachThreadClear(req: HttpRequest): Promise<HttpResponseInit> {
   if (req.method === 'OPTIONS') return { status: 204, headers: HEADERS }
   try {
-    const guard = requireWrite(req); if (guard) return guard
     const body = await req.json().catch(() => ({})) as any
-    const _ro = resolveOwner(req); const owner = _ro.verified ? _ro.owner : (body?.owner || DEMO_EMAIL).toString()
+    const _w = resolveOwnerForWrite(req, body); if (_w.reject) return _w.reject
+    const owner = _w.owner as string
     const pool = getPool(); await ensureOpsTables(pool)
     await pool.query(`delete from coach_thread where owner=$1`, [owner])
     return { status: 200, headers: HEADERS, jsonBody: { ok: true } }

@@ -6901,3 +6901,112 @@ test('H:reextract-recheck-non-fatal: a checking failure never fails the re-parse
     'applyAnchorTruth must wrap clearRequirements + the recheck in a try/catch so a recheck failure '
     + 'cannot surface as a failure of the anchor-truth write itself')
 })
+
+// H:coach-body-owner-cannot-outrank-guard -- Phase 0 / AC-S2.1. The defect: resolveOwner() reads
+// identity from the Bearer token, the UAT header, or the ?owner= QUERY STRING -- it never sees the
+// body. requireWrite() therefore approved on the DEMO branch (no Bearer, no ?owner=), and the three
+// coach handlers then took `body.owner`, running as an account the guard had never inspected.
+// Measured 2026-09-03 by reading appSession.ts:63 against coachAgent.ts:198/334/380.
+//
+// The invariant, not the incident: a request the guard cleared as DEMO must never execute as a
+// different owner. Asserted through the real handler with NO Postgres reachable, so it can only
+// pass if the refusal happens before any work.
+//
+// MUTATION that must make this FIRE: in appSession.ts resolveOwnerForWrite, delete the
+// `if (claimed && claimed !== owner)` rejection and return `{ owner }` unconditionally.
+test('H:coach-body-owner-cannot-outrank-guard: an unverified body-asserted owner is refused', async () => {
+  const { coachChat } = await import('../dist/functions/tests/coachAgent.js')
+  const req = {
+    method: 'POST',
+    headers: new Map(),                    // no Authorization -- unverified
+    query: new Map(),                      // no ?owner= -- so the guard sees DEMO and allows
+    params: {},
+    json: async () => ({ messages: [{ role: 'user', content: 'hi' }], owner: 'von.ellis@enterpriseds.io' }),
+  }
+  const res = await coachChat(req, {})
+  assert.equal(res.status, 401,
+    'a body-asserted non-demo owner on an unverified request must be refused, not silently honoured')
+  assert.notEqual(res.jsonBody?.owner, 'von.ellis@enterpriseds.io',
+    'the refusal must not echo the attacker-supplied owner as the resolved one')
+})
+
+// H:coach-demo-body-owner-still-works -- Phase 0 / AC-S2.2. The counterweight to the guard above:
+// unauthenticated DEMO exploration must not start 401ing. The frontend sends `owner` in the BODY
+// (app/src/api.js:266,276,277), and for a signed-out user that value IS the demo address, so a fix
+// that rejected every body-supplied owner would break the shipped demo path.
+//
+// MUTATION that must make this FIRE: change the rejection to `if (claimed)` -- i.e. reject ANY
+// body-supplied owner rather than only one that disagrees with the guard-approved owner.
+test('H:coach-demo-body-owner-still-works: a demo-owner body on an unverified request is NOT refused', async () => {
+  const { coachChat } = await import('../dist/functions/tests/coachAgent.js')
+  const req = {
+    method: 'POST',
+    headers: new Map(),
+    query: new Map(),
+    params: {},
+    json: async () => ({ messages: [{ role: 'user', content: 'hi' }], owner: 'demo@executive-engine.local' }),
+  }
+  const res = await coachChat(req, {})
+  assert.notEqual(res.status, 401,
+    'demo-mode exploration must keep working unauthenticated -- only a MISMATCHED owner is refused')
+})
+
+// H:coach-single-identity-source -- Phase 0 / AC-S2.1, structural. The root cause was that the
+// guard and the handler derived identity from two different places, so they could disagree. A
+// source grep is the right shape here: it forbids the DIVERGENCE returning in any coach handler,
+// including one added later that a runtime test would not know to cover.
+//
+// MUTATION that must make this FIRE: reintroduce `body?.owner` into any coachAgent.ts handler.
+test('H:coach-single-identity-source: no coach handler reads body.owner directly', () => {
+  const src = readFileSync(join(import.meta.dirname, '../src/functions/tests/coachAgent.ts'), 'utf8')
+  const stripped = src.split('\n').filter((l) => !l.trim().startsWith('//')).join('\n')
+  assert.ok(!/body\?\.owner/.test(stripped),
+    'coachAgent handlers must take identity from resolveOwnerForWrite(), never from the request body '
+    + '-- that divergence between guard and handler IS the bypass')
+})
+
+// H:signing-secret-precedence-parity -- Phase 0 / AC-S3.4. appSession.ts secret() resolves
+// SESSION_SIGNING_SECRET first, then MICROSOFT_CLIENT_SECRET, then AZURE_CLIENT_SECRET.
+// api-test.yml mints its own Bearer with a Python HMAC signer, so the two resolve the SAME key
+// independently -- and independent copies drift. Measured 2026-09-03: before this change the
+// workflow signed with AZURE_CLIENT_SECRET only, so the moment SESSION_SIGNING_SECRET was set on
+// the Function App, every api-test.yml dispatch would have started failing to verify. That is a
+// self-inflicted outage triggered by a SECRET being added, with nothing in the diff to point at.
+//
+// The invariant: the workflow must consult SESSION_SIGNING_SECRET BEFORE the fallback, exactly as
+// secret() does. Checking precedence (not merely that the name appears) is what makes this real.
+//
+// MUTATION that must make this FIRE: in api-test.yml, change the signer back to
+// `client_secret = os.environ['AZURE_CLIENT_SECRET']`.
+test('H:signing-secret-precedence-parity: api-test.yml resolves the signing key in secret() order', () => {
+  const wf = readFileSync(join(import.meta.dirname, '../../.github/workflows/api-test.yml'), 'utf8')
+  const line = wf.split('\n').find((l) => /^\s*client_secret\s*=/.test(l))
+  assert.ok(line, 'api-test.yml must still mint its own session token')
+  const iNew = line.indexOf('SESSION_SIGNING_SECRET')
+  const iOld = line.indexOf('AZURE_CLIENT_SECRET')
+  assert.ok(iNew !== -1,
+    'api-test.yml must consult SESSION_SIGNING_SECRET -- otherwise setting that secret on the '
+    + 'Function App silently breaks every dispatch')
+  assert.ok(iOld === -1 || iNew < iOld,
+    'SESSION_SIGNING_SECRET must be resolved BEFORE the AZURE_CLIENT_SECRET fallback, mirroring '
+    + 'appSession.ts secret() -- mirroring the ORDER is what removes the flag day')
+
+  const src = readFileSync(join(import.meta.dirname, '../src/functions/tests/appSession.ts'), 'utf8')
+  const fn = src.split('\n').find((l) => l.includes('function secret()'))
+  assert.ok(fn && fn.indexOf('SESSION_SIGNING_SECRET') < fn.indexOf('AZURE_CLIENT_SECRET'),
+    'appSession.ts secret() must still resolve SESSION_SIGNING_SECRET first -- if this flips, the '
+    + 'workflow parity above is asserting the wrong order')
+})
+
+// H:deploy-syncs-signing-secret -- Phase 0 / AC-S3.1. CLAUDE.md: a name mismatch in the --settings
+// list silently BLANKS the setting, so the app falls back with no error anywhere. An exact-name
+// assertion is the only cheap guard against a typo that would look like "the fix didn't work".
+//
+// MUTATION that must make this FIRE: delete the SESSION_SIGNING_SECRET line from api-deploy.yml,
+// or misspell either side of the '=' in it.
+test('H:deploy-syncs-signing-secret: api-deploy.yml syncs SESSION_SIGNING_SECRET by exact name', () => {
+  const wf = readFileSync(join(import.meta.dirname, '../../.github/workflows/api-deploy.yml'), 'utf8')
+  assert.ok(/"SESSION_SIGNING_SECRET=\$\{\{ secrets\.SESSION_SIGNING_SECRET \}\}"/.test(wf),
+    'api-deploy.yml --settings must carry SESSION_SIGNING_SECRET with an exact name match on both '
+    + 'sides -- a mismatch blanks the setting silently')
+})
