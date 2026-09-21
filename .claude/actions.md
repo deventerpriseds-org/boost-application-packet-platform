@@ -8,6 +8,25 @@ Status values: `open` | `in-progress` | `blocked` | `done`
 
 ## Open
 
+### ACT:resume-field-save-has-no-history — a live silent-data-loss path (2026-09-16)
+- **Origin:** found by the independent AC pass for `ACT:owner-inline-edit` while checking the owner's
+  claim that inline editing "is the case in other parts of the packet builder". They were right, and
+  the place it exists is the one that loses data.
+- **What it is:** `ResumeField` (`app/src/screens/OppDetail.jsx:440-502`) is already a
+  click-Edit-type-Save textarea over stored artifact text. It saves through
+  `api.saveArtifactContent` -> `POST /app/artifact/{id}/content` -> `artifactContent`
+  (`appPackets.ts:1520`), which is `pkg = {...cur, ...body.pkg}; update packet set pkg_json = $1` —
+  **a raw merge-and-overwrite. No `correction` row, no history, nothing to revert.** An owner typing
+  in the Resume tab today destroys whatever the draft replaced, with no record and no undo.
+- **Why it matters beyond itself:** it is the pattern a "match the house style" implementation would
+  copy, and copying it would ship the exact gap the owner asked to close. The AC pass inverted the
+  usual instruction for that reason: for inline editing, do NOT extend `ResumeField`'s route —
+  extend `artifactOwnerEdit`, which writes a versioned, revertable `correction` row and sits unused
+  right beside it.
+- **Not fixed here** — different screen, outside the asset-block scope the owner asked about.
+  Tier 1 when picked up: it writes `pkg_json`, which feeds the gate and provenance.
+  `check: grep -n "saveArtifactContent" app/src/screens/OppDetail.jsx`
+
 ### ACT:huddle-agent-architecture — establish how Huddle agents run before wiring the Boost tool (2026-09-03)
 - **Origin:** owner, stopping an implementation mid-flight: *"the convo AI is a wild goose chase...
   don't move forward until you've researched how huddle agents work and the current model, text and
