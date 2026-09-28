@@ -574,6 +574,65 @@ incident twice.
 
 ## Active work
 
+**2026-09-28 - HALF THE OWNER'S PIPELINE WAS INVISIBLE BECAUSE THE DC METRO DID NOT KNOW ITS OWN
+SUBURBS.** `main` `a228ea5`, deployed (api-deploy **36494262374**), **proven on the live UI**
+(ui-verify **36494496078**, `expect=AstraZeneca;Gaithersburg`, conclusion success).
+
+**The question that started it:** *"why didn't mail watch catch the astrazeneca role"* — and mail
+watch HAD caught it. Ingested 2026-09-20 03:30, `source=LinkedIn`, `stage=discovered`,
+`dismissed=f`, title intact. It sat in Postgres for **eight days**, invisible.
+
+**The mechanism, and it is the interesting part.** `metroGeoId` is NOT a column — there is no metro
+field on `opportunity`, only free-text `location`. It is derived at READ time by `resolveMetro()`
+(`geoMaster.ts`) via substring alias matching. `matchesLocationPrefs` (`data.jsx:13`) needs
+`o.metroGeoId` truthy for `inTarget`, so **an unresolved location means EXCLUDE**. The DC-Baltimore
+metro had NINE aliases — DC proper, Baltimore, and four suburbs. "Gaithersburg, MD" matched none,
+resolved to null, and was filtered out of Opportunities, Today and Swipe.
+
+**Measured across the owner's top 60 locations: 378 of 743 jobs hidden. After the fix: 308 hidden,
+435 visible — 70 recovered.** Gaithersburg 17, Rockville 13, Columbia MD 12, Hunt Valley 11,
+Alexandria 8, Fairfax 5, Herndon 4. Read-time derivation made the fix RETROACTIVE: every existing
+row re-resolves on the next load, no backfill.
+
+**The owner asked a sharper question than either of us realised:** *"are you saying remote on makes
+things only remote instead of local + remote?"* **No** — with targets set, `remoteOnly` takes the
+`inTarget || isRemote` "remote plus" branch, which IS local+remote. But the LOCAL half was failing
+silently, so it BEHAVED like remote-only. Turning remote OFF would have made it strictly worse
+(`return inTarget` alone). A correct toggle can look broken when its input is.
+
+**A STATE FALLBACK WAS TESTED AND DELIBERATELY NOT SHIPPED.** Four aliases (`, md`, `, dc`,
+`, d.c.`, `maryland`) resolve every Maryland town automatically and correctly reject Columbia SC,
+Vancouver BC and Vienna Austria — the owner's own "update it dynamically" instinct, and it works.
+Not shipped because it also takes **Cumberland/Hagerstown** (2+ hours out, a commute question the
+owner has not answered) and is unusable for Virginia, where `, va` sweeps in Richmond and Virginia
+Beach. Shipped the precise town list instead; the state rule is recorded here so it is not
+re-derived from scratch.
+
+**STILL OPEN, owner's call:** does statewide `Maryland, United States` (22 jobs) count; and whether
+to stop `Settings.jsx:1415` discarding the "Unrecognized location" bucket it builds at :1412 — that
+one `.filter((m) => m.geoId)` is the difference between silent loss and "12 jobs in an unrecognized
+location, assign?".
+
+## Hardening -- 2026-09-28: a bare alias nearly filed a New York job under Washington DC
+`resolveMetro` matches by PLAIN SUBSTRING with a LONGEST-ALIAS-WINS tiebreak. Writing the fix I
+nearly shipped a bare `'rockville'` — a substring of **"Rockville Centre, NY"** which at 9 chars
+**beats the `'new york'` alias (8)**. A New York job would have resolved to the DC metro. Every
+alias is a liability in BOTH directions: too narrow silently deletes jobs, too broad silently steals
+them. Ambiguous towns are now state-qualified; `H:metro-alias-no-cross-metro-collision` asserts the
+invariant across the WHOLE table (including metros nobody has touched), mutation-proved `FIRED`.
+
+**The guard then caught ME.** It failed on first run because I asserted "Rockville Centre resolves
+to the NYC metro" from memory. It resolves to **null** — NYC's aliases are city names with no
+`, ny` fallback. I wrote a literal that had to exist in behaviour I had not read. Expectation
+corrected to ground truth with the reason left inline rather than quietly fixed.
+
+**TWO ABSENCE CLAIMS I MADE THIS SESSION WERE WRONG, both from truncated searches.** (1) "The
+AstraZeneca role is not in Boost" — my query had `limit 25` and returned exactly 25 rows; the role
+was there. (2) "There is no way to add a job you find yourself" — `POST /app/capture` (source
+`Extension`) and `POST /mail/jd-search` (source `LinkedIn Search`, **576 rows**) both exist. **A
+search that could not have found the thing is not evidence of absence**, and `limit N` returning
+exactly N rows is the tell.
+
 **2026-09-28 - WHY LINKEDIN JOBS THE OWNER BROWSES DO NOT REACH BOOST. Answered, grounded, no code
 changed.** Owner sent screenshots of LinkedIn's in-app *"Jobs that match your profile"* (99+ results)
 asking why they were not in the app.

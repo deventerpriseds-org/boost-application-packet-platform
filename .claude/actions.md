@@ -8,13 +8,68 @@ Status values: `open` | `in-progress` | `blocked` | `done`
 
 ## Open
 
+### ACT:dc-metro-aliases — DONE, DEPLOYED, PROVEN LIVE (2026-09-28)
+- **Origin:** owner, after three rounds of narrowing: *"My biggest question is why mail watch didn't
+  catch the astrazeneca role"*, then *"So test to find the geoid list that includes Gaithersburg,
+  Westminster, Columbia and other Maryland towns"*.
+- **Mail watch DID catch it.** Ingested 2026-09-20 03:30, `source=LinkedIn`, `stage=discovered`,
+  `dismissed=f`, full title. Eight days in Postgres, invisible. The failure was DOWNSTREAM.
+- **Root cause:** `metroGeoId` is derived at READ time from free-text `location` by `resolveMetro()`
+  (there is no metro column). `matchesLocationPrefs` (`data.jsx:13`) requires it truthy, so an
+  unresolved location means EXCLUDE. The DC-Baltimore metro had 9 aliases; "Gaithersburg, MD"
+  matched none.
+- **Measured:** 378 of 743 jobs hidden across the top 60 locations -> 308 after, **70 recovered**.
+  Retroactive, because resolution is read-time: no backfill needed.
+- **Shipped:** ~48 state-qualified MD/NoVA town aliases + `H:metro-alias-no-cross-metro-collision`
+  (mutation-proved FIRED). `main` `a228ea5`, api-deploy **36494262374** success, ui-verify
+  **36494496078** success against the live app (`expect=AstraZeneca;Gaithersburg`).
+- **Deliberately NOT shipped:** the `, md` state fallback. It works and is self-maintaining, but it
+  also claims Cumberland/Hagerstown and cannot be used for VA (Richmond, Virginia Beach). Owner has
+  not answered whether Western Maryland counts. `check: grep -c "gaithersburg" api/src/functions/tests/geoMaster.ts`
+
+### ACT:unresolved-location-silently-excludes — the class, not the instance (2026-09-28)
+- **Origin:** found while fixing `ACT:dc-metro-aliases`. The alias gap was the instance; this is why
+  it cost eight days instead of eight seconds.
+- **The defect:** an unresolved location is treated as "exclude" with **no surface anywhere**. The
+  owner cannot see that 308 jobs are being filtered, or why. Worse, `Settings.jsx:1412` already
+  BUILDS an `Unrecognized location` group and `:1415` immediately discards it
+  (`.filter((m) => m.geoId)`). One `.filter()` is the difference between silent loss and
+  *"12 jobs in an unrecognized location — assign to DC-Baltimore?"*.
+- **Why it matters beyond this bug:** the alias list is hardcoded in `geoMaster.ts`, so every future
+  gap needs a developer and a deploy. That violates this repo's own "No hardcoded config" rule. The
+  fix makes the owner self-sufficient: surface the bucket, let them map it, store the mapping
+  per-owner in Postgres.
+- **Tier 2** (UI wiring + an owner-scoped write route; no gate or score path). Owner's call, not
+  started. `check: grep -n "filter((m) => m.geoId)" app/src/screens/Settings.jsx`
+
+### ACT:duplicate-opp-from-truncated-title (2026-09-28)
+- **Origin:** surfaced by the AstraZeneca lookup, not looked for.
+- **What it is:** the same posting exists twice — `VP, Head of AI Enterprise Process and Innovation
+  Centre (EPIC)` (2026-09-20) and `VP, Head of AI` (2026-09-25). `insertOpp` dedupes on the
+  pgvector distance of `embed(company — role)` at `dist < 0.12`; a truncated title embeds far enough
+  away to pass. So the near-duplicate guard is defeated by the parser shortening a title.
+- **Related silent-drop paths in the same parser**, none of which surface to the owner: the email
+  body is cut at `rawText.slice(0, 8000)` before the model sees it, the reply is capped at
+  `max_tokens: 1400`, and the 0.12 threshold is a fixed literal with no setting.
+  `check: manual — select company, role from opportunity where role ilike 'VP, Head of AI%'`
+
 ### ACT:no-way-to-add-a-job-you-found-yourself (2026-09-28)
 - **Origin:** owner, with screenshots of LinkedIn's in-app *"Jobs that match your profile"* (99+
   results): *"Why aren't opportunities like this showing up in the boost app?"*
-- **The answer, grounded:** Boost ingests from exactly two places — job-ALERT EMAILS (`mailWatch.ts`,
-  gated by `isAlert` at :199) and whole-BOARD ATS pulls (`POST /app/ats/ingest`, which takes
-  `{provider, board}`). **Neither accepts a single job URL.** LinkedIn's in-app search never emails,
-  so it is structurally invisible to the app. Not a bug, not a filter — a missing path.
+- **CORRECTED 2026-09-28, same day.** The original text of this row said Boost ingests from "exactly
+  two places" and that "neither accepts a single job URL". **Both halves were wrong**, and the error
+  was mine: I swept `mailWatch.ts` and `appAts.ts`, concluded absence, and did not check the rest.
+  A `select source, count(*)` against production settled it in one query — the very check the
+  "never claim absence from a partial sweep" rule exists to force.
+- **What actually exists — FOUR paths, measured by row count:** job-ALERT EMAILS (`mailWatch.ts`,
+  gated by `isAlert` at :199) → `LinkedIn` 2,257 / `Indeed` 85 / `Email` 44; **`POST /mail/jd-search`
+  → `LinkedIn Search`, 576 rows, one ran the same day at 19:41**; **`POST /app/capture`
+  {url,title,company,text} → `Extension`, 3 rows, last used 2026-08-14** — the universal
+  save-any-job-page endpoint, built for a Chrome extension; and `POST /app/ats/ingest`
+  ({provider, board}) → `Greenhouse` 1.
+- **So the real gap is narrower and sharper:** `/app/capture` takes a URL and works, but **nothing in
+  `app/src` calls it** — the only client was a desktop browser extension. On a phone there is no
+  extension, so there is no way in. The missing piece is a caller, not an endpoint.
 - **NOT a pipeline failure, measured:** 2,964 opportunities for the owner, 813 in the last 30 days,
   newest ingested the same day at 19:41. Falsification attempt: all FIVE companies in the screenshot
   are already in Boost, and the Riveron posting from it IS there (`discovered`, 2026-08-07,
