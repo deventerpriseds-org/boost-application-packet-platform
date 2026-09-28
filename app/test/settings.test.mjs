@@ -179,9 +179,21 @@ test('H:unrecognized-locations-are-surfaced: null-metro rows are counted and ren
   const src = readFileSync(new URL('../src/screens/Settings.jsx', import.meta.url), 'utf8')
     .replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '')
 
-  // It must accumulate rows whose metro did NOT resolve...
-  assert.match(src, /if \(o\.dismissed \|\| o\.metroGeoId\) continue/,
-    'the unrecognized bucket must be built from rows with NO metroGeoId')
+  // It must accumulate rows whose metro did NOT resolve, at EVERY site that builds the bucket.
+  //
+  // Counted rather than merely matched, and the inversion is banned outright. The first version of
+  // this assertion was a bare `assert.match(...)`, and mutate.sh reported INERT: the bucket is built
+  // in TWO places (the initial load and the reload after saving), so inverting one still left the
+  // other matching the regex and the guard passed on half-broken code. A guard that cannot tell
+  // "both sites correct" from "one site correct" is not guarding the thing it names.
+  const builds = (src.match(/const rawBy = new Map\(\)/g) || []).length
+  const correct = (src.match(/if \(o\.dismissed \|\| o\.metroGeoId\) continue/g) || []).length
+  assert.ok(builds > 0, 'the unrecognized bucket must be built at least once')
+  assert.equal(correct, builds,
+    `${builds} site(s) build the unrecognized bucket but only ${correct} filter on a NULL metro -- `
+    + 'every site must skip rows that already resolved, or one path silently lists the wrong rows')
+  assert.ok(!/o\.dismissed \|\| !o\.metroGeoId/.test(src),
+    'inverted condition: that collects rows that DID resolve, which is the opposite of unrecognized')
   // ...expose them as state...
   assert.match(src, /unresolved/, 'the unresolved group must reach component state')
   // ...and actually render them with their counts, not just compute them.
