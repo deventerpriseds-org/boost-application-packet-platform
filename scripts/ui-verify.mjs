@@ -8,8 +8,15 @@
 //   APP_URL       base of the SPA (default = production SWA)
 //   ROUTE         hash route to open, e.g. "#/settings/roles"
 //   OWNER         email to impersonate as data owner (seeds ee_auth_user)
-//   EXPECT        ';'-separated substrings that must ALL appear in the rendered body text
-//   EXPECT_ABSENT ';'-separated substrings that must NOT appear (proves a duplicate/stale surface is gone)
+//   EXPECT        ';'-separated substrings that must ALL appear in the rendered body text.
+//                 CASE-SENSITIVE, and the body is `innerText`, so it carries CSS text-transform:
+//                 a `<Label>Target locations</Label>` reads back as "TARGET LOCATIONS". Pass the
+//                 RENDERED casing, not the source casing. A miscased expect fails and is named
+//                 separately in `miscasedExpect`, so the log distinguishes "not on the page" from
+//                 "on the page, cased differently" instead of reporting shipped code as absent.
+//   EXPECT_ABSENT ';'-separated substrings that must NOT appear (proves a duplicate/stale surface is
+//                 gone). Matched case-INSENSITIVELY, so a rename that survived in different casing
+//                 cannot slip past it.
 //   COUNT_SEL     optional CSS selector to count
 //   COUNT_MIN     optional minimum count for COUNT_SEL
 //   COUNT_MAX     optional maximum count for COUNT_SEL (use 0 to assert absence of an element)
@@ -117,8 +124,25 @@ const measure = MEASURE_SEL
 await page.screenshot({ path: OUT, fullPage: true })
 await browser.close()
 
+// MISSING vs MISCASED -- the difference between "the feature did not ship" and "it shipped and
+// you typed the label the way the SOURCE spells it". `innerText` returns RENDERED text, so a
+// heading styled `text-transform: uppercase` comes back uppercased, and an exact-match EXPECT
+// then reports it ABSENT. That misreading has now happened twice (2026-09-03
+// "Keywords for this line"; 2026-09-28 "Unrecognized locations", where the card was LIVE and the
+// run still said missing) and a false ABSENCE is the expensive direction -- it accuses shipped
+// code. A prose reminder was already in `.claude/memory.md` when the second one happened, so this
+// is the structural version of it.
+//
+// THIS DOES NOT RELAX THE ASSERTION: a miscased expect still lands in `missingExpect` and still
+// FAILS the run. `miscasedExpect` is a diagnosis printed alongside it, nothing more.
+const lowerBody = bodyText.toLowerCase()
 const missingExpect = EXPECT.filter((s) => !bodyText.includes(s))
-const presentForbidden = EXPECT_ABS.filter((s) => bodyText.includes(s))
+const miscasedExpect = missingExpect.filter((s) => lowerBody.includes(s.toLowerCase()))
+// EXPECT_ABSENT is matched case-INSENSITIVELY, which only ever refuses MORE. A stale surface that
+// survived a rename in different casing satisfied the exact-match version of this check -- i.e. it
+// passed while the forbidden text was still on the page, the one failure mode this input exists to
+// catch. Widening it cannot turn a real failure into a pass.
+const presentForbidden = EXPECT_ABS.filter((s) => lowerBody.includes(s.toLowerCase()))
 const countOk = !COUNT_SEL || (count != null && count >= COUNT_MIN && (COUNT_MAX === null || count <= COUNT_MAX))
 // EVERY step must have fired. A sequence that stopped early leaves the page in a state the
 // assertions below were never written for, so a partial run is a failure, not a partial pass.
@@ -130,7 +154,7 @@ const ok = missingExpect.length === 0 && presentForbidden.length === 0 && countO
 const result = {
   ok, url: `${APP_URL}/${ROUTE}`, owner: OWNER, viewport: { w: VIEWPORT_W, h: VIEWPORT_H },
   bodyLen: bodyText.length, bodySnippet: bodyText.replace(/\s+/g, ' ').slice(0, 500),
-  expect: EXPECT, missingExpect,
+  expect: EXPECT, missingExpect, miscasedExpect,
   expectAbsent: EXPECT_ABS, presentForbidden,
   countSel: COUNT_SEL || null, count, countMin: COUNT_MIN, countMax: COUNT_MAX,
   clickSel: CLICK_SEL || null, clickSteps: CLICK_STEPS.length ? CLICK_STEPS : null, clicked,

@@ -7112,3 +7112,51 @@ test('H:owner-location-alias-must-name-a-real-metro: a geoId outside the seeded 
   assert.ok(METROS.filter((m) => m.geoId).length >= 10,
     'the seeded metro table must carry real geoIds, or this guard passes by having nothing to check')
 })
+
+// ---------------------------------------------------------------------------------------------
+// H:ui-verify-miscased-expect-is-not-absent — `ui-verify` reads the page with `innerText`, which
+// returns RENDERED text and therefore carries CSS `text-transform`. A heading written
+// `<Label>Unrecognized locations</Label>` comes back as "UNRECOGNIZED LOCATIONS", so an
+// exact-match EXPECT reports it in `missingExpect` — indistinguishable, in the log, from the
+// feature never having shipped.
+//
+// EVIDENCE, twice: run 33735198012 (`expect "Keywords for this line"`, 2026-09-03) and run
+// 36498915376 (`expect "Unrecognized locations"`, 2026-09-28). In the second, the card WAS live —
+// the passing re-run 36499212686 returned the identical `bodyLen` of 5540, proving the page never
+// differed and only the casing of the input did. A prose reminder about this was ALREADY in
+// `.claude/memory.md` when the second one happened, which is why the fix is a field in the result
+// rather than another note.
+//
+// The invariant has two halves, and the second is the one that keeps this honest: a miscased
+// expect must still FAIL. `miscasedExpect` diagnoses, it never forgives.
+test('H:ui-verify-miscased-expect-is-not-absent: miscasing is named, and still fails the run', () => {
+  const src = readFileSync(new URL('../../scripts/ui-verify.mjs', import.meta.url).pathname, 'utf8')
+
+  // (1) EXPECT stays EXACT. Lower-casing the haystack for the required strings would silently
+  //     accept a heading the app renders in the wrong case.
+  assert.match(src, /const missingExpect = EXPECT\.filter\(\(s\) => !bodyText\.includes\(s\)\)/,
+    'missingExpect must match the RAW body exactly -- a case-insensitive EXPECT is a weaker assertion')
+
+  // (2) The diagnosis is DERIVED FROM the failures, so it can only ever describe a string that is
+  //     already failing. Deriving it from EXPECT instead would let it describe a passing one.
+  assert.match(src, /const miscasedExpect = missingExpect\.filter\(/,
+    'miscasedExpect must be a subset of missingExpect, not an independent scan of EXPECT')
+
+  // (3) THE LOAD-BEARING ONE: the verdict must not consult the diagnosis. If `ok` ever subtracts
+  //     miscased strings, this stops being a diagnostic and becomes the weakening it exists to
+  //     avoid -- a green run on a page whose text renders in the wrong case.
+  const okLine = src.split('\n').find((l) => l.startsWith('const ok = '))
+  assert.ok(okLine, 'the verdict line must exist to be checked')
+  assert.ok(!/miscased/i.test(okLine),
+    'the pass/fail verdict must not reference miscasedExpect -- the diagnosis must never forgive a failure')
+
+  // (4) It has to reach the reader. A field computed and not printed helps nobody at 2am.
+  assert.match(src, /expect: EXPECT, missingExpect, miscasedExpect,/,
+    'miscasedExpect must be printed in UI_VERIFY_RESULT, or the diagnosis never reaches the log')
+
+  // (5) EXPECT_ABSENT is matched case-INSENSITIVELY. This only ever refuses more: the exact-match
+  //     version passed while a renamed-but-recased stale surface was still on the page, which is
+  //     the single failure mode this input exists to catch.
+  assert.match(src, /const presentForbidden = EXPECT_ABS\.filter\(\(s\) => lowerBody\.includes\(s\.toLowerCase\(\)\)\)/,
+    'EXPECT_ABSENT must be case-insensitive on both sides, or a recased stale surface slips through')
+})
