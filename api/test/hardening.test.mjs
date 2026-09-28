@@ -7010,3 +7010,69 @@ test('H:deploy-syncs-signing-secret: api-deploy.yml syncs SESSION_SIGNING_SECRET
     'api-deploy.yml --settings must carry SESSION_SIGNING_SECRET with an exact name match on both '
     + 'sides -- a mismatch blanks the setting silently')
 })
+
+// ── H:metro-alias-no-cross-metro-collision ─────────────────────────────────────────────────────
+//
+// THE DEFECT THIS GUARDS. `resolveMetro` matches by PLAIN SUBSTRING CONTAINMENT with a
+// longest-alias-wins tiebreak (`geoMaster.ts`: `if (s.includes(a) && a.length > bestLen)`). That
+// makes every alias a liability in two directions at once, and the second one is the dangerous one:
+//
+//   TOO NARROW -> an unresolved location means EXCLUDE (`matchesLocationPrefs` needs `o.metroGeoId`
+//                 to be truthy), so a missing town silently deletes jobs from every screen.
+//                 Measured 2026-09-28 on the owner's live pipeline: 86 jobs in the top 60 locations
+//                 resolved to NULL, including a VP role unseen for eight days.
+//   TOO BROAD  -> a bare town name claims every other place that contains it. Caught while writing
+//                 this: a bare 'rockville' is a substring of "Rockville Centre, NY" and, at 9 chars,
+//                 BEATS the 'new york' alias (8) on the longest-match tiebreak -- so a New York job
+//                 would have been filed under Washington DC. That is why ambiguous towns here are
+//                 state-qualified ('rockville, md') and only unmistakable ones stand bare.
+//
+// This asserts the INVARIANT, not the incident: no alias in the whole table may claim a location
+// that belongs somewhere else. It therefore also covers metros nobody has touched yet.
+//
+// MUTATION that must make this FIRE: in geoMaster.ts, drop the state qualifier from any ambiguous
+// alias -- e.g. 'rockville, md' -> 'rockville', or 'columbia, md' -> 'columbia'.
+test('H:metro-alias-no-cross-metro-collision: an alias never claims a location from another place', async () => {
+  const { resolveMetro, METROS } = await import('../dist/functions/tests/geoMaster.js')
+
+  // Real places that are NOT in the metro whose name they echo. Each is a collision a bare alias
+  // would cause. `null` means "must not resolve to anything".
+  const FOREIGN = [
+    ['Columbia, SC', null], ['Vancouver, British Columbia', null], ['Vienna, Austria', null],
+    // Rockville Centre is `null`, not the NYC metro: NYC's aliases are city names ('new york',
+// 'brooklyn'…) with no ', ny' state fallback, so the suburb resolves to nothing. That is the
+    // TOO-NARROW half of the defect and it is real, but it is not this guard's job -- what matters
+    // here is that it is NOT claimed by Washington DC, which a bare 'rockville' would have done.
+    // (Expectation corrected after the guard failed on first run: I asserted '90000070' from
+    // memory without checking NYC's alias list.)
+    ['Westminster, London', null], ['Rockville Centre, NY', null], ['Richmond, VA', null],
+    ['Virginia Beach, VA', null], ['Springfield, IL', null], ['Hanover, NH', null],
+    ['Aberdeen, WA', null], ['Frederick, OK', null], ['Largo, FL', null], ['Ashburn, GA', null],
+  ]
+  for (const [loc, expected] of FOREIGN) {
+    const got = resolveMetro(loc)?.geoId ?? null
+    assert.equal(got, expected,
+      `"${loc}" resolved to ${got} but must be ${expected} -- an alias is claiming a place it does `
+      + 'not own. State-qualify the offending alias (e.g. "rockville, md").')
+  }
+
+  // The other direction: the DC-metro towns this was built to fix must actually resolve, or the
+  // guard would pass on an empty alias list and protect nothing.
+  const DC = '90000097'
+  for (const loc of ['Gaithersburg, MD', 'Rockville, MD', 'Columbia, MD', 'Falls Church, VA',
+                     'Tysons Corner, VA', 'Alexandria, VA', 'HUNT VALLEY, MD, US, 21031']) {
+    assert.equal(resolveMetro(loc)?.geoId ?? null, DC, `"${loc}" must resolve to the DC-Baltimore metro`)
+  }
+
+  // Structural: an ambiguous bare alias must not be reintroduced anywhere in the table. These are
+  // town names that exist in several states; bare, they are a collision waiting to happen.
+  const NEEDS_QUALIFIER = ['columbia', 'rockville', 'vienna', 'westminster', 'springfield',
+                           'hanover', 'aberdeen', 'frederick', 'largo', 'ashburn', 'richmond']
+  for (const m of METROS) {
+    for (const a of m.aliases) {
+      assert.ok(!NEEDS_QUALIFIER.includes(a),
+        `metro "${m.name}" has bare alias "${a}" -- that name exists in multiple states and must be `
+        + 'state-qualified, or substring matching will claim the wrong place')
+    }
+  }
+})

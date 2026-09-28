@@ -18,7 +18,38 @@ export const METROS: Metro[] = [
   { name: 'San Francisco Bay Area', geoId: '90000084', aliases: ['san francisco', 'bay area', 'oakland', 'palo alto', 'mountain view', 'san jose', 'sunnyvale', 'menlo park'] },
   { name: 'Los Angeles Metropolitan Area', geoId: '90000049', aliases: ['los angeles', 'l.a.', 'santa monica', 'pasadena', 'irvine', 'long beach'] },
   { name: 'Greater Chicago Area', geoId: '90000014', aliases: ['chicago', 'evanston', 'naperville'] },
-  { name: 'Washington DC-Baltimore Area', geoId: '90000097', aliases: ['washington, dc', 'washington dc', 'washington, d.c.', 'baltimore', 'arlington, va', 'silver spring', 'bethesda', 'reston', 'mclean'] },
+  // The nine original aliases covered DC proper, Baltimore and four suburbs -- and silently hid
+  // every other town in the metro. Measured 2026-09-28 against the owner's live pipeline: 86 jobs
+  // in the top 60 locations alone resolved to NULL and were filtered out of Opportunities, Today
+  // and Swipe, including a VP role that sat unseen for eight days. An unresolved location means
+  // "exclude" (see matchesLocationPrefs), so every gap in this list deletes jobs from view.
+  //
+  // AMBIGUOUS NAMES ARE STATE-QUALIFIED, because matching is plain substring containment: a bare
+  // 'columbia' would also claim Columbia SC and Vancouver BC, 'vienna' would claim Vienna Austria,
+  // 'westminster' would claim Westminster London. Bare names are used ONLY where the town name is
+  // unique enough to stand alone (gaithersburg, ellicott city, tysons). Guarded by
+  // H:metro-alias-no-cross-metro-collision.
+  { name: 'Washington DC-Baltimore Area', geoId: '90000097', aliases: [
+    'washington, dc', 'washington dc', 'washington, d.c.', 'baltimore', 'arlington, va',
+    'silver spring', 'bethesda', 'reston', 'mclean',
+    // Maryland — DC and Baltimore suburbs. Western Maryland (Cumberland, Hagerstown) is
+    // deliberately NOT here: it is 2+ hours out and is a separate commute question the owner
+    // has not answered. A ', md' state-wide fallback would sweep it in, which is why this is a
+    // town list rather than a state rule.
+    // 'rockville, md' is state-qualified on purpose: bare 'rockville' is a substring of
+    // "Rockville Centre, NY" and, being LONGER than the 'new york' alias, would win the
+    // longest-match tiebreak and drag a NYC job into this metro.
+    'gaithersburg', 'rockville, md', 'columbia, md', 'hunt valley', 'towson', 'ellicott city',
+    'owings mills', 'germantown, md', 'laurel, md', 'bowie, md', 'annapolis', 'frederick, md',
+    'westminster, md', 'catonsville', 'glen burnie', 'linthicum', 'greenbelt', 'college park, md',
+    'north bethesda', 'chevy chase', 'potomac, md', 'clarksburg, md', 'elkridge', 'hanover, md',
+    'fort meade', 'aberdeen, md', 'largo, md', 'upper marlboro', 'waldorf, md', 'lanham',
+    // Northern Virginia. The state cannot be used as a fallback here -- ', va' would sweep in
+    // Richmond, Virginia Beach and Charlottesville, which are separate markets.
+    'alexandria, va', 'falls church', 'tysons', 'fairfax, va', 'herndon', 'vienna, va',
+    'chantilly, va', 'ashburn, va', 'sterling, va', 'leesburg, va', 'springfield, va', 'annandale',
+    'dulles', 'manassas', 'woodbridge, va', 'centreville, va', 'fort belvoir', 'quantico',
+  ] },
   { name: 'Greater Boston', geoId: '90000007', aliases: ['boston', 'cambridge, ma', 'waltham'] },
   { name: 'Greater Seattle Area', geoId: '90000091', aliases: ['seattle', 'bellevue', 'redmond', 'tacoma'] },
   { name: 'Atlanta Metropolitan Area', geoId: '90000052', aliases: ['atlanta'] },
