@@ -1,8 +1,8 @@
 import { app, HttpRequest, HttpResponseInit, InvocationContext } from '@azure/functions'
 import { resolveOwner, requireWrite, serverError } from './appSession'
 import { getPgClient } from './pgClient'
-import { resolveMetro, parseWorkMode } from './geoMaster'
-import { getSearchPrefs } from './appSearchPrefs'
+import { resolveMetro, parseWorkMode, METROS } from './geoMaster'
+import { getSearchPrefs, aliasKey } from './appSearchPrefs'
 import { deriveTemperature, deriveActionPriority, DEFAULT_TEMP_THRESHOLDS, TempThresholds } from './signals'
 // One direction only: appPackets does NOT import this module, so this cannot cycle.
 import { markPacketSent } from './appPackets'
@@ -30,10 +30,30 @@ async function ensureStageHistory(client: any) {
   )`)
 }
 
-interface SignalCtx { nowMs: number; thr: TempThresholds; dueSet: Set<string> }
+interface SignalCtx { nowMs: number; thr: TempThresholds; dueSet: Set<string>; aliases?: Record<string, string> }
+
+/**
+ * An owner-defined location → metro mapping, for a location the seeded table does not recognise.
+ *
+ * EXACT normalised match, never fuzzy. The owner assigned THIS location string to a metro in
+ * Settings; guessing that a similar string means the same place is exactly the accusation-grade
+ * matching this repo reserves for ranking. A location they have not mapped stays unresolved, which
+ * is what puts it in the "Unrecognized locations" bucket where they can map it.
+ */
+function ownerMetro(rawLocation: string, aliases?: Record<string, string>) {
+  if (!aliases) return null
+  const geoId = aliases[aliasKey(rawLocation)]
+  if (!geoId) return null
+  return METROS.find((m) => m.geoId === geoId) || null
+}
 
 function rowToOpp(r: any, ctx?: SignalCtx) {
-  const metro = resolveMetro(r.location || '')       // ACT-32: map free-text location → metro
+  // ACT-32: map free-text location → metro. The SEEDED table (`geoMaster.METROS`) is tried first;
+  // an owner-defined alias only fills the gap where it returns null, so the owner can never shadow
+  // a recognised metro -- their overrides extend the table, they do not fight it. Applied HERE, in
+  // the one funnel every screen reads, so Today / Swipe / Opportunities / Pipeline cannot disagree.
+  const seeded = resolveMetro(r.location || '')
+  const metro = seeded || ownerMetro(r.location || '', ctx?.aliases)
   const workMode = parseWorkMode(r.location || '')   // ACT-33: remote / hybrid / onsite
   // Derived signals — computed HERE (the one funnel every screen reads) so Today/Opps/Swipe/Pipeline agree.
   const c = ctx || { nowMs: Date.now(), thr: DEFAULT_TEMP_THRESHOLDS, dueSet: new Set<string>() }
@@ -90,12 +110,12 @@ export async function opportunitiesList(req: HttpRequest, context: InvocationCon
 
     // Signal context — built ONCE per request: owner temperature thresholds + the set of opp ids that
     // have a DUE outreach touch (the "act today" event that bumps action-priority to urgent).
-    const { tempThresholds } = await getSearchPrefs(client, owner)
+    const { tempThresholds, locationAliases } = await getSearchPrefs(client, owner)
     const dueRows = (await client.query(
       `select distinct m.opp_id from outreach_message m
          join opportunity o on o.id = m.opp_id
         where o.owner_email = $1 and m.state = 'due'`, [owner])).rows
-    const ctx: SignalCtx = { nowMs: Date.now(), thr: tempThresholds, dueSet: new Set(dueRows.map((d: any) => d.opp_id)) }
+    const ctx: SignalCtx = { nowMs: Date.now(), thr: tempThresholds, dueSet: new Set(dueRows.map((d: any) => d.opp_id)), aliases: locationAliases }
 
     // Stage funnel counts for the pipeline board (+ a 'rejected' lane count)
     const byStage: Record<string, number> = {}

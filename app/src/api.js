@@ -295,11 +295,21 @@ export const api = {
   mailAlertSnooze: (messageId, hours = 24) => post(`/mail/alert/snooze`, { messageId, hours }),
   mailAlertDismiss: (messageId) => post(`/mail/alert/dismiss`, { messageId }),
   // Search / filter preferences (target metros + remote-only) — ACT-32/33/34
+  // Add a job you found yourself, by link. The route (appCapture) has existed since G11 and was
+  // built for a Chrome extension, which is why it had no caller in this app -- and why there was no
+  // way to add a job from a phone at all. postDetailed, not post: this route REFUSES in the body
+  // ("could not identify a company + role on this page", or inserted:false/reason:duplicate) and
+  // those reasons are what the screen has to show, not a generic failure.
+  captureJob: ({ url, title, company, text } = {}) =>
+    postDetailed(`/app/capture?owner=${encodeURIComponent(_owner)}`, { url, title, company, text }),
   searchPrefsGet: () => get(`/app/search-prefs?owner=${encodeURIComponent(_owner)}`),
   // `checks` carries the chk_* settings (D:chk-settings-have-no-writer). Destructured explicitly like
   // its siblings so a typo in a caller is a dropped field rather than a silently ignored save — the
   // route applies partial updates, so omitting a key means "leave it", never "clear it".
-  searchPrefsSet: ({ targetGeoIds, remoteOnly, tempThresholds, checks }) => post(`/app/search-prefs?owner=${encodeURIComponent(_owner)}`, { targetGeoIds, remoteOnly, tempThresholds, checks }),
+  // `locationAliases` is `{ "<raw location>": "<geoId>" }` and is MERGED server-side, so sending one
+  // mapping never drops the others. An empty-string geoId removes a mapping. Destructured
+  // explicitly like its siblings so a typo is a dropped field rather than a silently ignored save.
+  searchPrefsSet: ({ targetGeoIds, remoteOnly, tempThresholds, checks, locationAliases }) => post(`/app/search-prefs?owner=${encodeURIComponent(_owner)}`, { targetGeoIds, remoteOnly, tempThresholds, checks, locationAliases }),
   // The owner's own master profile — the 14 free-text blocks every resume and packet is built from.
   // A SEPARATE endpoint from search-prefs on purpose: these blocks run to tens of thousands of
   // characters, and folding them in would drag the whole profile over the wire on every unrelated

@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react'
 import { api, getSessionToken } from '../api.js'
-import { chkValueFor } from '../settings.js'
+import { chkValueFor, locationAliasKey } from '../settings.js'
 import { go, useApp } from '../state.jsx'
 import { Pill } from '../shell.jsx'
 
@@ -1395,10 +1395,12 @@ function TemplateForm({ initial, busy, onCancel, onSave }) {
 // the scheduled search. No fabricated location list — only metros actually present in the pipeline.
 function LocationSettings() {
   const { toast } = useApp()
-  const [state, setState] = useState({ loading: true, metros: [], error: null })
+  const [state, setState] = useState({ loading: true, metros: [], unresolved: [], error: null })
   const [selected, setSelected] = useState(() => new Set())
   const [remoteOnly, setRemoteOnly] = useState(false)
   const [saving, setSaving] = useState(false)
+  // Owner-defined `{ rawLocation: geoId }`. Edited below and merged server-side on save.
+  const [aliases, setAliases] = useState({})
 
   useEffect(() => {
     let alive = true
@@ -1414,9 +1416,25 @@ function LocationSettings() {
           cur.count += 1; by.set(gid, cur)
         }
         const metros = [...by.values()].filter((m) => m.geoId).sort((a, b) => b.count - a.count)
-        setState({ loading: false, metros, error: null })
+        // UNRECOGNIZED LOCATIONS — the rows whose free-text location matched no metro. This group
+        // was already being computed above and then DISCARDED by the `.filter((m) => m.geoId)`
+        // on the line before this one, which is why 378 of the owner's 743 jobs could vanish from
+        // every screen for weeks with nothing on-screen to explain it: an unresolved location is
+        // treated as EXCLUDE by matchesLocationPrefs. Counting by the RAW location string (not the
+        // metro) is what makes each row actionable -- the owner maps that exact string to a metro.
+        const rawBy = new Map()
+        for (const o of list) {
+          if (o.dismissed || o.metroGeoId) continue
+          const loc = (o.location || '').trim()
+          if (!loc) continue
+          rawBy.set(loc, (rawBy.get(loc) || 0) + 1)
+        }
+        const unresolved = [...rawBy.entries()].map(([location, count]) => ({ location, count }))
+          .sort((a, b) => b.count - a.count)
+        setState({ loading: false, metros, unresolved, error: null })
         setSelected(new Set(prefs?.targetGeoIds || []))
         setRemoteOnly(!!prefs?.remoteOnly)
+        setAliases(prefs?.locationAliases || {})
       })
       .catch((e) => { if (alive) setState({ loading: false, metros: [], error: String(e.message || e) }) })
     return () => { alive = false }
@@ -1426,11 +1444,24 @@ function LocationSettings() {
   const save = useCallback(async () => {
     setSaving(true)
     try {
-      const res = await api.searchPrefsSet({ targetGeoIds: [...selected], remoteOnly })
+      const res = await api.searchPrefsSet({ targetGeoIds: [...selected], remoteOnly, locationAliases: aliases })
       if (res.ok === false) throw new Error(res.detail || res.error || 'failed')
+      // Reload so newly-mapped locations move out of the unrecognized bucket and into their
+      // metro's count -- the screen must show the consequence of the save, not just report it.
+      const opps = await api.listOpportunities().catch(() => null)
+      if (Array.isArray(opps) || opps?.opportunities) {
+        const list = Array.isArray(opps) ? opps : opps.opportunities
+        const rawBy = new Map()
+        for (const o of list) {
+          if (o.dismissed || o.metroGeoId) continue
+          const loc = (o.location || '').trim(); if (!loc) continue
+          rawBy.set(loc, (rawBy.get(loc) || 0) + 1)
+        }
+        setState((st) => ({ ...st, unresolved: [...rawBy.entries()].map(([location, count]) => ({ location, count })).sort((x, y) => y.count - x.count) }))
+      }
       toast('Target locations saved')
     } catch (e) { toast(`Save failed: ${e.message || e}`) } finally { setSaving(false) }
-  }, [selected, remoteOnly, toast])
+  }, [selected, remoteOnly, aliases, toast])
 
   return (
     <Card>
@@ -1454,6 +1485,46 @@ function LocationSettings() {
         <input type="checkbox" checked={remoteOnly} onChange={(e) => setRemoteOnly(e.target.checked)} />
         Remote plus: also keep remote-anywhere roles, on top of my selected metros (uncheck to show only the metros above)
       </label>
+
+      {/* Unrecognized locations. A location the metro table cannot match resolves to null, and a null
+          metro is EXCLUDED by the filter — so without this section those jobs are simply gone, with
+          nothing to explain where. Mapping one here is stored per-owner, so the owner closes the next
+          gap themselves instead of waiting on a code change. */}
+      {state.unresolved?.length > 0 && (
+        <div style={{ marginTop: 16, padding: 12, borderRadius: 8, border: '1px solid var(--proto-rule-soft)', background: 'var(--proto-panel)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
+            <Label>Unrecognized locations</Label>
+            <span className="px-pill" style={{ background: 'var(--proto-yellow-soft)', color: 'var(--proto-yellow)', fontWeight: 600 }}>
+              {state.unresolved.reduce((n, u) => n + u.count, 0)} job{state.unresolved.reduce((n, u) => n + u.count, 0) === 1 ? '' : 's'} affected
+            </span>
+          </div>
+          <div className="px-small" style={{ margin: '6px 0 12px', color: 'var(--proto-ink2)' }}>
+            These locations match no metro, so while you have target metros selected they are filtered
+            out of Swipe &amp; Opportunities. Assign one to a metro and its jobs become visible.
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            {state.unresolved.slice(0, 12).map((u) => (
+              <div key={u.location} style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                <div style={{ flex: '1 1 160px', minWidth: 0 }}>
+                  <div style={{ fontSize: 13, fontWeight: 600, overflowWrap: 'anywhere' }}>{u.location}</div>
+                  <div className="px-small" style={{ color: 'var(--proto-ink2)' }}>{u.count} job{u.count === 1 ? '' : 's'}</div>
+                </div>
+                <select className="px-input" style={{ flex: '0 1 220px', maxWidth: '100%' }}
+                  value={aliases[locationAliasKey(u.location)] || ''}
+                  onChange={(e) => setAliases((prev) => ({ ...prev, [locationAliasKey(u.location)]: e.target.value }))}>
+                  <option value="">Leave unassigned</option>
+                  {state.metros.map((m) => <option key={m.geoId} value={m.geoId}>{m.name}</option>)}
+                </select>
+              </div>
+            ))}
+          </div>
+          {state.unresolved.length > 12 && (
+            <div className="px-small" style={{ marginTop: 10, color: 'var(--proto-ink2)' }}>
+              …and {state.unresolved.length - 12} more, shown once these are assigned.
+            </div>
+          )}
+        </div>
+      )}
       <div style={{ marginTop: 14 }}>
         <button className="px-btn px-btn-accent" onClick={save} disabled={saving || state.loading}>{saving ? 'Saving…' : 'Save target locations'}</button>
         {selected.size === 0 && <span className="px-small" style={{ marginLeft: 10 }}>None selected = no location filter (all metros shown).</span>}

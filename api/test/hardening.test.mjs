@@ -7076,3 +7076,39 @@ test('H:metro-alias-no-cross-metro-collision: an alias never claims a location f
     }
   }
 })
+
+// ── H:owner-location-alias-must-name-a-real-metro ──────────────────────────────────────────────
+//
+// THE INVARIANT. An owner-defined location alias maps a free-text location to a METRO GEOID, and a
+// geoId is what `matchesLocationPrefs` compares against the owner's targets. So an alias whose
+// geoId is not in the seeded metro table is worse than useless: it resolves the location to a metro
+// that exists for nobody, matches no target, and the job stays hidden -- reproducing the exact
+// silent exclusion this whole feature was built to end, except now with the owner believing they
+// fixed it. The route therefore validates every geoId against `METROS` and refuses by name.
+//
+// The empty string is the documented REMOVE, and must not be treated as an invalid geoId.
+//
+// MUTATION that must make this FIRE: in appSearchPrefs.ts, drop the `valid.has(gid)` check (accept
+// any non-empty string), or delete the `rejected` refusal branch.
+test('H:owner-location-alias-must-name-a-real-metro: a geoId outside the seeded table is refused', async () => {
+  const { METROS } = await import('../dist/functions/tests/geoMaster.js')
+  const src = readFileSync(new URL('../src/functions/tests/appSearchPrefs.ts', import.meta.url), 'utf8')
+    .replace(/\/\*[\s\S]*?\*\//g, ' ').split('\n').map(l => l.replace(/(^|[^:])\/\/.*$/, '$1')).join('\n')
+
+  // The geoId must be checked against the real metro table, not trusted from the body.
+  assert.match(src, /new Set\(METROS\.map\(\(m\) => m\.geoId\)/,
+    'the valid-geoId set must be derived from METROS, so it cannot drift from the real table')
+  assert.match(src, /if \(!valid\.has\(gid\)\)/, 'every incoming geoId must be tested against that set')
+  assert.match(src, /not a known metro geoId/,
+    'a rejected alias must name the offender -- a generic 400 leaves the owner guessing which row')
+  // Empty string removes a mapping and must be handled BEFORE the validity check, or removal 400s.
+  const delIdx = src.indexOf("if (!gid) { delete merged[key]; continue }")
+  const valIdx = src.indexOf('if (!valid.has(gid))')
+  assert.ok(delIdx > 0 && valIdx > delIdx,
+    "the empty-string REMOVE must be handled before the geoId validity check, or clearing a mapping is refused")
+
+  // The seeded table must actually contain geoIds for this check to be meaningful (a table of all
+  // nulls would make `valid` empty and reject everything, which is a vacuous pass).
+  assert.ok(METROS.filter((m) => m.geoId).length >= 10,
+    'the seeded metro table must carry real geoIds, or this guard passes by having nothing to check')
+})

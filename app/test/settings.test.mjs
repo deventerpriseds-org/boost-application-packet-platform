@@ -4,7 +4,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
-import { chkValueFor } from '../src/settings.js'
+import { chkValueFor, locationAliasKey } from '../src/settings.js'
 
 // The shape the API actually publishes: some settings are scalars, some are [lo, hi] pairs, and the
 // COLUMNS are always per-end. That mismatch is the whole defect.
@@ -136,4 +136,56 @@ test('H:master-profile-ui-standing-note: the already-built warning is not gated 
       `the standing note is gated on save state ${what} -- it must be true whether or not a save `
       + 'just happened, or the owner reads it once and never again')
   }
+})
+
+// ── H:location-alias-key-matches-the-server ────────────────────────────────────────────────────
+//
+// THE DEFECT. An owner-defined location alias is stored under a NORMALISED key: the server's
+// `aliasKey` (appSearchPrefs.ts) strips the "(Remote|Hybrid|On-site)" suffix, trims, lowercases —
+// the same normalisation `resolveMetro` applies — and `ownerMetro` looks it up that way. The
+// Settings screen has to read the saved value back to show it in the dropdown, so it needs the SAME
+// key. Keyed on a plain `.toLowerCase()`, assigning "Bethesda, MD (Remote)" saves correctly under
+// "bethesda, md" and then renders as "Leave unassigned" — which reads to the owner as a failed
+// save, on a screen whose entire purpose is telling them their jobs are not lost.
+//
+// MUTATION that must make this FIRE: in app/src/settings.js, drop the work-mode strip from
+// locationAliasKey (return `String(raw).trim().toLowerCase()`).
+test('H:location-alias-key-matches-the-server: the work-mode suffix is stripped before keying', () => {
+  // Identical normalisation to appSearchPrefs.aliasKey -> stripWorkMode().trim().toLowerCase().
+  assert.equal(locationAliasKey('Bethesda, MD (Remote)'), 'bethesda, md')
+  assert.equal(locationAliasKey('Falls Church, VA (Hybrid)'), 'falls church, va')
+  assert.equal(locationAliasKey('Reston, VA (On-site)'), 'reston, va')
+  assert.equal(locationAliasKey('Reston, VA (Onsite)'), 'reston, va')
+  // A location with no suffix is only trimmed and lowercased.
+  assert.equal(locationAliasKey('  Gaithersburg, MD  '), 'gaithersburg, md')
+  assert.equal(locationAliasKey('HUNT VALLEY, MD, US, 21031'), 'hunt valley, md, us, 21031')
+  // Same place written two ways must key the SAME, or one mapping cannot serve both rows.
+  assert.equal(locationAliasKey('Columbia, MD (Hybrid)'), locationAliasKey('Columbia, MD'))
+  assert.equal(locationAliasKey(''), '')
+  assert.equal(locationAliasKey(null), '')
+})
+
+// ── H:unrecognized-locations-are-surfaced ──────────────────────────────────────────────────────
+//
+// THE DEFECT, measured. Settings' LocationSettings built an "Unrecognized location" group and then
+// discarded it one line later with `.filter((m) => m.geoId)`. Because an unresolved location is
+// EXCLUDED by matchesLocationPrefs, 378 of the owner's 743 jobs were filtered off every screen with
+// nothing anywhere saying so — a VP role sat unseen for eight days. The screen must now count the
+// null-metro rows by their RAW location string (that is what the owner maps) and render them.
+//
+// MUTATION that must make this FIRE: restore the discard — filter `state.unresolved` down to rows
+// that already have a geoId, or delete the `rawBy` accumulation.
+test('H:unrecognized-locations-are-surfaced: null-metro rows are counted and rendered, not dropped', () => {
+  const src = readFileSync(new URL('../src/screens/Settings.jsx', import.meta.url), 'utf8')
+    .replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '')
+
+  // It must accumulate rows whose metro did NOT resolve...
+  assert.match(src, /if \(o\.dismissed \|\| o\.metroGeoId\) continue/,
+    'the unrecognized bucket must be built from rows with NO metroGeoId')
+  // ...expose them as state...
+  assert.match(src, /unresolved/, 'the unresolved group must reach component state')
+  // ...and actually render them with their counts, not just compute them.
+  assert.match(src, /state\.unresolved\??\.length > 0/, 'the section must render when the bucket is non-empty')
+  assert.match(src, /state\.unresolved\.slice\(/, 'each unrecognized location must be listed')
+  assert.match(src, /locationAliases: aliases/, 'the assignment must be saved through searchPrefsSet')
 })

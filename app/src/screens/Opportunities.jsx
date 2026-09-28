@@ -4,6 +4,98 @@ import { api } from '../api.js'
 import { MatchScore, SignalIcon, Pill, FavStar, tempChipStyle, tempColor } from '../shell.jsx'
 import { Loading, ErrorBox, Empty, roleFamily, titleFamily } from './Today.jsx'
 
+// ── Add a job you found yourself ───────────────────────────────────────────────────────────────
+//
+// WHY THIS EXISTS. Boost only ever learned about a job from a job-alert EMAIL or a whole-board ATS
+// pull. A posting the owner finds by scrolling LinkedIn on their phone has no way in at all -- and
+// `POST /app/capture` has existed since G11, finished and correct, with NO CALLER in this app
+// because its only client was a desktop Chrome extension. This is the missing caller.
+//
+// THE FALLBACK IS NOT OPTIONAL. With only a URL and no page text, the route's model often cannot
+// name the company and role, and it says so rather than inventing them
+// ("could not identify a company + role on this page"). Sites that require a login -- LinkedIn
+// included -- are the common case, not the edge case. So the refusal opens two fields and keeps the
+// owner's link, instead of dead-ending them.
+function AddJobByLink({ onAdded }) {
+  const { toast } = useApp()
+  const [open, setOpen] = useState(false)
+  const [url, setUrl] = useState('')
+  const [company, setCompany] = useState('')
+  const [role, setRole] = useState('')
+  const [needsDetail, setNeedsDetail] = useState(false)  // the route could not read the page
+  const [busy, setBusy] = useState(false)
+  const [note, setNote] = useState(null)                 // { ok, msg }
+
+  const close = () => { setOpen(false); setUrl(''); setCompany(''); setRole(''); setNeedsDetail(false); setNote(null) }
+
+  const submit = async () => {
+    if (!url.trim() && !role.trim()) return
+    setBusy(true); setNote(null)
+    try {
+      const r = await api.captureJob({ url: url.trim(), title: role.trim() || undefined, company: company.trim() || undefined })
+      // The route reports a refusal in the BODY with a 200 (see api.js captureJob). Surface its own
+      // words -- a generic "failed" would hide the one thing that tells the owner what to do next.
+      if (r?.error) {
+        setNeedsDetail(true)
+        setNote({ ok: false, msg: `${r.error}. Add the company and role below and I'll save it.` })
+        return
+      }
+      if (r?.inserted === false) {
+        setNote({ ok: false, msg: r.reason === 'duplicate'
+          ? 'Already in your pipeline — not added again.'
+          : `Not added: ${r.reason || 'unknown reason'}.` })
+        return
+      }
+      const o = r?.opportunity || {}
+      toast(`Added ${[o.role, o.company].filter(Boolean).join(' · ') || 'the job'}`)
+      close()
+      if (onAdded) onAdded()
+    } catch (e) {
+      setNote({ ok: false, msg: String(e?.message || e) })
+    } finally { setBusy(false) }
+  }
+
+  if (!open) {
+    return (
+      <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+        <button className="px-btn px-btn-accent" data-qc="add-job-open" onClick={() => setOpen(true)}>+ Add job</button>
+      </div>
+    )
+  }
+
+  return (
+    <div className="px-box" data-qc="add-job-sheet" style={{ padding: 14, display: 'flex', flexDirection: 'column', gap: 10 }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
+        <div style={{ fontSize: 14, fontWeight: 700 }}>Add a job you found</div>
+        <button className="px-btn" onClick={close} disabled={busy}>Cancel</button>
+      </div>
+      <div className="px-small" style={{ color: 'var(--proto-ink2)' }}>
+        Paste the link to the posting — LinkedIn, a company careers page, anywhere.
+      </div>
+      <input className="px-input" data-qc="add-job-url" type="url" inputMode="url" autoFocus
+        placeholder="https://…" value={url} onChange={(e) => setUrl(e.target.value)}
+        onKeyDown={(e) => { if (e.key === 'Enter' && !needsDetail) submit() }} />
+      {needsDetail && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <input className="px-input" data-qc="add-job-company" placeholder="Company"
+            value={company} onChange={(e) => setCompany(e.target.value)} />
+          <input className="px-input" data-qc="add-job-role" placeholder="Role title"
+            value={role} onChange={(e) => setRole(e.target.value)} />
+        </div>
+      )}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+        <button className="px-btn px-btn-accent" data-qc="add-job-submit" onClick={submit}
+          disabled={busy || (!url.trim() && !role.trim())}>
+          {busy ? 'Reading the posting…' : needsDetail ? 'Save this job' : 'Add job'}
+        </button>
+        {note ? (
+          <span className="px-small" data-qc="add-job-note" style={{ color: note.ok ? 'var(--text-ok)' : 'var(--text-bad)' }}>{note.msg}</span>
+        ) : null}
+      </div>
+    </div>
+  )
+}
+
 const TEMPS = ['All', 'Hot', 'Warm', 'Cooling', 'Cold']
 // Recency temperature — shared order + palette (mirrors shell.jsx TEMP_META). Warmer → cooler.
 const TEMP_KEYS = ['hot', 'warm', 'cooling', 'cold']
@@ -229,6 +321,7 @@ export default function Opportunities({ opps, filter }) {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+      <AddJobByLink onAdded={reload} />
       {/* Live stage funnel — one connected node per pipeline stage, showing the live count. */}
       {stages.length > 0 && (
         <div className="px-box" style={{ padding: '12px 14px', overflowX: 'auto' }}>

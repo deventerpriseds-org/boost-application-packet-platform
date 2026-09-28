@@ -2,6 +2,10 @@ import { app, HttpRequest, HttpResponseInit, InvocationContext } from '@azure/fu
 import { resolveOwner, requireWrite } from './appSession'
 import { getPgClient } from './pgClient'
 import { TempThresholds, DEFAULT_TEMP_THRESHOLDS, normalizeTempThresholds } from './signals'
+// `stripWorkMode` and `METROS` come from the geo master so the owner's alias keys are normalised
+// EXACTLY as resolveMetro normalises a location, and so a saved geoId is checked against the real
+// metro table rather than trusted from the request body.
+import { stripWorkMode, METROS } from './geoMaster'
 // The `chk_*` half of the SAME table. Its columns, defaults and whitelist live in `checkPrefs`, which
 // is the one reader/writer of them; this route only dispatches to it, so there is no second
 // declaration of what a check setting is.
@@ -31,14 +35,30 @@ async function ensurePrefs(client: any) {
     alter table owner_search_prefs add column if not exists temp_warm_days  int not null default ${DEFAULT_TEMP_THRESHOLDS.warmMaxDays};
     alter table owner_search_prefs add column if not exists temp_cool_days  int not null default ${DEFAULT_TEMP_THRESHOLDS.coolMaxDays};
   `)
+  // OWNER-DEFINED LOCATION ALIASES. `{ "<lowercased raw location>": "<geoId>" }`.
+  //
+  // WHY THIS EXISTS, measured 2026-09-28: the metro alias table is hardcoded in `geoMaster.ts`, and
+  // a location it cannot match resolves to null -- which `matchesLocationPrefs` treats as EXCLUDE.
+  // 378 of the owner's 743 jobs were being filtered out that way, and closing a gap meant a code
+  // change and a deploy. That is the "no hardcoded config" rule broken: the owner could not fix
+  // their own search. This column is the owner-editable layer over the seeded table, exactly as
+  // that rule prescribes -- code SEEDS the metros, the owner overrides.
+  await client.query(
+    `alter table owner_search_prefs add column if not exists location_aliases jsonb not null default '{}'::jsonb`)
 }
 
-export async function getSearchPrefs(client: any, owner: string): Promise<{ targetGeoIds: string[]; remoteOnly: boolean; tempThresholds: TempThresholds }> {
+/** Normalise a raw location for alias lookup. Mirrors resolveMetro's own lowercase + work-mode strip. */
+export function aliasKey(rawLocation: string): string {
+  return stripWorkMode(String(rawLocation || '')).trim().toLowerCase()
+}
+
+export async function getSearchPrefs(client: any, owner: string): Promise<{ targetGeoIds: string[]; remoteOnly: boolean; tempThresholds: TempThresholds; locationAliases: Record<string, string> }> {
   await ensurePrefs(client)
-  const r = (await client.query('select target_geo_ids, remote_only, temp_hot_hours, temp_warm_days, temp_cool_days from owner_search_prefs where owner_email=$1', [owner])).rows[0]
+  const r = (await client.query('select target_geo_ids, remote_only, temp_hot_hours, temp_warm_days, temp_cool_days, location_aliases from owner_search_prefs where owner_email=$1', [owner])).rows[0]
   return {
     targetGeoIds: r?.target_geo_ids || [], remoteOnly: !!r?.remote_only,
     tempThresholds: normalizeTempThresholds({ hotMaxHours: r?.temp_hot_hours, warmMaxDays: r?.temp_warm_days, coolMaxDays: r?.temp_cool_days }),
+    locationAliases: (r?.location_aliases && typeof r.location_aliases === 'object') ? r.location_aliases : {},
   }
 }
 
@@ -72,6 +92,31 @@ export async function searchPrefs(req: HttpRequest, _ctx: InvocationContext): Pr
       vals.push(t.hotMaxHours); sets.push(`temp_hot_hours=$${vals.length}`)
       vals.push(t.warmMaxDays); sets.push(`temp_warm_days=$${vals.length}`)
       vals.push(t.coolMaxDays); sets.push(`temp_cool_days=$${vals.length}`)
+    }
+    // Owner-defined location aliases. MERGED, not replaced, so saving one mapping never drops the
+    // others -- the same partial-update contract every field above follows.
+    //
+    // THE GEOID IS VALIDATED AGAINST THE REAL METRO TABLE. A geoId is what the location filter
+    // compares, so accepting an arbitrary string from the body would let a typo create a metro that
+    // exists for exactly one owner and silently matches nothing -- the same class of silent
+    // exclusion this whole feature exists to end. An empty string is the documented way to REMOVE a
+    // mapping; anything else unrecognised is refused by name so the screen can say which.
+    if (b?.locationAliases && typeof b.locationAliases === 'object' && !Array.isArray(b.locationAliases)) {
+      const valid = new Set(METROS.map((m) => m.geoId).filter(Boolean) as string[])
+      const merged: Record<string, string> = { ...(await getSearchPrefs(client, owner)).locationAliases }
+      const rejected: string[] = []
+      for (const [rawLoc, geoId] of Object.entries(b.locationAliases)) {
+        const key = aliasKey(rawLoc)
+        if (!key) continue
+        const gid = String(geoId ?? '')
+        if (!gid) { delete merged[key]; continue }          // '' removes the mapping
+        if (!valid.has(gid)) { rejected.push(`${rawLoc} -> ${gid}`); continue }
+        merged[key] = gid
+      }
+      if (rejected.length) {
+        return { status: 400, headers: HEADERS, jsonBody: { ok: false, error: `not a known metro geoId: ${rejected.join(', ')}` } }
+      }
+      vals.push(JSON.stringify(merged)); sets.push(`location_aliases=$${vals.length}::jsonb`)
     }
     if (sets.length) await client.query(`update owner_search_prefs set ${sets.join(', ')}, updated_at=now() where owner_email=$1`, vals)
     // Partial in the same sense as everything above it: only the `chk_*` keys present in

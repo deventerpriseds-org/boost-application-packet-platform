@@ -36,3 +36,22 @@ export function chkValueFor(column, checks) {
   const v = pair[m[2] === 'Min' ? 0 : 1]
   return v === null ? undefined : v
 }
+
+/**
+ * The key an owner-defined location alias is stored under.
+ *
+ * MIRRORS `aliasKey` in `api/src/functions/tests/appSearchPrefs.ts`, which is the source of truth:
+ * the server re-keys whatever the client sends, and `ownerMetro` looks the alias up by this same
+ * normalisation. The mirror exists so the screen can READ BACK a saved mapping and show it in the
+ * dropdown -- without it, assigning "Bethesda, MD (Remote)" saves correctly under "bethesda, md"
+ * and then renders as "Leave unassigned", which reads to the owner as the save having failed.
+ *
+ * Kept deliberately small and pinned by H:location-alias-key-matches-the-server, because two
+ * normalisers that drift is exactly how a value gets written under one key and read under another.
+ */
+export function locationAliasKey(rawLocation) {
+  return String(rawLocation || '')
+    .replace(/\s*\((remote|hybrid|on-?site)\)\s*/gi, '')
+    .trim()
+    .toLowerCase()
+}
