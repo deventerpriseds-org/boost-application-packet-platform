@@ -27,6 +27,27 @@ Status values: `open` | `in-progress` | `blocked` | `done`
   also claims Cumberland/Hagerstown and cannot be used for VA (Richmond, Virginia Beach). Owner has
   not answered whether Western Maryland counts. `check: grep -c "gaithersburg" api/src/functions/tests/geoMaster.ts`
 
+### ACT:ui-verify-reports-miscased-as-absent — FIXED (2026-09-28)
+- **Origin:** not an owner request — a failure of mine, caught while proving the two features above
+  on the live app. `ui-verify` read `expect "Unrecognized locations"` as ABSENT (run **36498915376**)
+  when the card was live. `innerText` returns RENDERED text, `<Label>` uppercases via CSS, and the
+  passing re-run (**36499212686**) came back with the **identical `bodyLen` of 5540** — same page,
+  same content, only my input's casing differed.
+- **Why it became code and not a note:** the identical miss is already written in `.claude/memory.md`
+  from 2026-09-03 (`expect "Keywords for this line"`), and I had read that section this session.
+  Prose was tried and failed twice; the org rule says graduate a repeat into a structural guard.
+- **Change (`scripts/ui-verify.mjs`):** the result now carries **`miscasedExpect`** — the subset of
+  `missingExpect` that matches case-insensitively. It still FAILS; it only distinguishes *"on the
+  page, cased differently"* from *"absent"*. Separately, `EXPECT_ABSENT` is now matched
+  case-insensitively, which only ever refuses MORE — the exact-match version passed while a
+  renamed-but-recased stale surface was still on the page.
+- **Guard:** `H:ui-verify-miscased-expect-is-not-absent`. Load-bearing assertion: the `const ok =`
+  line must never reference `miscasedExpect`, so the diagnosis can never become a forgiveness.
+  Three mutations, all **FIRED** — verdict subtracts miscased; `EXPECT_ABSENT` back to exact;
+  `EXPECT` weakened to case-insensitive. api suite 1104/1104, 0 skipped.
+- **Standing rule:** a `ui-verify` EXPECT takes the RENDERED casing, not the source casing. The wider
+  point — a false ABSENCE is the expensive direction, because it accuses work that already exists.
+
 ### ACT:unresolved-location-silently-excludes — BUILT AND DEPLOYED (2026-09-28)
 - **Done:** `main` `81c406e`. Settings > Locations now renders the "Unrecognized locations" bucket it
   used to discard at `:1415`, counted by RAW location string with per-location job counts, each row
@@ -43,6 +64,17 @@ Status values: `open` | `in-progress` | `blocked` | `done`
   regex over the file, and the bucket is built at TWO sites (initial load + reload after save), so
   inverting one still left the other matching. It now COUNTS the sites and requires every one to
   filter on a null metro. Re-proved FIRED at both sites independently.
+- **VERIFIED ON THE LIVE APP** — `ui-verify` run **36499212686**, `#/settings/locations`,
+  `owner=von.ellis@enterpriseds.io`, `expect="UNRECOGNIZED LOCATIONS;These locations match no metro"`
+  → `conclusion: success`, `missingExpect: []`, `consoleErrors: []`. The second string renders ONLY
+  inside the conditional card, so a pass proves the bucket is non-empty on production data rather
+  than that a heading exists. Live DB corroborates unresolvable rows are real (`db-query` run
+  **36499075959**: `Home Farm, MD`, `Walkersville, MD`, `Chestertown, MD`, `Bakersfield, CA`,
+  `Erie, PA`, `Kenosha, WI` — all confirmed `resolveMetro -> null` locally).
+- **First attempt at that proof FAILED and the failure was MINE** (run 36498915376,
+  `expect="Unrecognized locations"`). `<Label>` uppercases via CSS and `innerText` returns rendered
+  text; the passing re-run had the identical `bodyLen` of 5540. Fixed structurally — see
+  `ACT:ui-verify-reports-miscased-as-absent`.
 - **This is the "no hardcoded config" rule applied to geography:** code seeds the metros, the owner
   overrides. Closing the next gap no longer needs a developer or a deploy.
 
@@ -84,6 +116,12 @@ Status values: `open` | `in-progress` | `blocked` | `done`
   dead-ending them. A duplicate surfaces as "Already in your pipeline" rather than silence, since
   `insertOpp` already refused it and that refusal was previously invisible.
 - **Placement prototype:** https://claude.ai/artifact/JdwQQ91B3k4zNMkz3EzcqX
+- **VERIFIED ON THE LIVE APP** — `ui-verify` run **36498706949**, `#/opportunities`,
+  `owner=von.ellis@enterpriseds.io`, `expect="Add job"` → `conclusion: success`,
+  `missingExpect: []`, `expectAbsent: []`, `consoleErrors: []`, at `81c406e`.
+- **NOT yet confirmed by the owner in their own browser on their phone**, which is where the need
+  came from. Deploys are green and the control is proven to render on production; the end-to-end
+  paste-a-LinkedIn-link path is unexercised by a human.
 - **Deliberately out of scope for the first pass:** no bulk paste (a multi-URL box is a scraper in
   disguise), no auto-apply or auto-packet (capture lands at `discovered` and stops), and no new
   dedupe rule -- it reuses `insertOpp`'s embedding check so a job added by hand and one arriving by

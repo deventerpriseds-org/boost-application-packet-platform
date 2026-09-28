@@ -542,6 +542,30 @@ And for `expect`: assert a `data-qc` COUNT rather than visible copy wherever pos
 styled (`text-transform`), translated and edited; a hook is a contract. The one run that passed
 (33735472071, count 18) asserted a hook. Every run that failed asserted my memory.
 
+### 2026-09-28 — THE FIRST ROW OF THAT TABLE RECURRED, so it stopped being prose
+`expect "Unrecognized locations"` against `#/settings/locations` returned `missingExpect: [...]`
+(run **36498915376**) and I read it as the card not having shipped. It had. `<Label>` uppercases
+via CSS, `innerText` returns RENDERED text, and the re-run with `UNRECOGNIZED LOCATIONS` passed
+(**36499212686**) with the **identical `bodyLen` of 5540** — same page, same content; only my
+input's casing differed. The guardrail above was already written, and already read, when this
+happened. **Prose had one job here and failed it twice, so the fix is now in the harness:**
+
+- `scripts/ui-verify.mjs` reports **`miscasedExpect`** — the subset of `missingExpect` that DOES
+  match case-insensitively. It still **fails**; it just says *"on the page, cased differently"*
+  instead of *"absent"*, which is the reading that accuses shipped code.
+- `EXPECT_ABSENT` is now matched **case-insensitively** — strictly more refusing. The exact-match
+  version passed while a renamed-but-recased stale surface was still on the page, i.e. it was blind
+  to the single thing that input exists to catch.
+- Locked by `H:ui-verify-miscased-expect-is-not-absent`. Its load-bearing assertion is that the
+  `const ok =` line never references `miscasedExpect`, so the diagnosis can never become a
+  forgiveness. Three mutations, all **FIRED**: verdict subtracts miscased; `EXPECT_ABSENT` back to
+  exact; `EXPECT` weakened to case-insensitive.
+
+**The standing lesson, one line: a `ui-verify` EXPECT takes the RENDERED casing, not the source
+casing.** And more generally — a false ABSENCE is the expensive direction of this whole class of
+error, because it accuses work that already exists (cf. the `limit 25` AstraZeneca miss the same
+session).
+
 
 ## Hardening -- 2026-09-03: a ONE-SHOT slot was carrying a binding that had to persist
 `assistantSeed` is a one-shot text slot -- `applySeed` clears it the instant the panel reads it,
