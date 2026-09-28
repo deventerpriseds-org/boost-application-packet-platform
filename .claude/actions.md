@@ -8,6 +8,25 @@ Status values: `open` | `in-progress` | `blocked` | `done`
 
 ## Open
 
+### ACT:no-way-to-add-a-job-you-found-yourself (2026-09-28)
+- **Origin:** owner, with screenshots of LinkedIn's in-app *"Jobs that match your profile"* (99+
+  results): *"Why aren't opportunities like this showing up in the boost app?"*
+- **The answer, grounded:** Boost ingests from exactly two places — job-ALERT EMAILS (`mailWatch.ts`,
+  gated by `isAlert` at :199) and whole-BOARD ATS pulls (`POST /app/ats/ingest`, which takes
+  `{provider, board}`). **Neither accepts a single job URL.** LinkedIn's in-app search never emails,
+  so it is structurally invisible to the app. Not a bug, not a filter — a missing path.
+- **NOT a pipeline failure, measured:** 2,964 opportunities for the owner, 813 in the last 30 days,
+  newest ingested the same day at 19:41. Falsification attempt: all FIVE companies in the screenshot
+  are already in Boost, and the Riveron posting from it IS there (`discovered`, 2026-08-07,
+  `dismissed=f`). The gap is COVERAGE — LinkedIn shows 99+ in-app and emails a handful — not reach.
+- **Zero-code mitigation the owner controls:** a LinkedIn saved-search alert sends from
+  `jobalerts-noreply@linkedin.com`, which already matches the sender rule, so those flow in with no
+  change to the app. Told to the owner 2026-09-28.
+- **The build:** a paste-a-job-URL intake that creates one `opportunity` from a link or pasted JD.
+  Extends the existing intake surface — do NOT stand up a second ingestion system.
+  **Tier 2** (a route plus UI wiring; no gate or score path). Owner has not yet said to build it.
+  `check: grep -rn "ats/ingest" app/src` — a URL-taking caller does not exist yet
+
 ### ACT:resume-field-save-has-no-history — a live silent-data-loss path (2026-09-16)
 - **Origin:** found by the independent AC pass for `ACT:owner-inline-edit` while checking the owner's
   claim that inline editing "is the case in other parts of the packet builder". They were right, and

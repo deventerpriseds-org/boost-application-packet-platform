@@ -573,6 +573,77 @@ incident twice.
 
 
 ## Active work
+
+**2026-09-28 - WHY LINKEDIN JOBS THE OWNER BROWSES DO NOT REACH BOOST. Answered, grounded, no code
+changed.** Owner sent screenshots of LinkedIn's in-app *"Jobs that match your profile"* (99+ results)
+asking why they were not in the app.
+
+**Boost has exactly TWO ingestion paths and neither can see that screen:** job-ALERT EMAILS via
+`mailWatch.ts` (gated by `isAlert`, `mailWatch.ts:199` — subject/preview regex from
+`mail_watch_config.subject_patterns`, OR sender matching `/jobalert|jobs?[-.]noreply|job[-.]?alert/`),
+and whole-BOARD pulls via `POST /app/ats/ingest` (Greenhouse/Lever boards, wired into
+Settings > ATS sources). **There is no single-job-URL path at all** — `atsIngest` takes
+`{provider, board}`, never a URL. LinkedIn's in-app search never generates an email, so it is
+structurally invisible.
+
+**The pipeline is HEALTHY — measured, not assumed:** `opportunity` holds **2,964** rows for
+`von.ellis@enterpriseds.io`, **813 in the last 30 days**, newest ingested the same day at 19:41.
+Config live: `enabled=t`, senders `{linkedin,indeed,glassdoor,ziprecruiter,greenhouse,lever}`.
+
+**I tried to falsify my own answer and half-failed, which was the valuable part.** Rather than assert
+the postings were absent, I searched for all five companies. **All five are in Boost**, and the
+Riveron posting from the screenshot IS there (`discovered`, 2026-08-07, not dismissed). AstraZeneca,
+BAE and Cvent are present with OTHER roles. So the story is not "LinkedIn jobs never arrive" — it is
+a COVERAGE gap: LinkedIn shows 99+ in-app and emails a handful, and Boost holds exactly the
+email-sized slice. Had I stopped at "no path", I would have reported a true mechanism with a false
+conclusion.
+
+**Ruled out as the cause:** stage filtering. `discovered` is in `FRESH_STAGES` in all four consumers
+(`data.jsx:6`, `Opportunities.jsx:12`, `Today.jsx:25`, `Swipe.jsx:7` as `QUEUE_STAGES`), and the rows
+are `dismissed=f, is_demo=f`. If the owner cannot SEE the Riveron row, that is a separate defect.
+
+**Two closers, one of which needs no code:** a LinkedIn saved-search alert emails from
+`jobalerts-noreply@linkedin.com`, which already matches the sender rule — the owner's own one click
+converts the 99+ surface into the one Boost reads. The product gap is the missing paste-a-job-URL
+path; tracked, not built.
+
+**Transport note:** `boost-pg-mcp-write` was `needs_reconnect` all session, so all four reads took
+the `db-query.yml` fallback (runs 36479316826, 36479430620, 36479495029). Data never waited; the
+reconnect card was rendered.
+
+**2026-09-28 - THE AUTH BYPASS THAT WAS FIXED, VERIFIED, AND NEVER SHIPPED.** `main` `28f15a2`,
+deployed (run 35110043855), and **proven closed against production** (api-test run 35600391936:
+no `Authorization` header + `{"owner":"von.ellis@enterpriseds.io"}` in the body -> **HTTP 401**,
+resolved owner `demo@executive-engine.local`, body claim not honoured).
+
+`resolveOwner()` reads identity from the Bearer token, the UAT header and `?owner=` — **never the
+request body**. Three coach handlers then did
+`_ro.verified ? _ro.owner : (body?.owner || DEMO_EMAIL)`, so an unauthenticated request asserting an
+owner in its JSON passed `requireWrite()` on the demo branch and ran as that account. Closed by
+`resolveOwnerForWrite()` (`appSession.ts`), which derives the guard and the handler's owner from ONE
+function so they cannot disagree again.
+
+**The real lesson is not the bug — it is that the fix sat unlanded for 25 days.** It had an AC pass,
+three mutation proofs (all FIRED) and a green suite, on branch
+`claude/eds-setup-postgres-connectors-nqujcn`, and never reached `main`. **Verified work that is not
+merged protects nobody.**
+
+## Hardening -- 2026-09-28: 'git log' cannot prove a branch is unmerged on a squashed repo
+Asked to sweep for orphaned work, my first instrument said **~150 branches had unmerged commits**.
+It was noise. `origin/main` has **3 parentless roots** — the repo was re-imported as a squash — so
+`git merge-base HEAD origin/main` returns **rc=1, NO COMMON ANCESTOR** for every pre-squash branch,
+and `origin/main..<branch>` therefore lists that branch's ENTIRE history as "not in main".
+
+**The instrument that works:** skip any branch where `git merge-base origin/main <branch>` fails,
+and only then count `origin/main..<branch>`. That cut 150 branches to **four**, of which exactly one
+held live code — the auth fix above. The other three were docs.
+
+Worse, the harness had checked this session out ONTO that dead lineage
+(`claude/session-handoff-setup-ctozd3`, root `808c678` 2026-07-07, disjoint from `main`), and I
+greped it for several minutes believing I was reading production code. **The tell was CLAUDE.md
+changing content between two reads in one session.** Re-based onto `origin/main` before any real
+work; the old tip survives on 12 other refs, checked before force-pushing.
+
 **2026-09-03 - I CONFLATED BOOST'S ConvAI VOICE BRIDGE WITH HUDDLE'S VOICE CALLS, and started
 building on it.** The owner said *"voicecalls work fine"* -- about HUDDLE. I took it as clearance and
 began implementing a shared-secret guard on BOOST's `/api/app/voice/chat`, its ElevenLabs ConvAI
