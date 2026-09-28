@@ -27,7 +27,26 @@ Status values: `open` | `in-progress` | `blocked` | `done`
   also claims Cumberland/Hagerstown and cannot be used for VA (Richmond, Virginia Beach). Owner has
   not answered whether Western Maryland counts. `check: grep -c "gaithersburg" api/src/functions/tests/geoMaster.ts`
 
-### ACT:unresolved-location-silently-excludes — the class, not the instance (2026-09-28)
+### ACT:unresolved-location-silently-excludes — BUILT AND DEPLOYED (2026-09-28)
+- **Done:** `main` `81c406e`. Settings > Locations now renders the "Unrecognized locations" bucket it
+  used to discard at `:1415`, counted by RAW location string with per-location job counts, each row
+  carrying a metro dropdown. The assignment stores to `owner_search_prefs.location_aliases` (jsonb,
+  MERGED not replaced, `''` removes) and is applied in `rowToOpp` -- the one funnel every screen
+  reads -- so Today/Swipe/Opportunities/Pipeline cannot disagree.
+- **Seeded table wins:** `resolveMetro` runs FIRST; an owner alias only fills a null, so an override
+  can never shadow a recognised metro. Lookup is an exact normalised match, never fuzzy.
+- **Guards, all mutation-proved FIRED:** `H:owner-location-alias-must-name-a-real-metro` (api -- a
+  geoId outside `METROS` is refused BY NAME, because an alias pointing at a metro that exists for
+  nobody would hide the job while the owner believed they had fixed it);
+  `H:location-alias-key-matches-the-server`; `H:unrecognized-locations-are-surfaced`.
+- **The third guard was INERT on its first mutation and was rewritten.** It asserted with a bare
+  regex over the file, and the bucket is built at TWO sites (initial load + reload after save), so
+  inverting one still left the other matching. It now COUNTS the sites and requires every one to
+  filter on a null metro. Re-proved FIRED at both sites independently.
+- **This is the "no hardcoded config" rule applied to geography:** code seeds the metros, the owner
+  overrides. Closing the next gap no longer needs a developer or a deploy.
+
+### ACT:unresolved-location-silently-excludes — ORIGINAL ENTRY (superseded by the row above)
 - **Origin:** found while fixing `ACT:dc-metro-aliases`. The alias gap was the instance; this is why
   it cost eight days instead of eight seconds.
 - **The defect:** an unresolved location is treated as "exclude" with **no surface anywhere**. The
@@ -53,7 +72,24 @@ Status values: `open` | `in-progress` | `blocked` | `done`
   `max_tokens: 1400`, and the 0.12 threshold is a fixed literal with no setting.
   `check: manual — select company, role from opportunity where role ilike 'VP, Head of AI%'`
 
-### ACT:no-way-to-add-a-job-you-found-yourself (2026-09-28)
+### ACT:no-way-to-add-a-job-you-found-yourself — BUILT AND DEPLOYED (2026-09-28)
+- **Done:** `main` `81c406e`. An "+ Add job" control on Opportunities opens a paste-the-link sheet
+  calling `api.captureJob` -> `POST /app/capture`. **The endpoint needed no change** -- it has been
+  finished since G11 and simply had no caller in this app, because its only client was a desktop
+  Chrome extension. On a phone there was no way in at all. This is the missing caller.
+- **The manual fallback is load-bearing, not polish.** With a URL and no page text the route's model
+  often cannot name the company and role, and it says so rather than inventing them
+  ("could not identify a company + role on this page"). Sites behind a login -- LinkedIn included --
+  are the COMMON case. The refusal opens company/role fields and keeps the owner's link instead of
+  dead-ending them. A duplicate surfaces as "Already in your pipeline" rather than silence, since
+  `insertOpp` already refused it and that refusal was previously invisible.
+- **Placement prototype:** https://claude.ai/artifact/JdwQQ91B3k4zNMkz3EzcqX
+- **Deliberately out of scope for the first pass:** no bulk paste (a multi-URL box is a scraper in
+  disguise), no auto-apply or auto-packet (capture lands at `discovered` and stops), and no new
+  dedupe rule -- it reuses `insertOpp`'s embedding check so a job added by hand and one arriving by
+  email collide the same way.
+
+### ACT:no-way-to-add-a-job-you-found-yourself — ORIGINAL ENTRY (superseded by the row above)
 - **Origin:** owner, with screenshots of LinkedIn's in-app *"Jobs that match your profile"* (99+
   results): *"Why aren't opportunities like this showing up in the boost app?"*
 - **CORRECTED 2026-09-28, same day.** The original text of this row said Boost ingests from "exactly

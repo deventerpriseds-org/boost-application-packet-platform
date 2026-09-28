@@ -574,6 +574,41 @@ incident twice.
 
 ## Active work
 
+**2026-09-28 - BOTH GAPS THE METRO BUG EXPOSED ARE NOW CLOSED.** `main` `81c406e`, api + front-end
+deploys fired. Owner: *"Complete 2 and 3 now."*
+
+**(2) The owner can fix geography themselves.** Settings > Locations renders the "Unrecognized
+locations" bucket it used to build at `:1412` and discard at `:1415`, counted by RAW location string
+with per-location job counts and a metro dropdown per row. Stored in
+`owner_search_prefs.location_aliases` (jsonb, MERGED, `''` removes), applied in `rowToOpp` so every
+screen agrees. The SEEDED table is tried first -- an owner alias only fills a null, so it can never
+shadow a recognised metro -- and lookup is an exact normalised match, never fuzzy. This is the
+"no hardcoded config" rule applied to geography: code seeds, owner overrides, no deploy needed to
+close the next gap.
+
+**(3) A job can be added by link, from a phone.** `POST /app/capture` has been finished since G11
+and had NO CALLER in this app -- its only client was a desktop Chrome extension. The endpoint needed
+no change; the missing piece was a caller. **The manual fallback is load-bearing:** with a URL and no
+page text the model usually cannot name company+role and says so, and login-walled sites (LinkedIn
+included) are the common case, so the refusal opens company/role fields rather than dead-ending.
+Prototype: https://claude.ai/artifact/JdwQQ91B3k4zNMkz3EzcqX
+
+## Hardening -- 2026-09-28: a whole-file regex cannot tell one broken site from two good ones
+`H:unrecognized-locations-are-surfaced` came back **INERT** on its first mutation. The assertion was
+`assert.match(src, /if \(o\.dismissed \|\| o\.metroGeoId\) continue/)` -- a bare regex over the
+whole file. The bucket is built at **two** sites (initial load, and the reload after saving), so
+inverting the condition at one still left the other matching and the guard passed on half-broken
+code: the reload would have listed the rows that DID resolve. Rewritten to COUNT the accumulation
+sites and require every one to filter on a null metro, plus an outright ban on the inverted form.
+Re-proved FIRED at both sites independently.
+
+**The general rule this earns:** when a guard asserts a pattern that legitimately appears more than
+once, `assert.match` is the wrong instrument -- it answers "does this exist somewhere", not "is this
+true everywhere". Count, or assert the absence of the defect. The same session also produced a
+`NOT-APPLIED` from an ambiguous two-occurrence anchor, which is the harness catching the identical
+confusion from the other direction.
+
+
 **2026-09-28 - HALF THE OWNER'S PIPELINE WAS INVISIBLE BECAUSE THE DC METRO DID NOT KNOW ITS OWN
 SUBURBS.** `main` `a228ea5`, deployed (api-deploy **36494262374**), **proven on the live UI**
 (ui-verify **36494496078**, `expect=AstraZeneca;Gaithersburg`, conclusion success).
