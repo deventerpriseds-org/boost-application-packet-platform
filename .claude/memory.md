@@ -596,7 +596,87 @@ not. `H2` already says this -- *assert the invariant, not the incident* -- and I
 incident twice.
 
 
+## Hardening -- 2026-09-29: I declared the ROLE SYSTEM ABSENT after reading ONE function
+
+**Owner, refuting it directly:** *"It's not true that the system don't have roles that match bins and
+favorites ... You need to actually read thoroughly as I obviously docentation isn't good enough"*
+
+**ROOT CAUSE.** Asked why off-target AstraZeneca roles had appeared, I read `applyLocationPrefs` in
+`data.jsx`, saw it tests location/remote only, wrote *"no role or title gate anywhere in that
+chain"* -- and then let that sentence stand as *"the system has no role filter"*. Three claims in
+that one reply were wrong:
+
+| I claimed | Ground truth | Where it was |
+|---|---|---|
+| no role/title gate anywhere | `fav`/`watch`/`off` per title, owner-editable in **Roles & Titles** with a bulk "Turn role off" and five promotion rules | `RolesTitles.jsx`, `appRoleTaxonomy.ts` |
+| nothing acts on it | favourites drive the **DEFAULT sort** + three filter chips, in Opportunities AND Swipe | `Opportunities.jsx:288`, `Swipe.jsx:30` |
+| `match_score 0` = no function match, 15 = match | `scoreWithBoost = base + 15 when favourite` -- the 15s ARE favourites, 0 means **not favourited**; it is not a function score at all | `roleTaxonomy.ts:282-285` |
+
+The generalisation is the error, not the first read: `applyLocationPrefs` genuinely does test location
+only. I widened "not in this function" to "not in this product" without sweeping -- and I had already
+seen `is_favorite`, `'fav'` and `title_tier` scroll past in my OWN grep output and followed none of
+them. The prose rule forbidding exactly this was already in `CLAUDE.md` *and* in
+`.claude/accuracy-log.md`, and was broken anyway. Second `peer-caught` entry in that log.
+
+**WHAT WAS ACTUALLY BROKEN** (found only on the thorough read, and narrower than what I reported):
+1. **`off` is inert.** `opportunity.title_tier` is persisted and shipped to the client as `o.tier`,
+   and **no screen consumes `o.tier`** -- swept `Opportunities.jsx`, `Swipe.jsx`, `Today.jsx`,
+   `data.jsx`, `shell.jsx`. "Turn role off" drops the favourite boost and hides nothing.
+   `roleTaxonomy.ts:5` says so: *"'off' seeds for nothing (reserved for user muting later)"*.
+2. **These titles cannot be addressed by it anyway.** The override map is keyed on
+   `normalize(title)`, which CUTS at the first comma, so they collapse to bare seniority phrases
+   (`"senior director"`, `"executive director"`, `"biso"`) that match no `taxonomy_title` row. There
+   is nothing in Roles & Titles to toggle -- and a row named `"senior director"` would mute EVERY
+   "Senior Director, ..." job at once.
+3. `FAMILY_KW.transformation` is `/\b(transformation|strategy)\b/`, which is why "Regulatory
+   Affairs **Strategy**" is labelled "Transformation & Strategy" on screen.
+
+**GUARDRAIL -- a TOOL, because prose had already failed twice here.**
+
+    node scripts/explain-title.mjs "<job title>"
+
+Prints, from the BUILT module the running code uses: the override key `normalize()` produces, the
+group, band, role, tier, favourite + resulting score, the match method -- and **`addressable`**, i.e.
+whether a `taxonomy_title` row with that key exists at all, which is the only thing that says whether
+the owner can tier it. Measured contrast on two real titles:
+
+    "Senior Director, Regulatory Affairs Strategy - Cell Therapy"
+        override key "senior director"   addressable NO    tier watch   favourite false
+    "Vice President of Digital Transformation"
+        override key "vp digital transformation"   addressable YES   tier fav   favourite true
+
+One command settles what a whole reply of reading-one-file got wrong three times. **Before writing
+"there is no X" about the role system, run the matcher on the real input instead.**
+
 ## Active work
+
+**2026-09-29 - OPEN, AWAITING THE OWNER: the `off` tier is wired to nothing.** Surfaced when the
+owner asked why off-target AstraZeneca roles had appeared. They appeared because `a228ea5` taught the
+DC metro its suburbs (incl. **Gaithersburg**) -- which is the change he asked for, and the reason the
+role he originally chased is visible at all -- so a null metro stopped hiding them. Ground truth
+(`db-query` 36503661839): all 16 rows are `Gaithersburg, MD`, `match_score 0`, `title_tier watch`,
+added 2026-07-21..09-27, i.e. **none is new**. The real gap is that **"Turn role off" in Roles &
+Titles hides nothing** (no screen reads `o.tier`) and **these titles cannot be tiered at all**
+(their override key is a bare `"senior director"`, which is no `taxonomy_title` row). Diagnose any
+title with `node scripts/explain-title.mjs "<title>"`. **NOT STARTED** -- wiring `off` changes what
+every screen shows and is the owner's call. An earlier "match-score floor" proposal is WITHDRAWN: it
+would have built a parallel filter beside the tier system that already exists. See the 2026-09-29
+Hardening block above for the three claims I got wrong before reading properly.
+
+**2026-09-29 - `+ Add job` moved into the top bar's page-actions slot.** `main` `be1f6da`. Owner, with
+a phone screenshot: *"Move the add button to the right on the top row."* `TopBar` gained a SLOT
+(`TOPBAR_ACTIONS_ID` / `TopBarActions`) rather than a hardcoded button. Proven live at 390x844
+(`ui-verify` 36503126041): `count 1` for `#ee-topbar-actions [data-qc="add-job-open"]`, `measure
+81x46`. 46px clears Apple's 44 but is under Material's 48dp -- left for the UX review, not silently
+adjusted.
+
+**2026-09-29 - UX review landed**, `docs/ux-review/UX-REVIEW-recent-additions.md`: 19 findings
+(4 BLOCKER / 10 MAJOR / 5 MINOR), none actioned yet. Worst three: the Unrecognized-locations queue
+can permanently stall (hard `slice(0,12)` with no "ignore" option, so an unmappable row blocks the
+other 303); "416 jobs affected" is computed off metro alone while the real filter also keeps remote,
+so it counts jobs that were never hidden; and the metro chips are `<span onClick>` with no tab stop
+(WCAG 2.1.1). Also caught: **`--text-ok` / `--text-bad` are used at 11 sites and defined nowhere**,
+so error text renders as ordinary ink -- mine, introduced with the Add-job panel.
 
 **2026-09-28 - BOTH GAPS THE METRO BUG EXPOSED ARE NOW CLOSED.** `main` `81c406e`, api + front-end
 deploys fired. Owner: *"Complete 2 and 3 now."*
