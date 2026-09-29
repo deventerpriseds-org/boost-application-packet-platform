@@ -38,10 +38,22 @@ Status values: `open` | `in-progress` | `blocked` | `done`
 - **The competing explanation is DISCONFIRMED.** None of these rows is new — the most recent
   predates the report by two days — so this is not a fresh ingest. They are old rows that were
   invisible and became visible.
-- **OBSERVATION (source).** `app/src/data.jsx:19-22` — `applyLocationPrefs` is the ONLY preference
-  filter in the shared funnel, and it tests location/remote alone. No role or title gate exists
-  anywhere in that chain. `match_score` is used for RANKING and for the quick-filter chips; nothing
-  gates on it.
+- **OBSERVATION (source).** `app/src/data.jsx:19-22` — `applyLocationPrefs` is the only preference
+  filter in the SHARED FUNNEL, and it tests location/remote alone.
+- **⚠ CORRECTED 2026-09-29, owner-caught.** An earlier version of this row continued *"No role or
+  title gate exists anywhere in that chain... nothing gates on it"* and let that stand as "the system
+  has no role filter". **That is false**, and the owner said so: *"It's not true that the system
+  don't have roles that match bins and favorites... You need to actually read thoroughly."* What
+  actually exists, all of it read this time:
+  - **`fav` / `watch` / `off` tiers per title**, owner-editable in the **Roles & Titles** screen
+    (`RolesTitles.jsx`), including a bulk **"Turn role off"**, with five documented promotion rules.
+  - **Owner overrides DO apply at tagging time** — `appRoleTaxonomy.ts:84-86`,
+    `const tier = override || m.tier`, keyed by `normalize(title)`.
+  - **Favourites drive the DEFAULT sort** (`Opportunities.jsx:288`) and three filter chips
+    (★ Favorites / the three seniority groups / Unclassified), in **Opportunities AND Swipe**.
+  - **`match_score` is NOT a function-match score.** `scoreWithBoost(base, isFav) = base + 15 if fav`
+    (`roleTaxonomy.ts:282-285`, `FAVORITE_BOOST = 15`). So the **15**s are favourites with base 0,
+    and **0 means "not favourited"**. The earlier reading of "0 = no function match" was invented.
 - **OBSERVATION (source).** `api/src/functions/tests/roleTaxonomy.ts:196` — the NO-MATCH result is
   `tier: 'watch'`, the same tier a real match gets, so `title_tier` cannot distinguish "watching"
   from "did not match". And `matched_group` is a SENIORITY bucket (the C Suite / VP & Head of /
@@ -54,15 +66,35 @@ Status values: `open` | `in-progress` | `blocked` | `done`
   the AstraZeneca VP EPIC role the owner originally chased became visible at all). What it did NOT
   do is introduce a defect: **a null metro had been accidentally doing the job a role gate should
   have been doing.** Removing the accident exposed a pre-existing gap.
-- **SCALE (`db-query` run 36503772328)** — non-dismissed, discovery stages:
-  `match_score 0` = **1557**, `10-19` = 302, `20+` = 290. **72% of the discovery pool has no
-  function match and nothing filters it.** The location accident was masking a fraction of that;
-  the rest was always visible.
-- **AWAITING THE OWNER'S DECISION:** should the funnel gate on role match the way it gates on
-  location, and at what default? Recommendation is a match-score floor stored on the EXISTING
-  `owner_search_prefs` row and applied in the EXISTING `applyLocationPrefs` funnel in `data.jsx`
-  (renamed for what it then does) — not a parallel filter, and owner-settable per the
-  no-hardcoded-config rule. NOT STARTED: it is multi-file and changes what every screen shows.
+- **SCALE (`db-query` run 36503772328)** — non-dismissed, discovery stages: `match_score 0` =
+  **1557**, `10-19` = 302, `20+` = 290. Read correctly (see the correction above), that is
+  **1557 NOT-FAVOURITED vs 592 favourited**, not "no function match". The default view is `all`,
+  not `★ Favorites`, so the 1557 are shown.
+- **THE ACTUAL GAP, found only on the thorough read — two halves, both measured:**
+  1. **`off` is INERT.** `opportunity.title_tier` is persisted and shipped to the client as `o.tier`,
+     and **no screen consumes `o.tier`** (swept `Opportunities.jsx`, `Swipe.jsx`, `Today.jsx`,
+     `data.jsx`, `shell.jsx`). "Turn role off" removes the favourite boost and **hides nothing**.
+     `roleTaxonomy.ts:5` says it outright: *"'off' seeds for nothing (reserved for user muting
+     later)"*. So the muting bin exists in the UI and in the schema `check` constraint, and was
+     never wired to the funnel.
+  2. **These titles cannot be addressed by it anyway.** The override map is keyed on
+     `normalize(title)`, which CUTS at the first comma. Measured by running the built matcher on the
+     owner's real rows:
+
+         "Senior Director, Regulatory Affairs Strategy - Cell Therapy" -> key "senior director"
+         "Executive Director, Strategy, Oncology R&D"                  -> key "executive director"
+         "BISO - Commercial IT"                                        -> key "biso"
+
+     None is a `taxonomy_title` row, so there is **nothing in Roles & Titles to toggle** — and a row
+     named `"senior director"` would mute EVERY "Senior Director, …" job at once, including wanted
+     ones.
+  3. **Why they look relevant at all:** `FAMILY_KW.transformation` is `/\b(transformation|strategy)\b/`,
+     so "Regulatory Affairs **Strategy**" resolves to role **"Transformation & Strategy"** — the exact
+     label in the owner's screenshot. `seniorityBand` puts "Executive Director" in **vp** on the word
+     *Executive*.
+- **AWAITING THE OWNER'S DECISION.** The earlier recommendation (a match-score floor) is WITHDRAWN —
+  it would have built a parallel filter beside a tier system that already exists, which is the
+  "extend, don't duplicate" rule broken by the same misreading. NOT STARTED.
 
 ### ACT:add-job-button-owns-a-whole-row — FIXED (2026-09-29)
 - **Origin:** owner, with a phone screenshot of Opportunities and a red arrow at the header's right

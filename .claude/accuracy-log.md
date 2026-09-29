@@ -743,7 +743,6 @@ screen.
 two `verify.sh` runs (~$2.78 each) briefed on the wrong premise. The independent AC pass found it in
 one read — which is the argument for the pass, not against it.
 
-<<<<<<< HEAD
 ## 2026-09-03 — three attributions refuted in one session, same root cause
 
 | # | My claim | Ground truth | The ONE source that would have settled it up front | Pattern |
@@ -767,7 +766,6 @@ shape for #3. Each was one query or one grep away.
 **What went right, and is worth keeping:** all three were caught inside the session — two by the
 independent AC subagent, one by me re-checking the subagent's refutation rather than accepting it.
 The findings themselves survived every correction; only the attributions moved.
-=======
 ### A green deploy over a missing table, and the guard that was blind by construction
 
 | | |
@@ -827,4 +825,47 @@ and `git show origin/main:...masterContext.ts` still reads `entity[r.block_key]`
 
 For the trend table: `peer-caught`. Not self-caught, not instrument-caught. That is the worst category
 in this log and the first entry in it.
->>>>>>> origin/main
+
+## 2026-09-29 — I declared the role-matching system ABSENT after reading ONE chain
+
+**Owner:** *"It's not true that the system don't have roles that match bins and favorites ... You need
+to actually read thoroughly as I obviously docentation isn't good enough"*
+
+| # | My claim | Ground truth | The ONE source that would have settled it | Pattern |
+|---|---|---|---|---|
+| 1 | "There is no role or title gate anywhere in that chain" | A full taxonomy exists: `fav`/`watch`/`off` tiers, per-title owner overrides that DO apply (`tagFields`: `override \|\| m.tier`), favorites-first default sort, ★ Favorites / C Suite / VP & Head of / Director / Unclassified chips in Opportunities AND Swipe, and a whole **Roles & Titles** screen with bulk "Turn role off" | `roleTaxonomy.ts` + `appRoleTaxonomy.ts` + `RolesTitles.jsx` — none of which I opened | absence-from-a-narrow-read |
+| 2 | "`match_score = 0` means no function match; 15 means matched" | `scoreWithBoost(base, isFav) = base + 15 if fav`. `FAVORITE_BOOST = 15`. So the 15s are **favourites with base 0**, and 0 means **not favourited** — it is not a function-match score at all | `roleTaxonomy.ts:282-285`, eleven lines | asserted-a-semantic-I-never-read |
+| 3 | "nothing acts on it" | Favourites drive the DEFAULT sort (`Opportunities.jsx:288`) and three filter chips, in two screens | `grep -n isFavorite app/src/screens/` | same as #1 |
+
+**Root cause, and it is not "I lacked documentation".** I grepped `data.jsx`, found `applyLocationPrefs`
+tests location only, and wrote *"no role gate anywhere in that chain"* — then let that sentence stand as
+*"the system has no role filter"*. The rule against exactly this was already in `CLAUDE.md`:
+*"Never claim a capability is ABSENT from a single-file / single-name grep... requires sweeping EVERY
+place it could live."* I had also just seen `is_favorite`, `'fav'`, `title_tier` and `keepCard` scroll
+past in my own grep output and followed none of them.
+
+**The owner's observation is ground truth and my analysis was the thing that was wrong** — the second
+guard in this log's own standing-rules section, violated in the same reply that cited the first.
+
+**What was ACTUALLY broken, found only once I read properly:**
+1. **`off` is inert.** `opportunity.title_tier` is persisted and shipped to the client as `o.tier`, and
+   **no screen consumes `o.tier`.** "Turn role off" removes the favourite boost and hides nothing.
+   `roleTaxonomy.ts:5` says so in as many words: *"'off' seeds for nothing (reserved for user muting
+   later)"*.
+2. **These titles cannot be addressed by it anyway.** The override map is keyed on `normalize(title)`,
+   which cuts at the first comma. Measured by running the built matcher:
+   `"Senior Director, Regulatory Affairs Strategy - Cell Therapy"` -> key `"senior director"`;
+   `"Executive Director, Strategy, Oncology R&D"` -> `"executive director"`; `"BISO - Commercial IT"`
+   -> `"biso"`. None is a `taxonomy_title` row, so there is nothing in Roles & Titles to toggle — and a
+   row named `"senior director"` would match EVERY "Senior Director, …" job at once.
+3. **The keyword fallback is why they are binned as relevant at all.** `FAMILY_KW.transformation` is
+   `/\b(transformation|strategy)\b/`, so "Regulatory Affairs **Strategy**" resolves to role
+   "Transformation & Strategy" — the exact label in the owner's screenshot.
+
+**Guard this earns (structural, not prose):** before writing "there is no X" about this product, the
+claim must be backed by a sweep that NAMES the files searched, and that list must include every file
+already surfaced by my own greps in the same turn. The cheap mechanical version: run the matcher//the
+real function on the real input — `node -e "require('./dist/...').resolveTitle('<real title>')"` settled
+all three of the above in one command, after I had spent a whole reply asserting from a read of one file.
+
+For the trend table: **peer-caught**. Second entry in that category, the worst one in this log.
