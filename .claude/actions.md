@@ -27,6 +27,43 @@ Status values: `open` | `in-progress` | `blocked` | `done`
   also claims Cumberland/Hagerstown and cannot be used for VA (Richmond, Virginia Beach). Owner has
   not answered whether Western Maryland counts. `check: grep -c "gaithersburg" api/src/functions/tests/geoMaster.ts`
 
+### ACT:funnel-gates-on-location-but-never-on-role — INVESTIGATED, AWAITING OWNER DECISION (2026-09-29)
+- **Origin:** owner, with a phone screenshot of a search for "Astrazeneca" showing four roles
+  (Regulatory Affairs Strategy, Oncology R&D, Medical AI/Digital, Global Oncology RWD) circled:
+  *"Why are roles that don't match my preferences suddenly make it in? It seems you broke
+  something... Investigate"*
+- **OBSERVATION (ground truth, `db-query` run 36503661839).** All 16 AstraZeneca rows:
+  `location = 'Gaithersburg, MD'` (every one), `match_score = 0` (every non-dismissed one),
+  `title_tier = 'watch'` (every one), `added` between **2026-07-21 and 2026-09-27**.
+- **The competing explanation is DISCONFIRMED.** None of these rows is new — the most recent
+  predates the report by two days — so this is not a fresh ingest. They are old rows that were
+  invisible and became visible.
+- **OBSERVATION (source).** `app/src/data.jsx:19-22` — `applyLocationPrefs` is the ONLY preference
+  filter in the shared funnel, and it tests location/remote alone. No role or title gate exists
+  anywhere in that chain. `match_score` is used for RANKING and for the quick-filter chips; nothing
+  gates on it.
+- **OBSERVATION (source).** `api/src/functions/tests/roleTaxonomy.ts:196` — the NO-MATCH result is
+  `tier: 'watch'`, the same tier a real match gets, so `title_tier` cannot distinguish "watching"
+  from "did not match". And `matched_group` is a SENIORITY bucket (the C Suite / VP & Head of /
+  Director chips), so "Senior Director, Regulatory Affairs Strategy - Cell Therapy" lands in
+  `director` on the word *Director* alone. The function verdict is `match_score`, and it is 0.
+- **INTERPRETATION.** `a228ea5` taught the DC-Baltimore metro its suburbs, including
+  **`gaithersburg`** — verified absent from the alias list at `a228ea5^` and present after. Before:
+  `Gaithersburg, MD` -> null -> EXCLUDED. After: -> DC-Baltimore (a selected target) -> INCLUDED.
+  So I did cause the change, and it is the change doing exactly what was asked (that alias is why
+  the AstraZeneca VP EPIC role the owner originally chased became visible at all). What it did NOT
+  do is introduce a defect: **a null metro had been accidentally doing the job a role gate should
+  have been doing.** Removing the accident exposed a pre-existing gap.
+- **SCALE (`db-query` run 36503772328)** — non-dismissed, discovery stages:
+  `match_score 0` = **1557**, `10-19` = 302, `20+` = 290. **72% of the discovery pool has no
+  function match and nothing filters it.** The location accident was masking a fraction of that;
+  the rest was always visible.
+- **AWAITING THE OWNER'S DECISION:** should the funnel gate on role match the way it gates on
+  location, and at what default? Recommendation is a match-score floor stored on the EXISTING
+  `owner_search_prefs` row and applied in the EXISTING `applyLocationPrefs` funnel in `data.jsx`
+  (renamed for what it then does) — not a parallel filter, and owner-settable per the
+  no-hardcoded-config rule. NOT STARTED: it is multi-file and changes what every screen shows.
+
 ### ACT:add-job-button-owns-a-whole-row — FIXED (2026-09-29)
 - **Origin:** owner, with a phone screenshot of Opportunities and a red arrow at the header's right
   side: *"Move the add button to the right on the top row."* The trigger had shipped owning a
