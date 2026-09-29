@@ -27,6 +27,36 @@ Status values: `open` | `in-progress` | `blocked` | `done`
   also claims Cumberland/Hagerstown and cannot be used for VA (Richmond, Virginia Beach). Owner has
   not answered whether Western Maryland counts. `check: grep -c "gaithersburg" api/src/functions/tests/geoMaster.ts`
 
+### ACT:add-job-button-owns-a-whole-row — FIXED (2026-09-29)
+- **Origin:** owner, with a phone screenshot of Opportunities and a red arrow at the header's right
+  side: *"Move the add button to the right on the top row."* The trigger had shipped owning a
+  full-width row under the header to hold one right-aligned button; on a 390px viewport that row
+  spent ~56px above the fold, where the funnel and the first job row compete for every pixel.
+- **Done:** `main` `be1f6da`. `TopBar` gains a page-actions SLOT (`TOPBAR_ACTIONS_ID` +
+  `TopBarActions`), and Opportunities portals its trigger into it. A slot rather than a hardcoded
+  button so the next screen's primary action is not a second parallel mechanism.
+- **Two defects avoided in the doing, both invisible to a build:** (1) resolving the portal node
+  during RENDER returns null on the first pass and React never re-renders to correct it — the button
+  would never appear on any screen, with green tests; it is read in an effect and held in state.
+  (2) The trigger now renders in BOTH states with `aria-expanded` instead of being replaced by the
+  panel — a control that vanishes when used is why the old version needed its own Cancel as the only
+  way back.
+- **Guards, both mutation-proved FIRED (3 mutations):** `H:add-job-trigger-lives-in-the-top-bar`
+  (trigger back in a page row → FIRED; trigger dropped from the open panel → FIRED) and
+  `H:topbar-slot-is-resolved-in-an-effect` (node read during render → FIRED).
+- **VERIFIED ON THE LIVE APP AT PHONE WIDTH** — `ui-verify` run **36503126041**, `#/opportunities`,
+  viewport **390×844**: `ok: true`, `count: 1` for `#ee-topbar-actions [data-qc="add-job-open"]`
+  (so the button is *inside* the slot, not merely present somewhere), `measure: 81×46px visible`,
+  `consoleErrors: []`. Body text now reads `Pipeline·Exec + Add job ⚙ ☀ 1364 Discovered …` — the
+  standalone row is gone and the funnel follows the header directly.
+- **OPEN, for the UX review to rule on:** 46px height clears Apple HIG's 44px but is under
+  Material's 48dp. Flagged rather than silently adjusted.
+- **PROCESS NOTE, owner-raised:** the owner objected that the original Add-job and locations UI was
+  deployed *"without it getting approved"*. The placement was my judgement call inside "complete 2
+  and 3 now", and it should have been shown first. This move is different — it was explicitly
+  instructed — but the standing correction is: UI added on my own initiative goes to the owner as a
+  proposal before it ships.
+
 ### ACT:ui-verify-reports-miscased-as-absent — FIXED (2026-09-28)
 - **Origin:** not an owner request — a failure of mine, caught while proving the two features above
   on the live app. `ui-verify` read `expect "Unrecognized locations"` as ABSENT (run **36498915376**)
