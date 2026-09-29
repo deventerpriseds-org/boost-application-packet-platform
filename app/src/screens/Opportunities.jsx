@@ -1,7 +1,7 @@
 import React, { useMemo, useState, useEffect, useCallback } from 'react'
 import { go, useApp } from '../state.jsx'
 import { api } from '../api.js'
-import { MatchScore, SignalIcon, Pill, FavStar, tempChipStyle, tempColor } from '../shell.jsx'
+import { MatchScore, SignalIcon, Pill, FavStar, tempChipStyle, tempColor, TopBarActions } from '../shell.jsx'
 import { Loading, ErrorBox, Empty, roleFamily, titleFamily } from './Today.jsx'
 
 // ── Add a job you found yourself ───────────────────────────────────────────────────────────────
@@ -55,16 +55,31 @@ function AddJobByLink({ onAdded }) {
     } finally { setBusy(false) }
   }
 
-  if (!open) {
-    return (
-      <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-        <button className="px-btn px-btn-accent" data-qc="add-job-open" onClick={() => setOpen(true)}>+ Add job</button>
-      </div>
-    )
-  }
+  // THE TRIGGER LIVES IN THE TOP BAR, NOT ON THE PAGE. It used to own a full-width row of its own
+  // directly under the header to hold one right-aligned button. Owner, 2026-09-29, with a phone
+  // screenshot: "Move the add button to the right on the top row." On a 390px viewport that row
+  // spent ~56px of vertical space -- above the fold, where the funnel and the first job row compete
+  // for every pixel -- to say one word.
+  //
+  // It is rendered UNCONDITIONALLY, in both the open and closed states, so the control the owner
+  // reaches for does not vanish at the moment they use it; it becomes `aria-expanded` instead. A
+  // disappearing trigger is why the earlier version needed the panel to carry its own Cancel as the
+  // only way back.
+  const trigger = (
+    <TopBarActions>
+      <button className="px-btn px-btn-accent" data-qc="add-job-open" aria-expanded={open}
+        onClick={() => (open ? close() : setOpen(true))}>+ Add job</button>
+    </TopBarActions>
+  )
+
+  // Closed: the trigger is in the bar and NOTHING renders inline. A fragment holding only a portal
+  // puts no box in the page's flex column, so the parent's 16px gap does not leave a phantom row
+  // where the old one was.
+  if (!open) return trigger
 
   return (
     <div className="px-box" data-qc="add-job-sheet" style={{ padding: 14, display: 'flex', flexDirection: 'column', gap: 10 }}>
+      {trigger}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
         <div style={{ fontSize: 14, fontWeight: 700 }}>Add a job you found</div>
         <button className="px-btn" onClick={close} disabled={busy}>Cancel</button>

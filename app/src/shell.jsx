@@ -345,6 +345,28 @@ export function Overlay({
   )
 }
 
+// The top bar's page-actions slot. The id is exported as a constant rather than typed as a string in
+// each screen, so a rename cannot leave one screen portalling into a node that no longer exists.
+export const TOPBAR_ACTIONS_ID = 'ee-topbar-actions'
+
+/**
+ * Render a screen's primary action into the top bar.
+ *
+ * The slot node belongs to TopBar, which mounts before any screen, so it is present by the time a
+ * screen's effect runs. It is still resolved in an EFFECT and held in state rather than read during
+ * render: reading the DOM while rendering returns null on the first pass and React would never
+ * re-render to correct it, so the button would simply never appear. Rendering null until the node
+ * resolves costs one frame and cannot silently fail.
+ *
+ * Unmounting (navigating away, or the screen hiding its own action) removes the portal's children,
+ * so the slot empties itself and no screen has to clean up after another.
+ */
+export function TopBarActions({ children }) {
+  const [node, setNode] = useState(null)
+  useEffect(() => { setNode(document.getElementById(TOPBAR_ACTIONS_ID)) }, [])
+  return node ? createPortal(children, node) : null
+}
+
 function TopBar({ title }) {
   const { dark, setDark, auth } = useApp()
   const signedIn = !!auth?.user
@@ -355,6 +377,13 @@ function TopBar({ title }) {
       </div>
       <div className="ee-hide-sm" style={{ borderLeft: '1px solid var(--proto-rule-soft)', paddingLeft: 12, fontSize: 13, color: 'var(--proto-ink2)' }}>{title}</div>
       <div style={{ flex: 1 }} />
+      {/* PAGE ACTIONS SLOT. A screen's primary action portals in here instead of spending a whole
+          row of its own below the bar. Owner, 2026-09-29, with a phone screenshot of "+ Add job"
+          sitting alone on the row under the header: "Move the add button to the right on the top
+          row." On a 390px viewport that row cost ~56px of vertical space to hold one control.
+          It is a SLOT rather than a hardcoded button so the next screen's action has somewhere to
+          go that is not a second parallel mechanism -- see TopBarActions below. */}
+      <div id={TOPBAR_ACTIONS_ID} style={{ display: 'flex', alignItems: 'center', gap: 8 }} />
       <button className="px-btn" onClick={() => go('/settings/account')} title={signedIn ? auth.user.email : 'Sign in'}
         style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
         <span style={{ width: 7, height: 7, borderRadius: '50%', background: signedIn ? 'var(--surface-success-default)' : 'var(--proto-ink3)' }} />
