@@ -45,6 +45,17 @@ Status values: `open` | `in-progress` | `blocked` | `done`
   line must never reference `miscasedExpect`, so the diagnosis can never become a forgiveness.
   Three mutations, all **FIRED** — verdict subtracts miscased; `EXPECT_ABSENT` back to exact;
   `EXPECT` weakened to case-insensitive. api suite 1104/1104, 0 skipped.
+- **PROVEN LIVE, on the runner itself** — `ui-verify` run **36500771260** at `d58fef4`, fed one
+  miscased string and one genuinely absent one in the same call
+  (`expect="Unrecognized locations;Definitely Not On This Page XYZ"`):
+
+      missingExpect:  ["Unrecognized locations", "Definitely Not On This Page XYZ"]
+      miscasedExpect: ["Unrecognized locations"]
+      exit code 1
+
+  The absent string is in `missingExpect` and NOT in `miscasedExpect`, so the field DISCRIMINATES
+  rather than echoing — and the run still FAILED, which is the half that matters. A source grep
+  could not have shown either; this is the mechanism observed in the environment it runs in.
 - **Standing rule:** a `ui-verify` EXPECT takes the RENDERED casing, not the source casing. The wider
   point — a false ABSENCE is the expensive direction, because it accuses work that already exists.
 
