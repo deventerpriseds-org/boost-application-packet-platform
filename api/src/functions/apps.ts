@@ -51,7 +51,34 @@ interface AppEntry {
   hidden: boolean
   order: number | null
   tags: Record<string, string>
+  external: boolean       // not an Azure resource (e.g. hosted on Lovable)
+  source: string | null   // where it's hosted, for externals (e.g. "Lovable")
 }
+
+// Apps that aren't Azure Static Web Apps so the subscription scan can't find
+// them — hosted elsewhere (Lovable, Vercel, …) but still ours. Hard-added here
+// and merged into the scan output. Display name / description / hidden are still
+// overridable via the normal curated path (POST /api/apps keyed by `name`), so
+// these behave like any other card once listed.
+interface ExternalApp {
+  name: string
+  displayName: string
+  url: string
+  description?: string
+  source?: string
+  repositoryUrl?: string
+}
+
+const EXTERNAL_APPS: ExternalApp[] = [
+  {
+    name: 'taskos',
+    displayName: 'TaskOS',
+    url: 'https://journey-voice.lovable.app',
+    description: 'Task management app (journey-voice). Currently prototyped on Lovable; not yet on Azure.',
+    source: 'Lovable',
+    repositoryUrl: 'https://github.com/deventerprisesds/journey-voice'
+  }
+]
 
 // Acquire an ARM access token via client-credentials flow.
 async function getArmToken(): Promise<string> {
@@ -209,9 +236,36 @@ export async function apps(req: HttpRequest, context: InvocationContext): Promis
         isNew: !isNaN(createdMs) && (now - createdMs) <= FOURTY_EIGHT_H,
         hidden: !!meta.hidden,
         order: meta.order ?? null,
-        tags: site.tags || {}
+        tags: site.tags || {},
+        external: false,
+        source: null
       }
     })
+
+    // Merge in non-Azure apps (Lovable, etc.). Curated overrides from the same
+    // 'apps' partition apply by name, so they're editable/hideable like the rest.
+    for (const ext of EXTERNAL_APPS) {
+      const meta = curated[ext.name] || {}
+      entries.push({
+        name: ext.name,
+        displayName: meta.displayName || ext.displayName,
+        description: meta.description ?? (ext.description || ''),
+        url: ext.url,
+        hostname: (() => { try { return new URL(ext.url).host } catch { return null } })(),
+        location: '',
+        resourceGroup: '',
+        repositoryUrl: ext.repositoryUrl || null,
+        sku: null,
+        createdAt: null,
+        lastModifiedAt: null,
+        isNew: false,
+        hidden: !!meta.hidden,
+        order: meta.order ?? null,
+        tags: {},
+        external: true,
+        source: ext.source || null
+      })
+    }
 
     // Sort: pinned order first (if set), then newest created, then name.
     entries.sort((a, b) => {
