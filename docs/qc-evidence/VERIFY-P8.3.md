@@ -550,3 +550,552 @@ retractions above, exactly as reported.
 Every measurement in this addendum was taken on a detached checkout of `30a236b` with a fresh `tsc`
 build. The tree was returned to `claude/qc-p8-3-verify` afterwards and `npm test` re-confirmed at
 316/316 for this branch's own snapshot. Nothing was fixed here either.
+
+---
+
+## ADDENDUM 2 — re-verification of the fix commit `30bb129`
+
+`30bb129 fix(qc-p8.3): the defects the independent verifier found — including the 75% still on screen`
+landed on `claude/qc-p8-3-evidence` in response to this report. A fix that answers a verification is
+not verified by the fact that it was written, so every defect above was re-measured on a detached
+checkout of `30bb129`, and every guard the commit adds was revert-proofed the same way §1 did.
+
+**Baseline at `30bb129`:** `api` build exit 0, **330/330 · 0 fail · 0 skipped**; `app` build exit 0,
+**149/149 · 0 fail · 0 skipped**.
+
+### Fixed — measured, not accepted
+
+| Defect | Verified how | Result |
+|---|---|---|
+| **D-C** — the 75% on the rail | Re-ran the cross-consumer probe unchanged against the `30bb129` build | **Fixed.** `RAIL must_have card : total=1 closed=0`, source `0 of 1 closed … (3 more not judged either way)`, and requirements #0/#1/#2 now render **`unmeasured/not measured`** instead of green `closed`. All three surfaces agree: check `0/1`, score `0%`, rail `0/1`. The new `unjudgedSeqs()` reads the excluded rows off the same `#<seq>` offender contract and the same run as the check (`template_reach`, `facts_needed`, `fact_shortfall`), and `classTotal` keeps the class size visible rather than absorbing it. |
+| **D-A** — the mis-anchored quote | Re-ran the `İ` probe | **Fixed.** `locate` now returns `char_start = 15` against a true index of 15 and `verbatim = "led the platform modernization programme across four product lines"` — the whole phrase, no truncation, no glued tail. Same for the one-`İ` case (`start = 5`, true index 5). The exact branch now runs a case-insensitive `RegExp` over the **original** string, so `m.index` and `m[0].length` are measured on the string they index. |
+| **D-E** — H4b never followed the accusation | Read the case | **Fixed.** H4b now also asserts `!/\bsimilarity\(/.test(stripComments(src('evidence.ts')))`. |
+| **D-G1** — fabricated `record_sha256: ''` / `resolver_version: 0` | Read the diff | **Fixed.** `appChecks` now reads `r.evidence_record_sha256`, `r.evidence_resolver_version` and `r.evidence_extra` from the row it had already selected. |
+| **D-B** — the tautological guard | Read the comment | **Addressed as asked.** The guard is kept as defence in depth and the comment now says plainly that it "has never rejected anything and structurally cannot today", rather than implying a `refused` population that cannot be non-zero. That is the honest version of the same code. |
+| **D-D** — no read-time revalidation | `.claude/DEFERRED.md` | **Deferred and disclosed** as D19, with the symptom stated ("the excerpt renders normally and is a true substring of what the record USED to say") and the reason (reading the profile on every requirements GET is a cost decision). ACs 14 and 22 still fail; they now fail *knowingly*. |
+
+### The new guards are real
+
+Same method as §1 — revert the fix, rebuild, record the assertion.
+
+| Revert | Result |
+|---|---|
+| **H32** — restore the lower-cased-copy search in `requirements.locate` | **fires.** `AssertionError: pad "İ": offset drifted with the fold`; `actual: 12`, `expected: 11`. 34 pass / 1 fail. |
+| **H4b's new half** — import `similarity` into `evidence.ts` | **fires.** `AssertionError: evidence decides coverage, which decides the gate; it must not be decided by a ranking heuristic`. 34 pass / 1 fail. |
+| **the rail fix** — `unjudgedSeqs(entries)` → `new Set()` | **fires twice.** `a requirement nothing measured is never CLOSED on the rail (the 75% again)` → `actual: 3, expected: 0`; and `a fact-owned requirement is not counted closed by the rail either` → `actual: 2, expected: 1`. 34 pass / 2 fail; restored, 36/36. |
+
+### The substring claim survives the `locate` rewrite
+
+Changing the exact branch is exactly the kind of change that could break the property §2 established, so
+the whole harness was re-run against the `30bb129` build: **637 probes, 591 resolved, 0 substring
+violations** — and 591 resolved rather than 557, because the fold fix now anchors correctly in cases
+that previously drifted. Reader properties (AC-4/5/6/7/13/21) and the AC-28 identity re-measured
+unchanged. H3, H5, H5b and H5c stay green, so AC-51's guarantee — `verbatim` is exactly
+`jd_text.slice(char_start, char_end)` — survives the extractor change.
+
+### NEW FINDING — D-H: the threshold fix reaches one of three writers
+
+D-F is **partially** fixed. `evidenceThreshold` and `evidenceMinTokens` are now real
+`CheckThresholds` entries with seeded defaults, persisted per owner as `chk_evidence_threshold` /
+`chk_evidence_min_tokens` on `owner_search_prefs`, read by `loadThresholds`, and passed into
+`writeEvidence` — **from `appChecks.ts:109` only.** There are three call sites:
+
+| Call site | Passes the owner's thresholds? |
+|---|---|
+| `appChecks.ts:109` — `evaluateArtifact`, the checks hot path | **yes** |
+| `appRequirements.ts:306` — `requirementsBackfill` | **no** — `writeEvidence(client, opp.id, profile.records)` |
+| `appRequirements.ts:354` — **`POST /api/app/opportunity/{id}/evidence`**, the endpoint whose entire purpose is resolving evidence | **no** — same bare call |
+
+`grep -c loadThresholds api/src/functions/tests/appRequirements.ts` → **0**; the module never loads
+them. This is worse than two paths ignoring a setting, because `writeEvidence` **deletes and replaces
+every evidence row for the opportunity**: whichever writer ran last wins, so calling the evidence
+endpoint silently overwrites the threshold-respecting rows the checks path wrote with default-threshold
+ones. The owner's setting is not just unhonoured on those paths — it is destroyed by them. This is the
+same shape as D-C ("the fix was applied where the guard looks"), one layer down, and nothing asserts
+that the three writers agree.
+
+AC-20 itself remains **fail** on its own terms regardless: it names `MIN_QUOTE_CHARS` and
+`MIN_QUOTE_WORDS`, and those (with `DISTINCTIVE_LEN`) are still module constants with no owner path.
+
+### Scope note — the AC's "must NOT touch" list
+
+`AC-P8.3.md` closes with: *"What P8.3 must NOT touch: `requirements.ts` extraction rules and
+`EXTRACTOR_VERSION` …"*. `30bb129` changes both — the exact branch of `locate`, and
+`EXTRACTOR_VERSION` 1 → 2.
+
+Recording this as a crossing, not as a wrong call. The change fixes a real defect that this
+verification found, it is guarded by H32, and every extraction invariant it could have broken (H3, H5,
+H5b, H5c) is still green. Two consequences the owner should decide on rather than inherit:
+
+1. `EXTRACTOR_VERSION` is **written and never read** (`grep` finds it only in the `requirement` INSERT
+   and the schema column), so the bump changes no behaviour — it is purely a marker. That is what the
+   comment claims, and it is accurate.
+2. **Nothing re-extracts the version-1 rows.** The live Trinnex requirements were extracted under the
+   old rule, so any of them drawn from a posting containing a case-expanding character still carry
+   shifted offsets. The marker makes them findable; no backfill makes them correct.
+
+### Revised tally at `30bb129`
+
+**45 pass · 14 fail · 4 not_applicable.** Moved to pass: **AC-19** and **AC-61** (H4b now covers
+`evidence.ts`, closing 61(c) — the one quarter of the four that was missing), **AC-32** and **AC-36**
+(the rail now reports the judged population and never renders an unjudged row green).
+
+Still failing, unchanged: ACs 3, 14, 20, 22, 23, 33, 35, 38, 41, 42, 43, 44, 47, 48, 59.
+**AC-59** in particular is still open for two of its three consumers — `assetGate.js:86` still labels
+the check *"Must-haves this document covers"*, which is no longer what it measures, and
+`appReviewer.ts:183` still builds `engineJudged` from every must-have row while the check judges only
+`coverable`. Both are disclosed by the author as out-of-lane, and the third — the rail — is fixed.
+
+Measurements taken on a detached checkout of `30bb129`; the tree was restored after every revert and
+re-confirmed at 330/330 and 149/149. Nothing was fixed in this pass either — D-H is reported, not
+patched.
+
+---
+
+## ADDENDUM 3 — PR #13 merged; re-verified against `main` @ `3153f1a`
+
+`claude/qc-p8-3-evidence` was merged: `git merge-base --is-ancestor 30bb129 origin/main` → **yes**.
+`main` has since advanced ~30 commits across several lanes, one of which names a finding in this
+report. This report rode onto `main` inside the merge — but only as far as Addendum 1; **Addendum 2,
+including D-H, is not on `main`**, which is the gap this addendum closes.
+
+Everything below was measured on `main` merged into `claude/qc-p8-3-verify` (no conflicts).
+**Baseline: `api` build exit 0, `npm test` 582/582 · 0 fail · 0 skipped; `app` build exit 0,
+`npm test` 204/204 · 0 fail · 0 skipped.**
+
+### Everything previously confirmed fixed still holds on `main`
+
+Re-ran every probe unchanged against the merged tree:
+
+- **D-C** — `RAIL must_have card : total=1 closed=0`, source `0 of 1 closed … (3 more not judged
+  either way)`, requirements #0/#1/#2 `unmeasured/not measured`. Check `0/1`, score `0%`, rail `0/1`.
+- **D-A** — `locate: start=15 end=81`, `verbatim = "led the platform modernization programme across
+  four product lines"`, true index 15. No drift.
+- **The substring claim** — 637 probes, 591 resolved, **0 violations**.
+- **Reader and identity** — determinism, no astral, the code-point/code-unit equality the schema
+  CHECK depends on, and `evidenced(1) + no_evidence(1) + unresolvable(0) + fact_owned(3) +
+  eligibility(0) = 5 = total` all unchanged.
+
+### D-D is fixed — and the fix is larger than the finding
+
+`edbbdd5 fix(qc): D19 — stored evidence is re-validated on read, and a broken excerpt is withheld`.
+`requirementsGet` now re-reads the profile and puts every stored row through a new
+`verifyEvidence()`, which recomputes `sha256(rec.text)` against the stored `record_sha256` and
+re-slices the record at the stored offsets. The posture is **refuse, do not guess, and say which**: a
+rotted excerpt is *withheld*, not caveated, and it is explicitly **not** re-resolved on the read path
+(re-ranking is a write, and that route is readable with an unverified `?owner=`).
+
+Revert-proofed: forcing `verifyEvidence` to return `verified` unconditionally makes **8 tests fail**,
+including three named H-cases — `H:evidence-reverified-on-read`, `H:stale-evidence-not-absent`,
+`H:evidence-verified-at-the-boundary` — with `actual: 'verified', expected: 'stale'`. (The same
+revert also produces two `tsc` type errors, so it is guarded twice.) 108 pass / 8 fail; restored and
+re-confirmed green.
+
+This closes **AC-14** and **AC-22**, and it goes further than either asked: `EvidenceState` is a
+closed enumeration — `none | verified | stale | misresolved | source_missing | unverified` — and the
+`stale` / `misresolved` split is a distinction I did not think to ask for. A record that is
+byte-identical while its offsets no longer name the quote means *the row was recorded wrong*, not
+that the owner edited anything; blaming an edit they never made would be a false statement about
+them, and the digest is exactly what separates the two.
+
+**AC-38** also moves to pass: `tallyHealth()` counts each state as its own population, `evidenceHealth`
+is served on the requirements payload beside per-row verdicts that name the requirement, and
+`HEALTH_BUCKET` **throws** on an unbucketed state rather than letting a new state be silently
+miscounted.
+
+### AC-59's two remaining consumers are fixed
+
+- `app/src/assetGate.js:91` now reads **"Must-haves your profile can evidence"** (was "Must-haves
+  this document covers", which had stopped being what the check measures).
+- `appReviewer.ts:190` now reads `const engineJudged = judgedMustHaveIds(requirements, scoreRow)` —
+  no longer every must-have row while the check judges only `coverable`.
+
+With the rail already fixed, all three consumers agree. **AC-59 → pass.**
+
+### D-H survives, is now live on `main`, and has a guard that cannot see it
+
+The one finding that made it through the merge unaddressed.
+
+| Call site on `main` | Passes the owner's thresholds? |
+|---|---|
+| `appChecks.ts:109` — `evaluateArtifact` | **yes** |
+| `appRequirements.ts:441` — `requirementsBackfill` | **no** — `writeEvidence(client, opp.id, profile.records)` |
+| `appRequirements.ts:498` — **`POST /api/app/opportunity/{id}/evidence`** | **no** — same bare call |
+
+`grep -c loadThresholds api/src/functions/tests/appRequirements.ts` → **0**. `writeEvidence` still
+opens with `delete from requirement_evidence e using requirement r where … r.opp_id = $1`, so it
+replaces every row for the opportunity: **calling the evidence endpoint overwrites the
+threshold-respecting rows the checks path wrote with default-threshold ones.**
+
+New this pass, and the part worth flagging: a test now exists —
+`evidence.test.mjs:288`, `assert.match(appChecks, /writeEvidence\(…threshold: thresholds\.evidenceThreshold/)`
+— which asserts the property **at the one call site that was fixed** and is blind to the other two.
+That is the inverse of the cry-wolf failure the hardening rules guard against: not a guard that fires
+on correct code, but a guard that certifies a property it only partially checks. If the rule is "the
+owner's thresholds reach the resolver", the assertion has to be over the writers as a set — the same
+"name the core source and grep every consumer" discipline that D-C was about.
+
+### Not re-verified here — Section F has moved under a different spec
+
+`app/src/screens/PostingAnalysis.jsx` now renders a posting-vs-profile `CompareRow` whose profile
+cell is *"a `requirement_evidence` excerpt or a confirmed `owner_fact`, named either way"* — P8.4's
+**SPEC 4.2** comparison, not AC-42's SPEC 4.1 disclosure-expansion model. It plausibly satisfies the
+intent behind ACs 35 and 42–48, but it is a different design, it belongs to a different lane with its
+own criteria (`docs/qc-evidence/AC-P8.4.md`, now on `main`), and confirming what it actually renders
+needs `ui-verify.yml` against `main`. **I am not claiming those ACs as passed on the strength of
+reading a component.** They stay `fail` against P8.3's criteria as written, with that caveat.
+
+`AC-3` is **still fail**, though better factored: `pipeline.ts:93` now exports
+`profileFromMasterContext(mc)` — but it was extracted so the remediation loop could reuse it, and it
+still carries pipeline's own rule (`k !== 'itemsToOmit'`, joined with `' '`, `rowKey`/`etag`/
+`timestamp` admitted as prose) and never calls `profileRecords`. Two rules for "what is the profile"
+rather than three; the AC asks for one.
+
+`AC-23` is still fail on its letter, but only just: five of its six named reasons now exist as
+read-time states. The missing one is resolve-time — `resolveEvidence` still returns a bare `null` for
+a quote below the length or token floor, with no reason attached.
+
+### Corrected tally at `main` @ `3153f1a` — **48 pass · 11 fail · 4 not_applicable**
+
+Moved to pass since `30bb129`: **14**, **22**, **38** (D19), **59** (both remaining consumers).
+
+Still failing: **3, 20, 23, 33, 35, 41, 42, 43, 44, 47, 48** — of which 35 and 42–48 carry the
+Section F caveat above. `not_applicable` remains **16, 45, 46, 49**.
+
+**A correction to my own arithmetic.** Addendum 2 reported "45 pass · 14 fail · 4 not_applicable"
+while listing fifteen failing criteria — the count and the list disagreed, and the list was right.
+Recomputed from the per-criterion table: `8bf2b59` was 39/20/4, `30a236b` 40/19/4, `30bb129` 44/15/4,
+and `main` is 48/11/4. The verdict on every individual criterion is unchanged; only the totals were
+wrong.
+
+Measured on `claude/qc-p8-3-verify` with `origin/main` @ `3153f1a` merged in. Nothing was fixed in
+this pass either — D-H is reported, not patched.
+
+---
+
+## ADDENDUM 4 — `main` @ `a37f7c2`, and a correction to how D-H was stated
+
+`main` advanced 19 further commits. Merged in (no conflicts) and re-measured.
+**`api` 582/582 · `app` 204/204 · both builds clean · nothing skipped.**
+
+Every probe re-run unchanged and still green: the rail reports `total=1 closed=0` with #0/#1/#2
+`not measured`; `locate` returns `char_start 15` for a phrase at 15; 637 substring probes / 591
+resolved / **0 violations**; 4,000 `locate()` rounds / 0 mismatches; the AC-28 identity exact.
+
+**D-H is unchanged on `main`:** `grep -c loadThresholds api/src/functions/tests/appRequirements.ts`
+→ **0**; `writeEvidence` still called bare at `:441` (backfill) and `:498` (`POST /evidence`);
+`evidence.test.mjs:288` still asserts the property against `appChecks` alone.
+
+### The correction — I overstated D-H's reach
+
+Addendum 3, and the PR title carrying it, said D-H was "live on `main`". **The code is on `main`; the
+destructive path is not reachable through the product.** `8915afa` determined that the evidence
+resolver has no caller, and I verified that independently rather than accept it:
+
+```
+grep -rn "opportunity/${…}/evidence|evidenceResolve" app/src/   →  NO CALLER
+grep -rn "requirements/backfill|requirementsBackfill" app/src/  →  NO CALLER
+grep -rn "runArtifactChecks" app/src/                           →  api.js:180, AssetGateDrawer.jsx:420
+```
+
+So the **only** `writeEvidence` call site with a caller is `appChecks.ts:109` — the one that *does*
+pass the owner's thresholds. Today the setting is honoured on every reachable path, and the
+overwrite I described cannot happen through the UI.
+
+Ground-truthed against production rather than inferred (`db-query.yml` run **32489875839**, job
+96794765979, head `a37f7c2`):
+
+```
+ tbl_exists           →  requirement_evidence      (the table is deployed)
+ evidence_rows        →  0
+ reqs | extractor_v1  →  8277 | 8015
+```
+
+**Zero evidence rows in production.** Consistent with "nothing triggers the resolver", and it means
+no stored row can currently be overwritten by anything.
+
+### What that changes, and what it does not
+
+D-H stops being a live data-integrity bug and becomes a **latent one that arms itself the moment the
+planned caller lands** — and that caller is explicitly the next piece of work (`8915afa` calls it
+"the cheaper half" of getting `requirement_evidence` off zero). When `POST /evidence` gains a UI
+caller, it will write with seeded defaults and delete the rows the checks path wrote with the
+owner's values, and `evidence.test.mjs:288` will not notice, because it looks at the other call site.
+
+That is worth fixing *before* the caller, not after, and it is a cheap fix: import `loadThresholds`
+and widen the assertion from one call site to the set of writers. The finding stands; only my
+characterisation of its current blast radius was wrong, and the PR title is corrected with this
+addendum.
+
+### One thing this quantifies that was previously only noted
+
+Addendum 2 flagged that nothing re-extracts the rows written under `EXTRACTOR_VERSION = 1`, whose
+offsets predate the H32 fold fix. The production numbers put a size on it: **8,015 of 8,277
+requirement rows — 96.8% of the corpus — are still at version 1.** The marker makes them findable;
+nothing yet makes them correct. Whether that matters in practice depends on how many postings
+contain a case-expanding character, which I have not measured and am not going to guess at.
+
+### Tally at `main` @ `a37f7c2` — unchanged: **48 pass · 11 fail · 4 not_applicable**
+
+No criterion moved this pass. Fails remain **3, 20, 23, 33, 35, 41, 42, 43, 44, 47, 48** (35 and
+42–48 under the Section F caveat); `not_applicable` remains **16, 45, 46, 49**.
+
+Nothing was fixed in this pass either.
+
+---
+
+## ADDENDUM 5 — `main` @ `0beae72`: the resolver was rewritten, D-H is fixed, and a new defect found
+
+`main` advanced 4 more merges since `a37f7c2`, all inside a single arc: production measurement found
+the evidence spine evidenced **0 of 10** requirements on the Trinnex opportunity and **0 of 35** on a
+second posting with **0 refusals** — `requirements.locate()` was reused outside its design domain
+(comparing an employer's requirement against the candidate's own profile, which is not a paraphrase
+relationship). Per an owner decision recorded in `docs/qc-evidence/AC-matcher.md` (44 criteria), the
+resolve path was withdrawn from `locate()` entirely and replaced with a purpose-built matcher,
+`requirementSupport.ts` (`cc04ba1` onward). `RESOLVER_VERSION` bumped 1→2.
+
+Merged in (no conflicts), rebuilt, retested. **`api` 635/635 · `app` 204/204 · both builds clean.**
+
+### D-H is now genuinely fixed, and fixed at the design level
+
+`checkPrefs.ts` was extracted specifically so `loadThresholds`/`resolveOptionsFor` has **one
+importable location**, ending the `appChecks`↔`appRequirements` cycle that previously made
+"just import loadThresholds into appRequirements.ts" awkward. All three `writeEvidence` call sites
+now pass `evOpts`/thresholds:
+
+```
+appRequirements.ts:494  for (const opp of opps) ev.push(await writeEvidence(client, opp.id, profile.records, evOpts))
+appRequirements.ts:552  const out = await writeEvidence(client, opp.id, profile.records, evOpts)
+appChecks.ts:69         await writeEvidence(client, art.opp_id, profileRead.records, { … })
+```
+
+`grep -c loadThresholds api/src/functions/tests/appRequirements.ts` → **1** (was 0). This isn't
+patched around my finding — `resolveOptionsFor`'s own comment states the goal directly: "ONE place,
+so a third caller of `writeEvidence` cannot appear without them." **AC-20 also improves**: the new
+matcher's thresholds (`evidenceThreshold`, `evidenceMinTokens`, plus a new `evidenceMaxSentences`)
+are now real `CheckThresholds` columns with a `H42` guard (`hardening.test.mjs:1827`) asserting every
+per-owner settings column production reads has a writer that can set it.
+
+### The substring/offset guarantee holds under the new matcher
+
+Re-ran the full adversarial harness against `resolveEvidence`/`profileRecords` (unchanged export
+names, so the same probes run) with the new resolver underneath: **531 probes, 491 resolved, 0
+substring violations.** The new module's own header explicitly names the H32 class ("index into a
+lower-cased copy is not an index into the original... invisible to a substring assertion, because
+the wrong span is still a true substring") and its `literalSpan()` measures on the original string
+via case-insensitive regex `exec`, never `.toLowerCase().indexOf(...)`.
+
+### D-I (new) — the negation/attribution safety floor is bypassed by the literal-span shortcut
+
+The module states its own bar explicitly: *"attributing someone else's accomplishment to the
+candidate is the highest-severity output this system can produce,"* and ships `NEGATION_RE` /
+`ATTRIBUTION_RE` as one of seven rules in `SAFETY_FLOOR_RULES` — not owner-configurable, asserted by
+`M17/M37` (`matcher.test.mjs:427`). I tried to break it and did.
+
+`supportIn()` tries two kinds of candidate excerpt for a requirement: `literalSpan()` — an exact,
+case-insensitive substring match of the requirement's own words, deliberately **not** widened to the
+sentence — "tried ALONGSIDE the [sentence] segments... the ranking... picks it naturally when it
+wins." The safety-floor check runs against whichever excerpt wins:
+`if (NEGATION_RE.test(excerpt) || ATTRIBUTION_RE.test(excerpt))`.
+
+**The bug: when a negation or attribution marker sits immediately *before* the literal phrase, the
+literal span starts *after* the marker, and `NEGATION_RE`/`ATTRIBUTION_RE` never see it.** This is
+the ordinary English construction for negating a claim — "I did **not** X", "I **never** X", "we
+**failed to** X" — so the bypass is not an edge case, it is the common case.
+
+Reproduced six ways, every one resolving a claim the record explicitly negates or attributes to
+someone else:
+
+| Requirement | Record | Result |
+|---|---|---|
+| `Own the P&L for the water technology division` | "I did **not** own the P&L for the water technology division; I only reported metrics." | **RESOLVED**: `"own the P&L for the water technology division"` |
+| same | "I **never** own the P&L…; that sits with finance." | **RESOLVED** |
+| `Deliver the migration on schedule` | "We **failed to** deliver the migration on schedule due to vendor delays." | **RESOLVED** |
+| `Lead the platform rebuild` | "My manager insisted **rather than** lead the platform rebuild himself, he delegated it to me." | **RESOLVED** |
+| `Owned the P&L for the water technology division` | "Reported to the leader **who owned** the P&L for the water technology division throughout." | **RESOLVED** |
+| `Manage the vendor relationship` | "I manage the vendor relationship **on behalf of** the VP of Procurement." | **RESOLVED** |
+
+Every one of these is a true substring at its offsets — `writeEvidence`'s own guard, and the H28-class
+per-record check, both pass it, because they check substring correctness, not semantic correctness.
+It is exactly the failure the safety floor names as the system's worst possible output, produced by
+the system.
+
+**Why the existing tests didn't catch it.** `M16` (`matcher.test.mjs:400-415`), the test that exists
+specifically for this rule, uses `Declined to take on remote engineering teams` against `Ability to
+manage remote engineering teams` — different verb (`decline`/`take on` vs. `manage`), so no literal
+phrase match exists and the candidate is forced through the sentence-segment path, where
+`NEGATION_RE` correctly sees the whole sentence including "Declined". Its attribution counterpart
+uses `owned` against a requirement phrased `Own` — a tense mismatch that again forces the
+sentence-segment path. **Neither fixture exercises `literalSpan()`,** so a real, common bypass exists
+one config away from every test that was written to close this exact hole. Confirmed directly: my
+"control" case (`Declined to take on remote engineering teams` / `Ability to manage…`) still refuses
+correctly — only the literal-match path is broken.
+
+**Live exposure.** Same as D-H: `requirement_evidence` holds 0 rows in production and `POST /evidence`
+has no caller in `app/src`, so this is latent, not live, today. But it is *more urgent to close before
+a caller lands* than D-H was, because D-H silently used a wrong-but-plausible default; D-I fabricates
+a claim the candidate explicitly disclaimed — reviewer-facing, resume-facing, the exact scenario the
+module's changelog treats as the single worst outcome it can produce.
+
+A fix does not require abandoning `literalSpan`'s design goal (avoiding sentence-padding when the
+words are already literally present) — it requires the safety-floor check to run against a fixed
+lookback window (or the containing sentence) rather than against the winning excerpt alone, the same
+way `NEGATION_RE`/`ATTRIBUTION_RE` already work correctly on the sentence-segment path. Not fixed
+here; reported, with reproduction steps precise enough to turn directly into a test.
+
+### Tally — unchanged at 48/11/4; D-I is outside the original 63 criteria
+
+None of `AC-P8.3.md`'s 63 criteria named negation/attribution explicitly (that rule postdates this
+AC file), so D-I doesn't move a criterion verdict. It stands as the most severe defect found across
+every pass of this verification, ahead of D-C, and is reported here rather than in a new AC file
+because it was found doing exactly what this document exists to do: attack the accusation-grade claim
+the module makes about itself.
+
+Nothing was fixed in this pass. Probe scripts (`attack3.mjs`, `negdig.mjs`, `negdig2.mjs`) left in the
+scratchpad for reproduction.
+
+---
+
+## ADDENDUM 6 — `main` @ `9b0bff6`: the caller landed — D-I is now live-reachable
+
+`main` advanced 22 more commits, the significant one being exactly the transition Addendum 4 and 5
+flagged: *"the evidence resolver has no caller"* is fixed. `packetBuildAll` now self-posts to
+`POST /api/app/opportunity/{id}/evidence` after the artifacts exist, and that endpoint is reached
+from the **"Build entire packet"** button in `PacketBuilder.jsx` — a real, owner-facing control, not
+a workflow dispatch. Merged in (no conflicts), rebuilt: **`api` 671/671 · `app` 208/208**, both clean.
+
+### D-H remains fixed; D-I remains unfixed
+
+Re-checked both directly against the merged tree. `writeEvidence`'s three call sites still all pass
+`resolveOptionsFor`/thresholds (`checkPrefs.ts`'s design goal — "a third caller... cannot appear
+without them" — held even though a fourth caller, the escalation tier, was added this pass). D-I's
+mechanism is untouched: `NEGATION_RE.test(excerpt) || ATTRIBUTION_RE.test(excerpt)` still runs only
+against the winning candidate excerpt, and `literalSpan()` still wins ties by being shorter/exact. Re
+ran the six-case repro (`negdig2.mjs`) against the merged code: **all six still resolve**, including
+the control case (verb/tense-mismatched, forced onto the sentence path) still correctly refusing —
+confirming the bypass is specific to the literal-match path, not a general regression.
+
+### What this changes about D-I's severity
+
+D-I was reported latent because nothing called the resolver. **That is no longer true.** The path
+that reproduces the bypass — `resolveEvidence` via `writeEvidence` via `POST /evidence` — is the
+same path `packetBuildAll` now calls on every "Build entire packet" click, and that button has
+already been exercised for real: production `requirement_evidence` went from 0 rows to 6.
+
+Read those six rows directly (`db-query.yml`, run **32545898372**, head `9b0bff6`):
+
+```
+ total_rows | literal_rows(method='literal') | offset_gt0
+          6 |                              0 |          6
+
+ source_key   | method    | quote (first 80 chars)
+ aboutMe1     | proposed  | Passionate about customer-centric product design, I have fostered...
+ workHistory4 | proposed  | Developed a SaaS platform integrating real-time data collection...
+ workHistory1 | proposed  | Collaborated with CTO and CPO to design a 3-year technology roadmap...
+ workHistory1 | proposed  | Led an enterprise-wide Agile transformation, reducing time-to-market...
+ workHistory3 | proposed  | Redesigned a predictive analytics suite, converting a consultative...
+ expertise    | anchored  | Optimizing scaled agile operations|Strategic roadmaps...
+```
+
+(My query's `method='literal'` filter was against the wrong label — `evidence.ts:382` tags a
+literal-match winner `'exact'`, not `'literal'`; the second, unfiltered `SELECT` is what settles it.)
+
+**None of the six is tagged `exact`** — the specific D-I mechanism (a `literalSpan()` win) has not
+produced an observed row in this one live sample, so I am not claiming a fabricated row exists in
+production today. Five of six are `proposed` (model-escalated, and per `H:proposed-evidence-cannot-
+pass-the-gate` these can never move `must_have_coverage` regardless of correctness) and the sixth is
+`anchored` (sentence-path, which D-I's repro shows correctly catches negation). **The bypass remains
+structurally live and unexercised-so-far, not live-and-observed** — a real distinction, stated
+precisely rather than rounded up to "already happened."
+
+**A secondary, lower-severity note on the `proposed` path:** `evidenceProposal.ts` has no
+negation/attribution check either, so a model-escalated row could show the owner a claim the source
+sentence negates, with plausible-sounding model reasoning attached. This is materially less severe
+than the `exact`-path case — the gate rule keeps it from ever passing coverage — but it is the same
+class of gap, worth closing at the same time, and outside the scope of what I probed this pass since
+it isn't reachable via `resolveEvidence`/`supportIn` (it goes through a separate model call I did not
+attack).
+
+### Unrelated to D-I, worth noting: the reasoning-verification fix at HEAD
+
+The commit at `main`'s current tip (`9b0bff6`, "Check the model's explanation: accuse where a string
+settles it, label everywhere else") adds verification of the model's stated *reasoning* for a
+`proposed` row, not just its quote — catching two of five live explanations that asserted something
+their own quote didn't show (an IoT claim on a quote that never says IoT; a "secure" claim on a quote
+about "software" but not security). This closes a real gap and is orthogonal to D-I: it strengthens
+honesty about *why* a proposed row was offered, while D-I is about the *deterministic* path silently
+fabricating a claim disguised as `exact` fact. Both matter; they are different mechanisms.
+
+### Tally unchanged: 48 pass · 11 fail · 4 not_applicable
+
+D-I is still outside the 63 original criteria and doesn't move a grade. Nothing fixed in this pass.
+
+---
+
+## ADDENDUM 7 — `main` @ `19dc491`: a correction to Addendum 6, and D-I still stands
+
+`main` advanced 22 more commits. Merged in, rebuilt: **`api` 705/705 · `app` 208/208**, both clean
+(one interim run of `npm test` reported "18 skipped" with 687/705 passing; a clean re-run of the
+exact same command reported 705/705/0-skipped, so I'm treating the first as run-to-run noise in this
+sandbox rather than a real regression — flagged rather than silently dropped).
+
+### Correcting Addendum 6: the "real build" I cited had never actually run
+
+Addendum 6 said the six evidence rows I observed came from "the first real build" via the "Build
+entire packet" button. **That specific causal claim was wrong, and I should have verified it rather
+than inferred it.** `51c65e2` ("Call the evidence pass in-process — the route call was never
+authenticated"), landed 33 minutes *after* my observation, records that the `selfPost` call
+`packetBuildAll` used sent no `Authorization` header, `evidenceResolve` requires one
+(`requireWrite`), and so **every build since the caller was wired had silently logged "evidence
+resolve did not run: sign in required" and never once written a row.** The six rows I read were
+real, but they came from the authenticated `api-test.yml` dispatches used to diagnose the matcher
+(the same class of dispatch that produced every evidence row before this, going back to the original
+D:evidence-resolves-nothing investigation) — not from the button. I saw a plausible story (a caller
+was wired; the row count moved) and did not check the one thing that would have settled it: whether
+that specific request actually succeeded. That is exactly the "compare two derived facts instead of
+reading the primary source" failure this codebase's own house rules name, and the other lane caught
+their own version of it in the same session — worth crediting rather than papering over.
+
+### The button is now genuinely fixed, and I checked this one more carefully
+
+`packetBuildAll` (`app.http` route `app/opportunity/{id}/packet/build-all` — the handler the UI's
+"Build entire packet" button actually calls) now invokes `resolveEvidenceForOpp` **in-process**, no
+HTTP hop: it re-checks the opportunity belongs to the signed-in owner (a real gap the same commit
+found and closed — `requireWrite` proves someone is signed in, not that they own *this*
+opportunity), reads the profile, resolves the owner's thresholds via `resolveOptionsFor`, and calls
+`writeEvidence` directly. A follow-up commit (`a7a5cdc`) reports a live async build job completing
+with **"evidence resolved."** I did not just read that claim — production `requirement_evidence` is
+now at **14 rows**, up from the 6 I saw before this fix, which is independent corroboration that
+something is writing rows again post-fix.
+
+### D-I: re-checked against the now-genuinely-live path, still unfixed
+
+`requirementSupport.ts`'s safety-floor check is unchanged:
+`NEGATION_RE.test(excerpt) || ATTRIBUTION_RE.test(excerpt)` still runs only against the winning
+excerpt. Re-ran the six-case repro (`negdig2.mjs`) against the merged code: **all six still
+resolve**, including all the negation/attribution markers from Addendum 5/6, and the control case
+(verb-tense-mismatched, forced onto the sentence path) still correctly refuses.
+
+Queried production fresh, now that a genuine authenticated build has run:
+
+```
+ total | exact_rows | anchored_rows | proposed_rows
+    14 |          0 |             1 |            13
+```
+
+**Still zero `exact`-method rows.** The bypass mechanism remains structurally present and now
+confirmed genuinely reachable through real, working product usage — but has still not produced an
+observed bad row in the two live samples measured so far. I'm holding to the same distinction as
+Addendum 6: reachable and unfixed, not confirmed exploited.
+
+### D-H re-confirmed under the rewritten call
+
+The in-process `resolveEvidenceForOpp` also calls `resolveOptionsFor(client, owner)` before
+`writeEvidence` — so D-H's fix held through this rewrite too, on what is now a fourth/fifth distinct
+call site across the module's history (`appChecks.ts`, `appRequirements.ts` ×2, `appPackets.ts`).
+
+### Tally unchanged: 48 pass · 11 fail · 4 not_applicable
+
+Nothing fixed in this pass; nothing in this addendum moves an AC-P8.3 criterion. It exists to correct
+the record on Addendum 6's unverified causal claim and to confirm D-I survived a second, more solid
+verification of the path that would expose it.
