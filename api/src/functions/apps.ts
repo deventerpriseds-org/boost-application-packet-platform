@@ -77,6 +77,13 @@ const EXTERNAL_APPS: ExternalApp[] = [
     description: 'Task management app (journey-voice). Currently prototyped on Lovable; not yet on Azure.',
     source: 'Lovable',
     repositoryUrl: 'https://github.com/deventerprisesds/journey-voice'
+  },
+  {
+    name: 'interview-success',
+    displayName: 'Interview Success',
+    url: 'https://eds-interview-success.lovable.app',
+    description: 'Interview preparation app. Currently prototyped on Lovable; not yet on Azure.',
+    source: 'Lovable'
   }
 ]
 
